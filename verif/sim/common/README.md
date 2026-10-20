@@ -6,6 +6,9 @@ the common Bender/Verilator invocation, cocotb execution, artifact directories,
 metadata, and pass/fail checking. `hw_config.py` provides shared hardware YAML
 validation, parameter selection/encoding, and Verilog selector generation.
 
+`rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
+standalone and shared-parent scoreboards.
+
 Simulation-specific reusable agents, models, Python helpers, and HDL wrappers
 belong here when shared by multiple testbenches. A wrapper used by one component
 stays beside that component's tests. Utilities shared with formal verification

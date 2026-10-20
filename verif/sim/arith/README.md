@@ -2,7 +2,8 @@
 
 RTL: [src/uquintus/uqu_arith.v](../../../src/uquintus/uqu_arith.v), module
 `uqu_arith`. This is a combinational, fixed-width extended add/sub datapath for
-the future ALU and iterative MUL/DIV chain. Operands are 33 bits; the component
+the ALU and iterative MUL/DIV chain. The parent EX stage owns their shared
+first instance. Operands are 33 bits; the component
 has no clock, reset, state, or instruction handshake. The width is internal
 datapath headroom for the RV32 processor, not a configurable architectural width.
 

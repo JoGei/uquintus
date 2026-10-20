@@ -1,0 +1,8 @@
+top_module: uqu_alu_tb
+bender_target: alu_test
+test_module: test_uqu_alu
+parameters: []
+tests:
+  - directed
+  - randomized
+  - control

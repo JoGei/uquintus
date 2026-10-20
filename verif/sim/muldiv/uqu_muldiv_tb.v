@@ -1,8 +1,7 @@
 `default_nettype none
 `include "uqu_config.vh"
 
-// The external arithmetic instance stands in for the future ALU's shared
-// adder. The DUT contains only the remaining F-1 arithmetic instances.
+// The parent owns the shared first arithmetic instance, as EX will. The DUT contains only the remaining F-1 arithmetic instances.
 module uqu_muldiv_tb #(
     parameter ISA_M = 0,
     parameter MUA_MUL = `UQU_MUL_ITERATIVE,

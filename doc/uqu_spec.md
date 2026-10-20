@@ -17,9 +17,11 @@ it does not grant permission to change an agreed architectural contract.
 
 The repository contains specifications and standalone
 [register-file](../verif/sim/gpregfile/README.md),
-[shared arithmetic](../verif/sim/arith/README.md), and
+[shared arithmetic](../verif/sim/arith/README.md),
+[base integer ALU](../verif/sim/alu/README.md), and
 [native multiply/divide](../verif/sim/muldiv/README.md) components with a common
-simulation/lint flow. Their guides describe implementation and test scope.
+simulation/lint flow and a [shared-parent arithmetic fixture](../verif/sim/exec_arith/README.md).
+Their guides describe implementation and test scope.
 The complete processor, full-core verification, and ASIC build flow
 remain to be implemented.
 

@@ -1,0 +1,11 @@
+top_module: uqu_exec_arith_tb
+bender_target: exec_arith_test
+test_module: test_uqu_exec_arith
+parameters:
+  - ISA_M
+  - MUA_MUL
+  - MUA_DIV
+  - MUA_MULDIV_ITERUNROLL
+tests:
+  - mixed
+  - control

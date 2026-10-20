@@ -2,9 +2,9 @@
 
 [uqu_muldiv.v](../../../src/uquintus/uqu_muldiv.v) implements all eight RV32 M
 operations. It owns the iterative state and fixed-shift wiring, borrows the
-ALU's `uqu_arith` instance as slice zero, and generates only the remaining
-`F - 1` arithmetic instances. The complete ALU and EX integration are still
-pending. The local [Verilog wrapper](uqu_muldiv_tb.v) supplies the borrowed
+parent EX stage's `uqu_arith` instance as slice zero, and generates only the
+remaining `F - 1` arithmetic instances. The standalone ALU and shared-parent
+fixture are implemented; processor EX integration remains pending. The local [Verilog wrapper](uqu_muldiv_tb.v) supplies the borrowed
 instance for standalone tests.
 
 ```text
@@ -13,7 +13,7 @@ instance for standalone tests.
                            |              |
                     slice 0 ports    slices 1 .. F-1
                            |              |
-                     ALU uqu_arith   internal uqu_arith instances
+                     EX uqu_arith    internal uqu_arith instances
 ```
 
 ## Instruction handshake
@@ -54,7 +54,7 @@ being discarded. The unit does not decide interrupt or trap eligibility.
 With `ISA_M = 0`, requests are never accepted and all outputs are zero. Decode
 must reject M instructions in that configuration rather than issue them here.
 
-## Borrowing the ALU arithmetic instance
+## Using the parent-owned arithmetic instance
 
 | Port | Meaning |
 | --- | --- |
@@ -65,21 +65,21 @@ must reject M instructions in that configuration rather than issue them here.
 | `arith_carry_out_i` | Connect from `uqu_arith.carry_o`; subtraction carry means no borrow. |
 
 These are **combinational datapath connections**, with no ready/valid protocol.
-EX reserves the ALU for the owning instruction. When `arith_use_o = 1`, the ALU
-selects the MUL/DIV operands and controls and returns result/carry in the same
-cycle. EX must not arbitrate or stall individual arithmetic steps; doing so
+EX reserves the shared instance for the owning instruction. When
+`arith_use_o = 1`, the parent selects the MUL/DIV operands and controls and
+returns result/carry in the same cycle. EX must not arbitrate or stall individual arithmetic steps; doing so
 would violate fixed execution latency. Unrelated normal ALU operands must not
 feed slice zero during those cycles. When `arith_use_o = 0`, the arithmetic
 payload outputs are inactive zeros and the arithmetic response is ignored.
 
-A typical ALU connection is:
+A typical parent-owned connection is:
 
 ```verilog
 uqu_arith u_arith (
-    .a_i(muldiv_arith_use ? muldiv_arith_a : alu_a),
-    .b_i(muldiv_arith_use ? muldiv_arith_b : alu_b),
-    .sub_i(muldiv_arith_use ? muldiv_arith_sub : alu_sub),
-    .carry_i(muldiv_arith_use ? muldiv_arith_carry_in : alu_carry_in),
+    .a_i(ex_select_muldiv ? muldiv_arith_a : alu_arith_a),
+    .b_i(ex_select_muldiv ? muldiv_arith_b : alu_arith_b),
+    .sub_i(ex_select_muldiv ? muldiv_arith_sub : alu_arith_sub),
+    .carry_i(ex_select_muldiv ? muldiv_arith_carry_in : alu_arith_carry_in),
     .result_o(shared_result),
     .carry_o(shared_carry),
     .borrow_o(shared_borrow)
@@ -87,7 +87,9 @@ uqu_arith u_arith (
 ```
 
 Wire `shared_result` and `shared_carry` back to the corresponding MUL/DIV inputs.
-The same instance continues to serve normal ALU addition/subtraction. At `F=1`,
+The same instance serves normal ALU addition/subtraction through the ALU
+arithmetic ports. EX retains selection until the owning instruction completes
+or is canceled. See the [shared-parent fixture](../exec_arith/README.md). At `F=1`,
 MUL/DIV contains no data adder, subtractor, multiplier, or dedicated negation
 unit in its iterative configuration; its six-bit iteration-counter addition
 is control logic. At larger factors the additional instances are shared by

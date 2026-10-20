@@ -329,7 +329,7 @@ are available, shall be exactly `ceil(2 / F) + 32 / F + 1` EX cycles.
 The ceiling is mathematical ceiling division; an RTL integer expression may
 use `(2 + F - 1) / F` for this setup count.
 
-With `F = 1`, the shared ALU arithmetic instance shall prepare the dividend
+With `F = 1`, the EX-owned shared arithmetic instance shall prepare the dividend
 and divisor magnitudes sequentially in two setup cycles. With `F >= 2`, two
 existing arithmetic slices shall prepare those independent magnitudes in
 parallel during one setup cycle. Setup steering shall supply each slice's
@@ -382,7 +382,8 @@ and guard bits needed by the selected algorithms; an ordinary truncated
 32-bit result alone shall not constrain the implementation.
 
 For an unroll factor greater than one, the first iterative arithmetic step
-shall reuse the EX ALU. One shared chain of `F - 1` additional configurable
+shall use the EX-owned arithmetic instance shared with the ALU. One chain of
+`F - 1` additional configurable
 add/sub-and-fixed-shift slices shall implement the remaining steps. With
 `MUA_MUL = iterative` and `MUA_DIV = iterative`, both operations shall use this
 same chain and the same unroll factor. Separate chains shall not be generated
@@ -512,7 +513,7 @@ in [architecture, Section 3](uqu_spec.arch.md#3-classical-five-stage-pipeline), 
 not add setup or completion cycles. Fixed result availability and later
 acceptance under backpressure shall remain distinct.
 
-Iterative MUL/DIV borrowing of the EX ALU shall use internal operand/result
+ALU and iterative MUL/DIV use of EX-owned shared arithmetic shall use internal operand/result
 connections for each arithmetic step; it shall not create a new instruction
 request or add a handshake cycle for every iteration. The exact payload widths,
 unit adapters, and status fields remain TBD. OBI and CV-X-IF shall retain their
@@ -629,9 +630,9 @@ meet the immediate cancellation requirement above.
 ### 3.4. Shared extended arithmetic primitive
 
 The shared combinational add/sub component shall be named `uqu_arith`, in
-`src/uquintus/uqu_arith.v`. The ALU shall use its arithmetic instance for the
-first iterative MUL/DIV step; additional unrolled steps shall use further
-instances of the same primitive. Physical sharing shall follow Section 3.
+`src/uquintus/uqu_arith.v`. The parent EX stage shall own one instance shared
+by the ALU and the first iterative MUL/DIV step; additional unrolled steps shall
+use further instances of the same primitive inside MUL/DIV. Physical sharing shall follow Section 3.
 
 The initial implementation has two 33-bit operands, a subtraction selector,
 and a raw carry input. It supplies the low 33 result bits, carry-out beyond
@@ -667,16 +668,53 @@ The unit shall own at most one accepted instruction, retain a blocked result,
 and suppress transfers during reset or owning-instruction flush. It shall
 accept no requests when `ISA_M = 0`.
 
-The first arithmetic instance shall remain outside MUL/DIV, owned by the ALU.
+The first arithmetic instance shall remain outside both MUL/DIV and ALU, owned
+by their shared parent EX stage.
 `arith_use_o` selects MUL/DIV's two 33-bit operands, subtraction control, and
 carry-in for that instance; the result and carry-out return combinationally.
 This connection shall have no separate ready/valid handshake. EX shall reserve
 the resource for the owning instruction so that individual arithmetic steps
 cannot stall. MUL/DIV shall instantiate only the additional `F - 1` instances.
-The standalone test wrapper supplies slice zero until ALU integration exists.
+The standalone test wrapper supplies slice zero. A separate shared-parent
+fixture connects ALU and MUL/DIV around that instance; full EX integration
+remains pending.
 
 See the [MUL/DIV component guide](../verif/sim/muldiv/README.md) for the complete
 port contract, operation encoding, algorithms, timing table, and test commands.
+
+### 3.6. Base ALU and parent-owned arithmetic integration
+
+`src/uquintus/uqu_alu.v` implements base RV32I/E addition, subtraction, logic,
+signed/unsigned set-less-than, and all three variable shifts. Every operation
+shall offer its result in the request cycle under Section 3.1, with retained
+results under backpressure and immediate owning-instruction cancellation.
+Its request carries two 32-bit selected operands and a normalized four-bit
+operation code; its response carries one 32-bit result. The low operation bits
+follow `funct3`, with bit three selecting SUB or SRA. Decode shall normalize
+this modifier rather than blindly forwarding an immediate's bit 30. See the
+[ALU component guide](../verif/sim/alu/README.md) for the encoding table.
+
+EX shall own the shared `uqu_arith` instance and input mux, with ALU and MUL/DIV
+as sibling units. Both units shall expose the same combinational arithmetic
+operand/control and result/carry connection. EX shall issue only the owning
+unit and retain resource selection throughout computation; return signals may
+fan out to both units. Neither ALU nor MUL/DIV shall instantiate slice zero.
+MUL/DIV shall retain its `F - 1` additional instances. There shall be no
+per-step arithmetic arbitration or handshake and no additional execution cycle
+from the mux. A held result shall no longer require the arithmetic instance.
+
+The ALU shall sign-extend operands for signed comparison and examine the 33-bit
+subtraction's sign. Unsigned comparison shall zero-extend operands and use the
+subtraction's no-borrow carry. ADD/SUB shall return the low 32 result bits.
+Logic and shifts shall remain inside ALU, with B[4:0] selecting shift amount.
+The initial implementation shares one right barrel shifter using fixed input
+and output bit reversal for left shift. Branch comparison and targets remain
+in DE; upstream operand selection may use ADD for address, AUIPC, and LUI work.
+
+Standalone wrappers and the
+[shared-parent fixture](../verif/sim/exec_arith/README.md) supply the external
+arithmetic instance for verification. That fixture demonstrates the module
+boundary; the actual EX stage, ownership tracking, and pipeline remain pending.
 
 ## 4. Configurable operand forwarding
 
@@ -2084,7 +2122,7 @@ be resolved when their implementation milestone is undertaken:
 | Area | Remaining work |
 | --- | --- |
 | Execution/control | Internal module/event interfaces, detailed readiness wiring and controller sequencing, retained load-result placement, and timing evaluation of enabled forwarding paths. |
-| Integer arithmetic | Standalone MUL/DIV and shared arithmetic are implemented; integration with the future ALU and EX remains pending. Preserve fixed execution latencies and physical sharing during integration. |
+| Integer arithmetic | Standalone ALU, MUL/DIV, shared arithmetic, and a shared-parent fixture are implemented; full EX and pipeline integration remain pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
 | ISA/CSR/PMP | Remaining WARL/field mappings and same-instruction exception selection under the pinned ISA, complete CSR decode implementation, fixed sixteen-entry PMP details, and optional-feature combination validation. |
@@ -2228,3 +2266,4 @@ later decisions determine the active contract.
 | D-261 | Give DIV/DIVU/REM/REMU exactly `ceil(2/F) + 32/F + 1` EX cycles: two sequential magnitude preparations at F=1 or two parallel preparations in one cycle at F>=2, followed by the iterations and one completion cycle; use existing arithmetic slices and reserve all phases for unsigned and special cases too. | Reuse available unrolled arithmetic for operand preparation while keeping latency operand-independent. | Agreed; supersedes the divider timing in D-155 and D-157; default F=8 gives six cycles; iterative MUL timing remains D-159 |
 | D-251 | Fix enabled PMP capacity at sixteen configurable entries, numbered zero through fifteen, and remove the external ISA_PMP_REGIONS parameter; retain optional ISA_PMP with default zero and fixed four-byte granularity. | Provide one standard PMP capacity without region-count configuration or alternative-count implementation work. | Agreed; supersedes D-145 and D-146 |
 | D-262 | Default `MUA_MUL` to `iterative` alongside `MUA_DIV = iterative`, retaining `MUA_MULDIV_ITERUNROLL = 8`; preserve parallel multiplication as an explicit configuration option. | Share the iterative arithmetic chain between MUL and DIV in the default M-enabled implementation. | Agreed; supersedes the multiplier defaults in D-158 and D-164 |
+| D-263 | Place the first shared `uqu_arith` instance and its input mux in parent EX, with ALU and MUL/DIV as siblings exposing combinational arithmetic ports; retain MUL/DIV's additional `F - 1` slices and existing execution timings. | Make resource ownership explicit in the stage that already owns the executing instruction and keep the unit boundaries independent. | Agreed; supersedes the earlier ALU-owned arrangement; interfaces described in Sections 3.5 and 3.6 |

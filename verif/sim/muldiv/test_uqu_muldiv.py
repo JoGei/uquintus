@@ -3,32 +3,15 @@
 import json
 import os
 import random
+from pathlib import Path
+import sys
 
 import cocotb
 from cocotb.triggers import Timer
 from pyuvm import uvm_root, uvm_test
 
-MASK = (1 << 32) - 1
-
-
-def signed(value):
-    return value - (1 << 32) if value & (1 << 31) else value
-
-
-def reference(op, a, b):
-    """ISA arithmetic model; deliberately independent of RTL iteration steps."""
-    if op < 4:
-        lhs = signed(a) if op in (1, 2) else a
-        rhs = signed(b) if op == 1 else b
-        product = lhs * rhs
-        return (product if op == 0 else product >> 32) & MASK
-    lhs, rhs = (signed(a), signed(b)) if op in (4, 6) else (a, b)
-    if rhs == 0:
-        return MASK if op < 6 else a
-    quotient = abs(lhs) // abs(rhs)
-    if (lhs < 0) != (rhs < 0):
-        quotient = -quotient
-    return (quotient if op < 6 else lhs - quotient * rhs) & MASK
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
+from rv32_arithmetic import MASK, muldiv_result as reference
 
 
 class MuldivTest(uvm_test):

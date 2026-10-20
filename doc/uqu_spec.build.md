@@ -3,8 +3,8 @@
 **Status:** First specification draft finalized, 2026-10-20
 
 Build/configuration contracts and project organization. A shared component
-simulation/lint flow supports the register file, arithmetic datapath, and native
-multiply/divide; full-core and ASIC flows remain to be implemented. See the
+simulation/lint flow supports the register file, ALU, arithmetic datapath, native
+multiply/divide, and a shared-parent arithmetic fixture; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -300,10 +300,12 @@ verif/
     common/         # Shared Make helper, simulation utilities, and HDL wrappers
       component_runner.py # Component simulation/lint entry point used by Make
       hw_config.py        # Shared configuration validation and header generation
+      rv32_arithmetic.py  # Mathematical ALU and MUL/DIV reference models
     gpregfile/      # General-purpose register-file tests
     arith/          # Shared extended arithmetic tests
     muldiv/         # Native MUL/DIV tests and local arithmetic wrapper
-    alu/            # Example: test_uqu_alu.py and any local environment
+    alu/            # Base integer ALU tests and external arithmetic fixture
+    exec_arith/     # ALU/MUL/DIV sharing a parent-owned arithmetic instance
     lsu/            # LSU tests and any local environment
     core/           # Full-core simulation tests
   formal/           # Formal harnesses, properties, and riscv-formal integration

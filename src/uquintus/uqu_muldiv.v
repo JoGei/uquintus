@@ -2,7 +2,7 @@
 `include "uqu_config.vh"
 
 // Blocking native M-extension unit. Operation values match instruction funct3.
-// Arithmetic slice zero is borrowed from the enclosing ALU, combinationally.
+// Arithmetic slice zero is owned by the parent EX stage, combinationally.
 module uqu_muldiv #(
     parameter ISA_M = 0,
     parameter MUA_MUL = `UQU_MUL_ITERATIVE,
