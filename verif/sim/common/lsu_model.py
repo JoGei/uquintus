@@ -1,4 +1,4 @@
-"""Byte-addressed memory and instruction-level expectations for the LSU."""
+"""Byte-addressed memory and instruction-level expectations shared by LSU/MEM."""
 
 MASK = (1 << 32) - 1
 

@@ -21,13 +21,19 @@ sources:
   - target: ex_pipeline_test
     files:
       - verif/sim/ex_pipeline/uqu_ex_pipeline_tb.v
-  - target: any(lsu, rtl)
+  - target: any(lsu, mem, mem_pipeline_test, rtl)
     files:
       - src/uquintus/uqu_lsu.v
+  - target: any(mem, mem_pipeline_test, rtl)
+    files:
+      - src/uquintus/uqu_mem.v
+  - target: mem_pipeline_test
+    files:
+      - verif/sim/mem_pipeline/uqu_mem_pipeline_tb.v
   - target: any(csregfile, rtl)
     files:
       - src/uquintus/uqu_csregfile.v
-  - target: any(pmp, rtl)
+  - target: any(pmp, mem_pipeline_test, rtl)
     files:
       - src/uquintus/uqu_pmp.v
   - target: alu_test

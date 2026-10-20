@@ -4,7 +4,7 @@
 
 Build/configuration contracts and project organization. A shared component
 simulation/lint flow supports the register file, ALU, arithmetic datapath, native
-multiply/divide, EX, LSU, PMP checker, CSR register file, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
+multiply/divide, EX, MEM/LSU, PMP checker, CSR register file, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -302,6 +302,8 @@ verif/
       hw_config.py        # Shared configuration validation and header generation
       rv32_arithmetic.py  # Mathematical ALU and MUL/DIV reference models
       ex_model.py         # EX token and parent-pipeline scoreboard model
+      lsu_model.py        # Byte memory/native access expectations for LSU/MEM
+      mem_model.py        # MEM stage/parent fixture token and result model
     gpregfile/      # General-purpose register-file tests
     csregfile/      # Decoded CSR state, access, counters, and event tests
     arith/          # Shared extended arithmetic tests
@@ -310,7 +312,9 @@ verif/
     exec_arith/     # ALU/MUL/DIV sharing a parent-owned arithmetic instance
     ex/             # EX execution/control component tests
     ex_pipeline/    # EX with parent-owned DE/EX and EX/MEM register fixture
-    lsu/            # Native OBI LSU tests and byte-addressed reference memory
+    lsu/            # Native OBI LSU tests
+    mem/            # MEM routing, transaction, fault, and flush tests
+    mem_pipeline/   # MEM with parent-owned EX/MEM, MEM/WB, and PMP fixture
     pmp/            # Concurrent IF/MEM PMP checks and bytewise reference
     core/           # Full-core simulation tests
   formal/           # Formal harnesses, properties, and riscv-formal integration

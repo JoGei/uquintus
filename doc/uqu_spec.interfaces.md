@@ -26,8 +26,9 @@ The surrounding system shall provide the memories or connect these interfaces
 to a memory subsystem. The core shall not issue writes through `imem`.
 
 The standalone [LSU](../verif/sim/lsu/README.md) implements the native data port
-and its transaction/completion handling. MEM-stage and full-core integration
-remain pending; instruction-memory RTL remains separate work.
+and its transaction/completion handling. The [MEM stage](../verif/sim/mem/README.md)
+owns the LSU and connects it to the parent pipeline/protection boundary.
+Full-core integration and instruction-memory RTL remain separate work.
 
 Both core-facing memory interfaces shall use 32-bit byte addresses and 32-bit
 data. The `imem` interface shall return a 32-bit instruction-data word per read

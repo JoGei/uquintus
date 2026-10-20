@@ -139,5 +139,6 @@ and consecutive transfers. Tests count real unit request handshakes to prove
 one issue per instruction while the parent keeps `valid_i` asserted. Independent
 mathematical [models](../common/ex_model.py) are shared with the parent fixture.
 
-The complete processor, decode/hazard/forwarding blocks, LSU, CSR/WB machinery,
-and full-pipeline control remain unimplemented.
+The complete processor, decode/hazard/forwarding blocks, WB/controller machinery,
+and full-pipeline integration remain pending. MEM/LSU and the standalone CSR
+register file have separate component implementations and tests.

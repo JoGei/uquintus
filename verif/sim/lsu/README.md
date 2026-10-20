@@ -1,10 +1,11 @@
 # Load/store unit
 
 [uqu_lsu.v](../../../src/uquintus/uqu_lsu.v) is the blocking LSU owned by the
-future MEM stage. It accepts one native access, checks it, performs a native
+MEM stage. It accepts one native access, checks it, performs a native
 OBI transaction, and retains a registered completion. It contains private
 transaction/result state, not the parent pipeline's EX/MEM or MEM/WB registers.
-The MEM stage itself, PMP checker, and full-pipeline integration remain pending.
+The [MEM wrapper](../mem/README.md) is implemented; its parent owns the PMP block
+and pipeline boundary registers. Full-pipeline integration remains pending.
 
 ## MEM-side interface
 
@@ -141,7 +142,7 @@ parameters; ISA selection, atomics, integrity, fences, and PMP implementation
 remain outside its current functionality.
 
 The [cocotb/pyuvm suites](test_uqu_lsu.py) use a separate
-[byte-addressed model](lsu_model.py) and delayed bus driver:
+[byte-addressed model](../common/lsu_model.py) and delayed bus driver:
 
 - `directed`: every normalized operation/offset/denial combination; sign/zero
   extension and lane placement; alignment priority; original fault addresses;

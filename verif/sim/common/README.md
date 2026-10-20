@@ -9,6 +9,9 @@ validation, parameter selection/encoding, and Verilog selector generation.
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
 standalone and shared-parent scoreboards. `ex_model.py` provides instruction-level
 EX outcomes to the stage and parent-register fixture scoreboards.
+`lsu_model.py` provides byte-addressed memory and native load/store expectations
+shared by LSU and MEM tests. `mem_model.py` adds MEM token/result expectations
+shared by the standalone stage and parent-register fixture.
 
 Simulation-specific reusable agents, models, Python helpers, and HDL wrappers
 belong here when shared by multiple testbenches. A wrapper used by one component

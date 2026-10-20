@@ -831,9 +831,9 @@ remain separate implementation work.
 `src/uquintus/uqu_lsu.v` implements the blocking native LSU for the MEM stage.
 The LSU owns one access's private request/response tracking and registered
 completion; pipeline EX/MEM and MEM/WB storage remains outside the unit.
-The MEM stage itself remains implementation work. It shall issue the access
-once, associate its completion with the parent-held instruction, and transfer
-result/exception metadata onward without repeating the transaction.
+The MEM stage in Section 3.9 issues each access once, associates its completion
+with the parent-held instruction, and transfers result/exception metadata
+onward without repeating the transaction.
 
 The unit accepts a native valid/ready request carrying load/store selection,
 instruction funct3, effective address, store data, original instruction, and an
@@ -862,8 +862,62 @@ the coordinated system-reset contract. There shall be no bus timeout or retry.
 
 The [LSU component guide](../verif/sim/lsu/README.md) defines ports, fault priority,
 request permission, byte lanes, completion timing, and verification. PMP integration,
-MEM-stage pipeline control, fences, custom memory operations, atomics, integrity,
+full-core pipeline control, fences, custom memory operations, atomics, integrity,
 and non-OBI bus adapters remain separate implementation work.
+
+### 3.9. MEM stage and parent-owned pipeline storage
+
+`src/uquintus/uqu_mem.v` owns the LSU and one local request-issued bit.
+The stage's parent shall own both EX/MEM and MEM/WB registers, their validity,
+instruction identity/PC/destinations, and retained payloads. MEM shall not
+duplicate these boundary registers or own the core-wide PMP/CSR blocks.
+The [MEM component guide](../verif/sim/mem/README.md) defines its ports and tests.
+
+`valid_i` describes the live parent-held EX/MEM instruction. `ready_o` permits
+filling an empty slot or replacing its current instruction when
+`valid_o && ready_i` transfers it to MEM/WB. The parent shall retain the input
+payload while held; `ready_i` describes MEM/WB capacity. A native LSU request
+may be accepted while WB is blocked, but this shall not release EX/MEM or
+permit repeated issue. The LSU shall retain completion until MEM transfers it.
+Non-memory tokens, including arithmetic/FPU results and CSR/XIF/fence tokens,
+shall pass through without LSU side effects. Existing exceptions take priority
+and shall issue neither LSU work nor a PMP query.
+
+MEM shall expose a combinational protection query containing original effective
+address, log2 access size, read/write requirement, and effective data privilege.
+The parent shall connect it to the MEM port of its one two-port PMP block and
+return permission as `pmp_allow_i`. The parent resolves MPRV/MPP; MEM shall not
+receive or store PMP configuration. LSU acceptance captures denial, independently
+of the controller's precise-effect `request_permit_i`. No denied native access
+shall reach OBI, and misalignment shall retain priority over permission denial.
+
+Successful load data becomes available only from registered LSU completion.
+`load_result_valid_o` qualifies a live successful load result independently of
+WB readiness. The parent/hazard block still determines destination, instruction
+class, youngest-writer priority, and configured forwarding eligibility; stage
+completion alone shall not identify a forwardable CSR/XIF result. Memory
+operations and exceptions shall not propagate floating-point flag updates.
+Pass-through FPU flags remain per-instruction metadata until qualified WB accrual.
+
+An owning MEM flush suppresses transfers/new issue and clears local issue
+tracking, while the LSU cancels or drains according to Section 3.8.
+`lsu_busy_o` shall remain visible even after EX/MEM validity is cleared. An empty
+EX/MEM slot may fill during killed bus work, but its replacement instruction
+shall wait for that work to drain before any completion or new LSU acceptance,
+including for non-memory/exception tokens. The killed response/error shall
+never become the replacement's result. This conservative blocking shall not
+prevent an older MEM/WB instruction from draining. A MEM-only flush shall not
+clear that older parent register. Reset may abandon bus tracking only under
+the existing coordinated system-reset contract.
+
+The [MEM parent-register fixture](../verif/sim/mem_pipeline/README.md) verifies
+the actual stage with external EX/MEM and MEM/WB registers and a parent-owned
+PMP block, including both PMP configurations. Standalone and fixture tests cover
+variable-latency transactions, faults, order/identity, WB backpressure, killed
+transaction draining, and recovery. Development Yosys checks confirm only one
+top-level tracking state bit plus one LSU, no boundary payload/PMP storage in
+MEM, and no combinational OBI-response bypass or flush withdrawal of request.
+Full-core WB/controller/fence and hazard/forwarding integration remain pending.
 
 ## 4. Configurable operand forwarding
 
@@ -2393,8 +2447,8 @@ be resolved when their implementation milestone is undertaken:
 
 | Area | Remaining work |
 | --- | --- |
-| Execution/control | Internal module/event interfaces, MEM-stage integration, readiness/controller sequencing, LSU-result forwarding qualification, and timing evaluation of enabled forwarding paths. |
-| Memory access | Native blocking LSU, registered completion storage, and reusable PMP checker implemented; connect the future IF/MEM stages, CSR-owned PMP state, precise-effect permission control, and fences. |
+| Execution/control | EX and MEM stages and parent-register fixtures implemented; connect full-core pipeline/controller sequencing, forwarding/hazards, and evaluate timing of enabled forwarding paths. |
+| Memory access | MEM/LSU, registered load readiness, and parent-owned PMP routing verified in a fixture; connect the future IF stage, CSR-owned PMP state, precise-effect permission control, and fences in the full core. |
 | Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
@@ -2545,3 +2599,4 @@ later decisions determine the active contract.
 | D-266 | Place one stateless two-port PMP block in the pipeline-stage parent at core scope; share region decoding from CSR-owned state and perform concurrent independent IF/MEM address, priority, and permission checks. | Share configuration decoding explicitly while preserving simultaneous instruction/data checks and single ownership of architectural protection state. | Agreed; standalone dual-port block implemented, full-core wiring pending |
 | D-267 | Implement CSRs as explicitly decoded state fields, allocating storage only for architecturally mutable fields in the selected configuration; assemble read values from state/constants/inputs/aliases and inspect representative synthesized storage. | Avoid a general writable CSR array and storage for hardwired, reserved, aliased, or disabled-feature payloads while preserving all architectural access and update semantics. | Implemented; standalone bindings and measured state budget in Section 18.2 |
 | D-268 | Implement the initial decoded CSR register file with one-shot WB commitment, explicit accepted architectural events, compact M/U/mtvec/mcause fields, optional Zfinx/PMP state, reserved PMP W-only writes legalized by clearing W, and explicit rejection of deferred debug/full-F/atomic configurations. | Provide the baseline CSR component with measured configuration-dependent storage while preserving architectural access semantics and leaving global pipeline arbitration in the parent. | Implemented under D-267; exact bindings and local priorities in Section 18.2 |
+| D-269 | Keep EX/MEM and MEM/WB registers in the MEM stage's parent; MEM owns one LSU and local one-shot issue tracking, exposes the parent PMP query, and blocks replacement completion/issue while killed bus work drains without stalling older WB. | Preserve precise transaction/identity association and shared PMP ownership with minimal stage-local control. | Implemented; stage and parent-register fixture in Section 3.9 |

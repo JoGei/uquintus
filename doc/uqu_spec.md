@@ -22,11 +22,14 @@ The repository contains specifications and standalone
 [base integer ALU](../verif/sim/alu/README.md),
 [EX stage](../verif/sim/ex/README.md),
 [load/store unit](../verif/sim/lsu/README.md),
+[MEM stage](../verif/sim/mem/README.md),
 [two-port PMP checker](../verif/sim/pmp/README.md), and
 [native multiply/divide](../verif/sim/muldiv/README.md) components with a common
 simulation/lint flow and a [shared-parent arithmetic fixture](../verif/sim/exec_arith/README.md).
 A [parent-register fixture](../verif/sim/ex_pipeline/README.md) verifies EX
-with DE/EX and EX/MEM registers outside the stage. Their guides describe
+with DE/EX and EX/MEM registers outside the stage. A separate
+[MEM parent-register fixture](../verif/sim/mem_pipeline/README.md) verifies MEM
+with EX/MEM and MEM/WB registers and one parent-owned PMP block. Their guides describe
 implementation and test scope.
 The complete processor, full-core verification, and ASIC build flow
 remain to be implemented.
