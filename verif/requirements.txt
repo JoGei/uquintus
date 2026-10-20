@@ -1,0 +1,5 @@
+# Pinned API used by verif/sim/common/component_runner.py.
+cocotb==1.9.2
+find-libpython==0.5.1
+pyuvm==3.0.0
+PyYAML==6.0.2

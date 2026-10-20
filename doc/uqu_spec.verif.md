@@ -117,7 +117,7 @@ assumptions used so that the demonstrated scope is explicit.
 
 ### 2.1. Python simulation framework
 
-**Status:** Agreed; initial register-file runner implemented, broader integration TBD
+**Status:** Agreed; shared component runner implemented, full-core integration TBD
 
 The project-wide simulation testbench stack shall use cocotb for driving/observing
 RTL and scheduling simulation activity, with pyuvm for testbench organization
@@ -140,15 +140,17 @@ Existing SystemVerilog architectural trace/RVFI instrumentation and formal
 checking shall retain their contracts in Section 1. Python environments may
 consume those observations and coordinate checking; framework selection shall
 not implicitly replace the agreed trace-monitor or formal boundaries.
-The initial register-file environment pins Python dependencies in
+The shared component environment pins Python dependencies in
 `verif/requirements.txt` and uses the cocotb 1.9.2 Python runner through
 the GNU Make helper `verif/sim/common/component_runner.py`, with explicit
 cocotb entry points invoking pyuvm test phases. The runner API is experimental
 and isolated in that shared helper. Component settings come from
 `config/sim/<component>.yml`; configuration validation, DUT parameter selection,
 and header generation are shared through `verif/sim/common/hw_config.py`.
-See the [component guide](../verif/sim/gpregfile/README.md) for prerequisites,
-commands, and test scope. Full-core integration and other backends remain open.
+See the [shared simulation guide](../verif/sim/common/README.md) for invocation
+and manifests, and the [register-file](../verif/sim/gpregfile/README.md) and
+[arithmetic](../verif/sim/arith/README.md) guides for test scope. Full-core
+integration and other backends remain open.
 
 ### 2.2. Independently selectable component regressions
 
@@ -274,7 +276,7 @@ management, CI execution environment, and result artifacts remain TBD.
 Pin Spike, RVFI/riscv-formal, tools, solvers, and any library reference models.
 Define the first supported configuration matrix, tests, formal assumptions and
 proof scope/depth, coverage, seeds, CI environment, and result artifacts.
-Extend the initial register-file runner and pinned cocotb/pyuvm environment in
+Extend the shared component runner and pinned cocotb/pyuvm environment in
 Section 2.1 with additional component DUT manifests and independently runnable
 suites under Section 2.2; define full-core integration and supported tool versions.
 Implement the retirement/trap comparison and verification monitors, separating

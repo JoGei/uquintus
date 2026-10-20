@@ -1,0 +1,6 @@
+{
+  "MUA_REGFILE_IMPL": {
+    "ff": {"value": 0, "macro": "UQU_RF_FF"},
+    "latch": {"value": 1, "macro": "UQU_RF_LATCH"}
+  }
+}
