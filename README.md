@@ -12,6 +12,12 @@ Implemented standalone components:
 | Native multiply/divide | [uqu_muldiv.v](src/uquintus/uqu_muldiv.v) | [MUL/DIV interface and tests](verif/sim/muldiv/README.md) |
 | Shared extended add/sub datapath | [uqu_arith.v](src/uquintus/uqu_arith.v) | [Arithmetic tests and interface](verif/sim/arith/README.md) |
 
+An [unimplemented FPU endpoint](src/uquintus/uqu_fpu.v) is also available for EX
+wiring. Its [interface contract](doc/uqu_spec.arch.md#331-unimplemented-fpu-interface)
+defines a decoded operation selector, three operands, rounding, and
+result/exception-flag ports. The endpoint
+accepts no requests, produces no results, and rejects enabled Zfinx elaboration.
+
 Provide Bender, Verilator, GNU Make, a C++ compiler, and the Python dependencies
 in `verif/requirements.txt` through your environment. Then run:
 

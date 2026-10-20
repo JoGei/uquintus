@@ -560,7 +560,7 @@ exact event payloads, and central-controller state encoding remain TBD.
 ### 3.3. Native Zfinx execution and FPU implementation
 
 **Status:** Blocking EX integration and immediate flush cancellation agreed;
-FPU implementation selection open
+inactive interface stub available; FPU implementation selection open
 
 Native Zfinx operations shall execute through an FPU attached to EX,
 independently of CV-X-IF. The owning instruction shall remain in EX until its
@@ -626,6 +626,65 @@ core's synchronous reset contract. No dependency revision or configuration is
 selected; operation coverage, timing, reset/flush behavior, and flow compatibility
 remain to be evaluated before implementation selection. An imported FPU shall
 meet the immediate cancellation requirement above.
+
+#### 3.3.1. Unimplemented FPU interface
+
+`src/uquintus/uqu_fpu.v` provides a plain-Verilog placeholder for EX integration.
+It has the common native request/result handshake, clock, synchronous active-low
+reset, and owning-instruction flush ports. Its interface is independent of a
+particular FPU backend:
+
+| Payload | Port | Meaning |
+| --- | --- | --- |
+| Request | `req_op_i[4:0]` | Decoded scalar operation selected in DE, using the internal encoding below. |
+| Request | `req_a_i[31:0]`, `req_b_i[31:0]`, `req_c_i[31:0]` | Up to three scalar FP32 or integer source values from the integer register file. |
+| Request | `req_rm_i[2:0]` | Effective rounding mode; the caller resolves dynamic rounding through `frm` where applicable. Ignored by operations that do not round. |
+| Result | `res_data_o[31:0]` | Destination value for integer-register writeback. |
+| Result | `res_fflags_o[4:0]` | Per-instruction exception flags in architectural `fflags` bit order, valid together with result data. |
+
+A future implementation shall retain result data and flags together under
+backpressure and discard both on owning-instruction flush. EX shall carry flags
+to WB for retirement-qualified CSR accrual; the FPU shall not own `fcsr` storage.
+DE shall recognize the instruction and produce `req_op_i`; the future FPU
+adapter shall translate that selector into backend controls without decoding
+instruction bits again. The scalar FP32 operation encoding is independent of
+the backend and of the architectural instruction encoding:
+
+| `req_op_i` | Operation | `req_op_i` | Operation |
+| --- | --- | --- | --- |
+| `5'd0` | FADD.S | `5'd11` | FSGNJX.S |
+| `5'd1` | FSUB.S | `5'd12` | FMIN.S |
+| `5'd2` | FMUL.S | `5'd13` | FMAX.S |
+| `5'd3` | FDIV.S | `5'd14` | FEQ.S |
+| `5'd4` | FSQRT.S | `5'd15` | FLT.S |
+| `5'd5` | FMADD.S | `5'd16` | FLE.S |
+| `5'd6` | FMSUB.S | `5'd17` | FCLASS.S |
+| `5'd7` | FNMSUB.S | `5'd18` | FCVT.W.S |
+| `5'd8` | FNMADD.S | `5'd19` | FCVT.WU.S |
+| `5'd9` | FSGNJ.S | `5'd20` | FCVT.S.W |
+| `5'd10` | FSGNJN.S | `5'd21` | FCVT.S.WU |
+
+Values 22 through 31 are reserved. The instruction names identify the scalar
+computation; source and destination values use integer registers under
+[Zfinx](https://docs.riscv.org/reference/isa/v20260120/unpriv/zfinx.html).
+The three operands and effective rounding mode remain separate payload fields.
+Instruction legality, DE decoding, rounding checks, backend-control mapping,
+and the actual backend remain implementation work. The stub performs none of
+them and does not execute any selector value.
+
+The placeholder supports only `ISA_ZFINX = 0`. It continuously drives
+`req_ready_o = 0`, `res_valid_o = 0`, `res_data_o = 0`, and `res_fflags_o = 0`,
+including during reset and flush. It contains no state and never accepts or
+completes an operation. An instance with `ISA_ZFINX != 0` shall fail elaboration
+through the explicitly named `uqu_fpu_zfinx_not_implemented` diagnostic cell.
+EX may wire this disabled endpoint, while decode shall continue to reject
+unsupported Zfinx instructions. The stub shall not advertise implemented
+floating-point capability or provide a successful substitute result.
+
+The Bender `fpu` target selects the endpoint; `rtl` also includes it. Functional
+floating-point tests and backend dependencies remain deferred. Placeholder
+validation covers Verilog parsing, synthesis to constant inactive outputs, and
+rejection of enabled elaboration, and is not floating-point functional coverage.
 
 ### 3.4. Shared extended arithmetic primitive
 
@@ -2123,7 +2182,7 @@ be resolved when their implementation milestone is undertaken:
 | --- | --- |
 | Execution/control | Internal module/event interfaces, detailed readiness wiring and controller sequencing, retained load-result placement, and timing evaluation of enabled forwarding paths. |
 | Integer arithmetic | Standalone ALU, MUL/DIV, shared arithmetic, and a shared-parent fixture are implemented; full EX and pipeline integration remain pending. Preserve fixed execution latencies and physical sharing during integration. |
-| Zfinx | Select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
+| Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
 | ISA/CSR/PMP | Remaining WARL/field mappings and same-instruction exception selection under the pinned ISA, complete CSR decode implementation, fixed sixteen-entry PMP details, and optional-feature combination validation. |
 | Frontend | Decompressor implementation, detailed prefetch/fault association and redirect tracking, and future predictor implementations; preserve agreed initial IF placement and request persistence. |

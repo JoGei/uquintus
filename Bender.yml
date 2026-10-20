@@ -12,6 +12,9 @@ sources:
   - target: any(alu, alu_test, exec_arith_test, rtl)
     files:
       - src/uquintus/uqu_alu.v
+  - target: any(fpu, rtl)
+    files:
+      - src/uquintus/uqu_fpu.v
   - target: alu_test
     files:
       - verif/sim/alu/uqu_alu_tb.v
