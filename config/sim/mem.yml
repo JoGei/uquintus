@@ -1,6 +1,6 @@
-top_module: uqu_mem
+top_module: uqu_stage_mem
 bender_target: mem
-test_module: test_uqu_mem
+test_module: test_uqu_stage_mem
 parameters: []
 tests:
   - directed

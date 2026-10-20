@@ -2,7 +2,7 @@
 
 // MEM execution/control only. The parent owns EX/MEM and MEM/WB payloads,
 // instruction identity, validity, and the core-wide PMP block.
-module uqu_mem (
+module uqu_stage_mem (
     input  wire        clk_i,
     input  wire        rst_ni,
     input  wire        flush_i,

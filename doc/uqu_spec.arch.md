@@ -778,7 +778,7 @@ pipeline remains pending.
 
 ### 3.7. EX stage and parent-owned pipeline registers
 
-`src/uquintus/uqu_ex.v` shall own local execution control, ALU/MUL/DIV/FPU
+`src/uquintus/uqu_stage_ex.v` shall own local execution control, ALU/MUL/DIV/FPU
 selection, the first shared arithmetic instance, and its operand mux. It shall
 not own DE/EX or EX/MEM pipeline registers, instruction-valid storage, or
 instruction-identity/destination metadata. Its parent shall retain the current
@@ -867,7 +867,7 @@ and non-OBI bus adapters remain separate implementation work.
 
 ### 3.9. MEM stage and parent-owned pipeline storage
 
-`src/uquintus/uqu_mem.v` owns the LSU and one local request-issued bit.
+`src/uquintus/uqu_stage_mem.v` owns the LSU and one local request-issued bit.
 The stage's parent shall own both EX/MEM and MEM/WB registers, their validity,
 instruction identity/PC/destinations, and retained payloads. MEM shall not
 duplicate these boundary registers or own the core-wide PMP/CSR blocks.

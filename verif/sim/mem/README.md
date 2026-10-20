@@ -1,6 +1,6 @@
 # Memory stage
 
-[uqu_mem.v](../../../src/uquintus/uqu_mem.v) owns one native LSU and one local
+[uqu_stage_mem.v](../../../src/uquintus/uqu_stage_mem.v) owns one native LSU and one local
 `issued_q` bit. **The parent owns EX/MEM and MEM/WB registers**, their validity,
 instruction identity, PC, destinations, and all payload retention. The core
 parent also owns the shared two-port PMP block and architectural control.
@@ -124,7 +124,7 @@ make lint COMPONENT=mem CONFIG=rv32i
 make test COMPONENT=mem_pipeline CONFIG=rv32i
 ```
 
-The fixed RV32 MEM module has no hardware parameters. [Component tests](test_uqu_mem.py)
+The fixed RV32 MEM module has no hardware parameters. [Component tests](test_uqu_stage_mem.py)
 use shared [memory](../common/lsu_model.py) and [MEM outcome](../common/mem_model.py)
 models. `directed` covers normalized controls, offsets, protection denial,
 fault priority, extraction/store lanes, bus errors, held results, pass-through

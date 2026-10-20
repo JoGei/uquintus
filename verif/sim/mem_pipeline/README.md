@@ -1,7 +1,7 @@
 # MEM with parent-owned pipeline registers
 
 [uqu_mem_pipeline_tb.v](uqu_mem_pipeline_tb.v) wraps the real
-[uqu_mem](../../../src/uquintus/uqu_mem.v) in EX/MEM and MEM/WB registers owned
+[uqu_stage_mem](../../../src/uquintus/uqu_stage_mem.v) in EX/MEM and MEM/WB registers owned
 by the verification parent. PC, original instruction, destination, and decoded
 control travel in these parent registers. Only boundary validity resets; payloads
 need no reset. `flush_i` kills MEM/EX-MEM only, leaving older MEM/WB work intact.

@@ -1,7 +1,7 @@
 # EX with parent-owned pipeline registers
 
 [uqu_ex_pipeline_tb.v](uqu_ex_pipeline_tb.v) owns DE/EX and EX/MEM register sets
-around the actual `uqu_ex` DUT. It supplies stable decoded operands and metadata,
+around the actual `uqu_stage_ex` DUT. It supplies stable decoded operands and metadata,
 computes EX/MEM capacity, and captures EX outputs. This is verification RTL,
 not the processor's full pipeline or hazard/forwarding implementation.
 

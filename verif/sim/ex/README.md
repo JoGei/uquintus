@@ -1,6 +1,6 @@
 # Execute stage
 
-[uqu_ex.v](../../../src/uquintus/uqu_ex.v) connects the integer ALU, MUL/DIV,
+[uqu_stage_ex.v](../../../src/uquintus/uqu_stage_ex.v) connects the integer ALU, MUL/DIV,
 and inactive FPU endpoint. EX owns their shared first `uqu_arith` instance and
 its mux. **Its parent owns both DE/EX and EX/MEM registers.** EX stores no
 pipeline instruction payload, PC, destination, or boundary-valid bit.

@@ -3,7 +3,7 @@
 
 // EX execution/control only. The parent owns DE/EX and EX/MEM registers,
 // including instruction validity, payload, identity, and downstream capacity.
-module uqu_ex #(
+module uqu_stage_ex #(
     parameter ISA_M = 0,
     parameter ISA_ZFINX = 0,
     parameter MUA_MUL = `UQU_MUL_ITERATIVE,

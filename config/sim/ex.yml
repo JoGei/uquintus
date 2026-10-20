@@ -1,6 +1,6 @@
-top_module: uqu_ex
+top_module: uqu_stage_ex
 bender_target: ex
-test_module: test_uqu_ex
+test_module: test_uqu_stage_ex
 parameters:
   - ISA_M
   - ISA_ZFINX

@@ -17,7 +17,7 @@ sources:
       - src/uquintus/uqu_fpu.v
   - target: any(ex, ex_pipeline_test, rtl)
     files:
-      - src/uquintus/uqu_ex.v
+      - src/uquintus/uqu_stage_ex.v
   - target: ex_pipeline_test
     files:
       - verif/sim/ex_pipeline/uqu_ex_pipeline_tb.v
@@ -26,7 +26,7 @@ sources:
       - src/uquintus/uqu_lsu.v
   - target: any(mem, mem_pipeline_test, rtl)
     files:
-      - src/uquintus/uqu_mem.v
+      - src/uquintus/uqu_stage_mem.v
   - target: mem_pipeline_test
     files:
       - verif/sim/mem_pipeline/uqu_mem_pipeline_tb.v

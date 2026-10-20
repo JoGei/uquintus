@@ -140,7 +140,7 @@ module uqu_ex_pipeline_tb #(
         end
     end
 
-    uqu_ex #(
+    uqu_stage_ex #(
         .ISA_M(ISA_M), .ISA_ZFINX(ISA_ZFINX), .MUA_MUL(MUA_MUL), .MUA_DIV(MUA_DIV),
         .MUA_MULDIV_ITERUNROLL(MUA_MULDIV_ITERUNROLL)
     ) u_ex (

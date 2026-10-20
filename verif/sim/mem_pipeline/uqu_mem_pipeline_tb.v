@@ -153,7 +153,7 @@ module uqu_mem_pipeline_tb #(
         end
     end
 
-    uqu_mem u_mem (
+    uqu_stage_mem u_mem (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
         .valid_i(exmem_valid_q), .ready_o(mem_ready), .valid_o(mem_valid), .ready_i(memwb_ready),
         .lsu_i(exmem_lsu_q),
