@@ -2,9 +2,10 @@
 
 **Status:** First specification draft finalized, 2026-10-20
 
-Build/configuration contracts and project organization. An initial standalone
-register-file simulation/lint flow exists; full-core and ASIC flows remain to be
-implemented. See the [component guide](../verif/sim/gpregfile/README.md).
+Build/configuration contracts and project organization. A shared component
+simulation/lint flow supports the register file and arithmetic datapath;
+full-core and ASIC flows remain to be implemented. See the
+[shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
 
@@ -173,8 +174,8 @@ RTL language requirement.
 
 Simulation testbenches shall use the project-wide cocotb/pyuvm stack defined in
 the [verification specification](uqu_spec.verif.md#21-python-simulation-framework).
-The initial register-file flow uses the pinned cocotb Python runner described in
-the component guide; additional backend and full-core integration remain TBD.
+The shared component flow uses the pinned cocotb Python runner described in
+the simulation guide; additional backend and full-core integration remain TBD.
 
 ## 4. OpenROAD-flow-scripts ASIC backbone
 
@@ -296,6 +297,7 @@ verif/
       component_runner.py # Component simulation/lint entry point used by Make
       hw_config.py        # Shared configuration validation and header generation
     gpregfile/      # General-purpose register-file tests
+    arith/          # Shared extended arithmetic tests
     alu/            # Example: test_uqu_alu.py and any local environment
     lsu/            # LSU tests and any local environment
     core/           # Full-core simulation tests

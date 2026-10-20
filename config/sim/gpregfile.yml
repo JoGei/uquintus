@@ -1,0 +1,15 @@
+# Component metadata for verif/sim/common/component_runner.py.
+# HDL source/dependency selection remains in Bender.yml.
+top_module: uqu_gpregfile
+bender_target: gpregfile
+test_module: test_uqu_gpregfile
+parameters:
+  - ISA_E
+  - ISA_ZFINX
+  - XIF
+  - XIF_NUM_RS
+  - XIF_DUALWRITE
+  - MUA_REGFILE_IMPL
+tests:
+  - directed
+  - randomized
