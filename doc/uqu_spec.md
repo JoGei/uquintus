@@ -15,10 +15,11 @@ Only decisions explicitly marked **agreed** are requirements. Proposed principle
 and layouts retain their proposal status. **TBD** means an unresolved follow-up;
 it does not grant permission to change an agreed architectural contract.
 
-The repository contains specifications and an initial standalone register-file
-component with its simulation/lint flow. See the
-[component guide](../verif/sim/gpregfile/README.md) for its implementation and test
-scope. The complete processor, full-core verification, and ASIC build flow
+The repository contains specifications and standalone
+[register-file](../verif/sim/gpregfile/README.md) and
+[shared arithmetic](../verif/sim/arith/README.md) components with a common
+simulation/lint flow. Their guides describe implementation and test scope.
+The complete processor, full-core verification, and ASIC build flow
 remain to be implemented.
 
 ## Document index
