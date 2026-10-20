@@ -1290,8 +1290,8 @@ to the deferred full-F design intent (D-185 through D-187); they shall not
 apply to Zfinx. Any future implementation of full F shall revisit that profile.
 
 PMP shall be selected through `ISA_PMP`, defaulting to `0`, and follow the
-internal structure defined in [architecture, Section 8.1](uqu_spec.arch.md#81-internal-pmp-and-memory-fault-boundary); its detailed profile and
-implementation milestone remain TBD. Other memory protection
+internal structure defined in [architecture, Section 8.1](uqu_spec.arch.md#81-internal-pmp-and-memory-fault-boundary); its enabled profile is described there, while full-core integration remains
+pending. Other memory protection
 features remain future design choices. U-mode support alone shall not be
 described as providing memory isolation without an implemented protection
 mechanism.
@@ -1443,8 +1443,8 @@ access succeeds in M-mode and fails in U-mode when PMP is enabled, including
 when all entries are OFF. `ISA_PMP = 0` instead permits every access through
 the checker and removes its checking logic at elaboration.
 
-The remaining PMP CSR field details and full-core implementation milestone
-remain TBD.
+The initial PMP CSR field implementation is defined in Section 18.2; its
+full-core integration milestone remains pending.
 
 ## 9. Precise synchronous exceptions
 
@@ -2076,6 +2076,43 @@ implemented PMP configuration/address registers, and floating-point CSR state
 when enabled. Read-only aliases shall share their underlying state; constants
 and integration inputs such as `mhartid` shall not require duplicated storage.
 
+CSR storage shall be implemented as explicitly decoded architectural state,
+with registers only for fields that can change in the selected hardware
+configuration. The CSR address space shall not be implemented as a general
+address-indexed array of writable 32-bit words. Full-width registers remain
+appropriate where all bits carry state, such as `mscratch` and the implemented
+counters. Fields that are temporarily read-only because of runtime locking
+shall retain their required state; locking shall not be confused with an
+elaboration-time constant.
+
+Each CSR's implementation shall identify its stored fields, read-value sources,
+write permissions, reset behavior, and WARL/ignored-write rules. Combinational
+read decoding shall assemble the architectural 32-bit value from stored fields,
+constants, derived values, integration inputs, or aliases of existing state.
+Explicit CSR writes and implicit architectural events shall update only their
+applicable state fields. Read/modify/write instructions shall operate on the
+architectural read value before applying the destination field's write and
+legalization rules; omitting constant-bit storage shall not change CSR semantics.
+CSR address legality shall remain independent of whether an address requires
+storage.
+
+In particular, only CY and IR require storage in `mcountinhibit` and, when
+present, `mcounteren`; their other bits are hardwired zero. Hardwired `misa`,
+integration-supplied `mhartid`, and supported constant-zero disabled PMP/HPM
+registers shall allocate no CSR payload storage. Counter aliases shall reuse
+the underlying counter state. Disabled optional-feature state shall be excluded
+at elaboration or eliminated by synthesis, preserving its specified mapped or
+unmapped CSR behavior. Existing reset and architectural update requirements
+remain binding.
+
+The implementation shall expose constants and field write restrictions directly
+in RTL rather than rely on synthesis to infer them from software usage.
+Representative synthesized CSR configurations shall be inspected for retained
+storage: hardwired/reserved fields and disabled features shall not retain
+payload flops or memory bits, aliases shall not duplicate state, and every
+architecturally mutable field shall remain implemented. Optimization shall
+preserve required access checks, side effects, and update arbitration.
+
 Other blocks shall consume the required CSR state through explicit module
 outputs and request architectural updates through explicit event connections.
 These events shall include the applicable trap/interrupt entry, `MRET`, cycle
@@ -2084,7 +2121,8 @@ acceptance and update arbitration shall preserve the existing instruction-age,
 commitment, reset, and precise-exception rules. The central controller shall
 continue to arbitrate global events, and the core-owned two-port PMP block shall
 consume the CSR module's PMP state. The module may use internal submodules while
-retaining this ownership boundary; exact ports and event formats remain TBD.
+retaining this ownership boundary. The standalone module's initial port/event
+contract is defined in Section 18.2; full-controller integration remains pending.
 
 The CSR module shall be able to report an exception for an invalid access.
 An explicit CSR instruction targeting an
@@ -2109,8 +2147,9 @@ central controller shall arbitrate the exception and finalize architectural
 trap entry at WB under [architecture, Section 9.2](uqu_spec.arch.md#92-early-exception-containment-and-wb-trap-entry), including the resulting trap-state CSR
 updates. Thus the CSR module's local fault report shall feed the same precise
 exception path as faults from other units. Discarded instructions shall have
-no CSR access side effects. Exact module ports, fault-report encoding, and
-global-event update sequencing remain TBD.
+no CSR access side effects. The initial module ports, fault report, and local
+update priorities are defined in Section 18.2; global-event arbitration remains
+controller integration work.
 
 Native CSR instruction processing shall complete within one WB processing cycle
 once the instruction is eligible to commit. The CSR module shall provide the
@@ -2242,6 +2281,49 @@ Verification shall cover M-mode and U-mode returns where supported, preceding
 CSR writes to return state, pending interrupts after state restoration, older
 faults discarding `MRET`, and illegal U-mode attempts with no return side effects.
 
+### 18.2. Standalone CSR register-file implementation
+
+`src/uquintus/uqu_csregfile.v` implements the decoded architectural state and
+CSR access checks described above. Its [component guide](../verif/sim/csregfile/README.md)
+defines the complete implemented CSR map, ports, state budget, event priorities,
+and regression scope. It does not own WB pipeline registers, current execution
+privilege, trap selection, or redirect arithmetic. The parent shall serialize
+instructions, qualify retirement, and supply one-shot CSR commitment and
+accepted trap/MRET/FP events.
+
+A live CSR query returns its required pre-update read value or an
+illegal-instruction report combinationally. Explicit writes require a legal
+live access and a commitment pulse, with no owning flush. The interface retains
+source/destination encoding information so Zicsr suppression is independent of
+a register operand's numeric value. There is no extra CSR transaction buffer or
+access wait cycle. Synchronous reset has highest priority; accepted trap entry
+wins over MRET, and either event suppresses ordinary explicit CSR writes.
+Counters and independently committed floating-point events retain their own
+qualified updates. A write to either counter half suppresses that counter's
+whole implicit increment for the edge; inhibit changes use the old inhibit
+state on the write edge. The controller remains responsible for never counting
+a faulting or discarded instruction as retired.
+
+The implementation stores MPP as one M/U selector bit, `mtvec.MODE` as one
+Direct/Vectored selector, and `mcause` as its interrupt flag plus four low cause
+bits. All baseline exception/interrupt causes fit this representation; upper
+cause bits read zero, and unsupported WLRL software-write codes deterministically
+retain only their low four bits. New causes numbered sixteen or higher shall
+require an explicit width/profile revision. PMP configuration stores six bits
+per entry with bits 6:5 hardwired zero. Reserved R=0/W=1 writes map to R=0/W=0,
+preserving the written A/L/X fields. PMP address payloads remain 32 bits and
+unreset; configuration reset clears their locks and leaves every entry OFF.
+
+State allocation is `265 + ISA_C + 5*ISA_UMODE + 8*ISA_ZFINX + 608*ISA_PMP`
+bits, with no CSR payload memory or duplicated alias state. Representative
+Yosys checks confirm the widths and reset coverage, including only 270 state
+bits for the default M+U configuration. Tests cover all sixteen combinations
+of U/C/Zfinx-CSR/PMP state, with representative I/E/M identification settings.
+This is a standalone-component milestone; complete pipeline/CSR/PMP integration
+and an operational Zfinx execution backend remain pending. Debug CSR behavior
+is deferred and `DEBUG=1` explicitly fails this component's elaboration, as do
+the unsupported full-F and atomic configurations.
+
 ## 19. Conservative data-memory fence
 
 **Status:** Full barrier, DE serialization, WB completion, and external
@@ -2316,7 +2398,7 @@ be resolved when their implementation milestone is undertaken:
 | Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
-| ISA/CSR/PMP | Remaining WARL/field mappings and same-instruction exception selection under the pinned ISA, complete CSR decode implementation, fixed sixteen-entry PMP details, and optional-feature combination validation. |
+| ISA/CSR/PMP | Decoded CSR state/access checks, optional PMP/FP state, counters and trap/MRET event updates are implemented as a component; integrate with WB/controller and the two-port PMP checker, preserve instruction-age/retirement rules, and implement the deferred debug CSR profile. |
 | Frontend | Decompressor implementation, detailed prefetch/fault association and redirect tracking, and future predictor implementations; preserve agreed initial IF placement and request persistence. |
 | Milestones | Implementation order and acceptance criteria for optional ISA features, PMP, XIF, latch storage, and non-default configurations after the baseline milestone. |
 
@@ -2461,3 +2543,5 @@ later decisions determine the active contract.
 | D-264 | Keep DE/EX and EX/MEM registers in the EX stage parent; EX owns only local execution control/tracking, its functional units, and the first shared arithmetic instance. | Separate pipeline storage and instruction identity from stage execution while preserving one-time unit issue, backpressure, and age-qualified cancellation. | Agreed; EX component and parent-register fixture described in Section 3.7 |
 | D-265 | Instantiate the same stateless PMP checker separately in IF and MEM, consuming PMP configuration/address state owned solely by the CSR unit through core-parent connections. | Check instruction and data accesses independently while sharing implementation and keeping architectural protection state in one place. | Superseded by D-266: core-owned two-port block with shared region decoding |
 | D-266 | Place one stateless two-port PMP block in the pipeline-stage parent at core scope; share region decoding from CSR-owned state and perform concurrent independent IF/MEM address, priority, and permission checks. | Share configuration decoding explicitly while preserving simultaneous instruction/data checks and single ownership of architectural protection state. | Agreed; standalone dual-port block implemented, full-core wiring pending |
+| D-267 | Implement CSRs as explicitly decoded state fields, allocating storage only for architecturally mutable fields in the selected configuration; assemble read values from state/constants/inputs/aliases and inspect representative synthesized storage. | Avoid a general writable CSR array and storage for hardwired, reserved, aliased, or disabled-feature payloads while preserving all architectural access and update semantics. | Implemented; standalone bindings and measured state budget in Section 18.2 |
+| D-268 | Implement the initial decoded CSR register file with one-shot WB commitment, explicit accepted architectural events, compact M/U/mtvec/mcause fields, optional Zfinx/PMP state, reserved PMP W-only writes legalized by clearing W, and explicit rejection of deferred debug/full-F/atomic configurations. | Provide the baseline CSR component with measured configuration-dependent storage while preserving architectural access semantics and leaving global pipeline arbitration in the parent. | Implemented under D-267; exact bindings and local priorities in Section 18.2 |

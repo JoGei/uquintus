@@ -17,6 +17,7 @@ it does not grant permission to change an agreed architectural contract.
 
 The repository contains specifications and standalone
 [register-file](../verif/sim/gpregfile/README.md),
+[CSR register-file](../verif/sim/csregfile/README.md),
 [shared arithmetic](../verif/sim/arith/README.md),
 [base integer ALU](../verif/sim/alu/README.md),
 [EX stage](../verif/sim/ex/README.md),

@@ -4,7 +4,7 @@
 
 Build/configuration contracts and project organization. A shared component
 simulation/lint flow supports the register file, ALU, arithmetic datapath, native
-multiply/divide, EX, LSU, PMP checker, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
+multiply/divide, EX, LSU, PMP checker, CSR register file, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -303,6 +303,7 @@ verif/
       rv32_arithmetic.py  # Mathematical ALU and MUL/DIV reference models
       ex_model.py         # EX token and parent-pipeline scoreboard model
     gpregfile/      # General-purpose register-file tests
+    csregfile/      # Decoded CSR state, access, counters, and event tests
     arith/          # Shared extended arithmetic tests
     muldiv/         # Native MUL/DIV tests and local arithmetic wrapper
     alu/            # Base integer ALU tests and external arithmetic fixture

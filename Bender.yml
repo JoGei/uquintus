@@ -24,6 +24,9 @@ sources:
   - target: any(lsu, rtl)
     files:
       - src/uquintus/uqu_lsu.v
+  - target: any(csregfile, rtl)
+    files:
+      - src/uquintus/uqu_csregfile.v
   - target: any(pmp, rtl)
     files:
       - src/uquintus/uqu_pmp.v
