@@ -3,18 +3,24 @@ package:
   name: uquintus
 
 sources:
-  - target: any(arith, alu, alu_test, exec_arith_test, muldiv, muldiv_test, rtl)
+  - target: any(arith, alu, alu_test, exec_arith_test, muldiv, muldiv_test, ex, ex_pipeline_test, rtl)
     files:
       - src/uquintus/uqu_arith.v
-  - target: any(muldiv, muldiv_test, exec_arith_test, rtl)
+  - target: any(muldiv, muldiv_test, exec_arith_test, ex, ex_pipeline_test, rtl)
     files:
       - src/uquintus/uqu_muldiv.v
-  - target: any(alu, alu_test, exec_arith_test, rtl)
+  - target: any(alu, alu_test, exec_arith_test, ex, ex_pipeline_test, rtl)
     files:
       - src/uquintus/uqu_alu.v
-  - target: any(fpu, rtl)
+  - target: any(fpu, ex, ex_pipeline_test, rtl)
     files:
       - src/uquintus/uqu_fpu.v
+  - target: any(ex, ex_pipeline_test, rtl)
+    files:
+      - src/uquintus/uqu_ex.v
+  - target: ex_pipeline_test
+    files:
+      - verif/sim/ex_pipeline/uqu_ex_pipeline_tb.v
   - target: alu_test
     files:
       - verif/sim/alu/uqu_alu_tb.v

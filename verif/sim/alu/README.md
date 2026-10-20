@@ -7,8 +7,9 @@ the shared `uqu_arith` instance used by both ALU and MUL/DIV.
 
 The local [standalone wrapper](uqu_alu_tb.v) supplies that instance. The
 [shared-parent regression](../exec_arith/README.md) connects the real ALU and
-MUL/DIV as siblings around one external arithmetic instance. The processor's
-EX stage and pipeline are still pending.
+MUL/DIV as siblings around one external arithmetic instance. The [EX component](../ex/README.md) now integrates these units with
+[parent-owned boundary registers](../ex_pipeline/README.md); the full processor
+pipeline remains pending.
 
 ## Request and result
 

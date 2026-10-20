@@ -1,6 +1,6 @@
 `default_nettype none
 
-// Unimplemented scalar Zfinx endpoint for future EX wiring. This stub never
+// Unimplemented scalar Zfinx endpoint for EX wiring. This stub never
 // accepts work or produces a result. Replace the implementation when selecting
 // an FPU backend; an enabled instance must not silently use this placeholder.
 module uqu_fpu #(

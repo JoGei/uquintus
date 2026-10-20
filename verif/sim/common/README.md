@@ -7,7 +7,8 @@ metadata, and pass/fail checking. `hw_config.py` provides shared hardware YAML
 validation, parameter selection/encoding, and Verilog selector generation.
 
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
-standalone and shared-parent scoreboards.
+standalone and shared-parent scoreboards. `ex_model.py` provides instruction-level
+EX outcomes to the stage and parent-register fixture scoreboards.
 
 Simulation-specific reusable agents, models, Python helpers, and HDL wrappers
 belong here when shared by multiple testbenches. A wrapper used by one component

@@ -1,0 +1,12 @@
+top_module: uqu_ex_pipeline_tb
+bender_target: ex_pipeline_test
+test_module: test_uqu_ex_pipeline
+parameters:
+  - ISA_M
+  - ISA_ZFINX
+  - MUA_MUL
+  - MUA_DIV
+  - MUA_MULDIV_ITERUNROLL
+tests:
+  - pipeline
+  - drain_flush

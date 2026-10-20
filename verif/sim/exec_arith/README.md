@@ -18,8 +18,8 @@ parent fixture (future ownership: EX)
 it stable from request presentation until result transfer or cancellation.
 The parent gates request valid and result ready to the selected unit and muxes
 its native handshake and arithmetic operands. There is no per-step arithmetic
-handshake. The eventual EX controller must retain ownership and issue each
-instruction only once; the fixture does not infer it from a later request.
+handshake. The [EX component](../ex/README.md) retains ownership and issues each
+instruction only once; this fixture does not infer it from a later request.
 
 ```sh
 make test COMPONENT=exec_arith CONFIG=rv32im
@@ -40,4 +40,5 @@ this target. Set every hardware parameter in a complete profile and select it
 with `CONFIG=/path/to/profile.yml`. Single-cycle ALU operations and all existing
 MUL/DIV phase counts remain unchanged by the parent mux. See the
 [ALU](../alu/README.md) and [MUL/DIV](../muldiv/README.md) guides for port and
-operation details. Physical implementation and full-EX verification are pending.
+operation details. The EX component and its parent-register fixture have separate regression targets.
+Physical implementation and full-core verification remain pending.

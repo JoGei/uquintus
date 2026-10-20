@@ -735,8 +735,8 @@ This connection shall have no separate ready/valid handshake. EX shall reserve
 the resource for the owning instruction so that individual arithmetic steps
 cannot stall. MUL/DIV shall instantiate only the additional `F - 1` instances.
 The standalone test wrapper supplies slice zero. A separate shared-parent
-fixture connects ALU and MUL/DIV around that instance; full EX integration
-remains pending.
+fixture connects ALU and MUL/DIV around that instance. The EX component also
+integrates both units, with boundary registers owned by its parent.
 
 See the [MUL/DIV component guide](../verif/sim/muldiv/README.md) for the complete
 port contract, operation encoding, algorithms, timing table, and test commands.
@@ -773,7 +773,58 @@ in DE; upstream operand selection may use ADD for address, AUIPC, and LUI work.
 Standalone wrappers and the
 [shared-parent fixture](../verif/sim/exec_arith/README.md) supply the external
 arithmetic instance for verification. That fixture demonstrates the module
-boundary; the actual EX stage, ownership tracking, and pipeline remain pending.
+boundary. The EX component implements ownership tracking; the full processor
+pipeline remains pending.
+
+### 3.7. EX stage and parent-owned pipeline registers
+
+`src/uquintus/uqu_ex.v` shall own local execution control, ALU/MUL/DIV/FPU
+selection, the first shared arithmetic instance, and its operand mux. It shall
+not own DE/EX or EX/MEM pipeline registers, instruction-valid storage, or
+instruction-identity/destination metadata. Its parent shall retain the current
+instruction and capture EX outputs together with the corresponding metadata.
+
+The stage shall expose `valid_i` for the parent-owned live EX slot, `ready_o`
+for permission to fill/replace that slot, and `valid_o`/`ready_i` for transfer
+into the parent-owned EX/MEM register. An empty EX slot may accept an instruction
+even when EX/MEM is occupied. An occupied slot shall transfer only when its
+output is valid and the parent can capture it. Older EX/MEM work shall drain
+independently of a busy EX, becoming empty when EX has no new output to supply.
+
+EX may accept a native-unit request before the parent can capture its result.
+One local tracking bit shall prevent reissue until transfer or cancellation;
+private execution-unit state and retained results shall remain in the units.
+Qualified pass-through readiness shall also be retained until transfer.
+No additional instruction payload pipeline register shall be introduced in EX.
+Parent-owned controls and metadata shall remain associated with the instruction
+through stalls. Owning flush/reset shall cancel EX and its units; a younger-only
+flush shall not affect older EX work, and an EX-only flush shall not invalidate
+an older parent-owned EX/MEM instruction.
+
+The separate forwarding/hazard block and parent shall present decoded controls
+and selected operands. Operand readiness shall include store data, independent
+of the ALU's address-offset operand. The parent/hazard logic shall retain
+correct operands once resolved until transfer or cancellation; EX shall not
+add another operand pipeline register. The existing DE admission rule remains
+binding: native operands shall be captured or guaranteed available through an
+enabled bypass on EX entry. Existing exception tokens shall bypass
+operand waits without starting computation. Unsupported unit routing or invalid
+normalized ALU/MUL/DIV control codes shall report illegal-instruction cause 2;
+an existing exception's cause/tval shall retain priority. EX reports exception
+metadata for the normal precise WB path and performs no trap-entry side effects.
+
+Stage completion shall not itself qualify a destination-register bypass. The
+parent and forwarding block shall distinguish computed addresses from load
+results and recognize that CSR/XIF results become available later. FPU flags
+shall remain associated with their instruction until retirement-qualified WB
+updates; the current FPU endpoint remains disabled and unimplemented.
+
+See the [EX interface guide](../verif/sim/ex/README.md) for ports, functional-unit
+codes, parent-register handshake details, operand retention, and pass-through
+semantics. The [parent fixture](../verif/sim/ex_pipeline/README.md) verifies both
+boundary registers outside EX, including throughput, metadata, stalls, older
+MEM draining, and EX cancellation. Full-core pipeline control and forwarding
+remain separate implementation work.
 
 ## 4. Configurable operand forwarding
 
@@ -2181,7 +2232,7 @@ be resolved when their implementation milestone is undertaken:
 | Area | Remaining work |
 | --- | --- |
 | Execution/control | Internal module/event interfaces, detailed readiness wiring and controller sequencing, retained load-result placement, and timing evaluation of enabled forwarding paths. |
-| Integer arithmetic | Standalone ALU, MUL/DIV, shared arithmetic, and a shared-parent fixture are implemented; full EX and pipeline integration remain pending. Preserve fixed execution latencies and physical sharing during integration. |
+| Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
 | ISA/CSR/PMP | Remaining WARL/field mappings and same-instruction exception selection under the pinned ISA, complete CSR decode implementation, fixed sixteen-entry PMP details, and optional-feature combination validation. |
@@ -2326,3 +2377,4 @@ later decisions determine the active contract.
 | D-251 | Fix enabled PMP capacity at sixteen configurable entries, numbered zero through fifteen, and remove the external ISA_PMP_REGIONS parameter; retain optional ISA_PMP with default zero and fixed four-byte granularity. | Provide one standard PMP capacity without region-count configuration or alternative-count implementation work. | Agreed; supersedes D-145 and D-146 |
 | D-262 | Default `MUA_MUL` to `iterative` alongside `MUA_DIV = iterative`, retaining `MUA_MULDIV_ITERUNROLL = 8`; preserve parallel multiplication as an explicit configuration option. | Share the iterative arithmetic chain between MUL and DIV in the default M-enabled implementation. | Agreed; supersedes the multiplier defaults in D-158 and D-164 |
 | D-263 | Place the first shared `uqu_arith` instance and its input mux in parent EX, with ALU and MUL/DIV as siblings exposing combinational arithmetic ports; retain MUL/DIV's additional `F - 1` slices and existing execution timings. | Make resource ownership explicit in the stage that already owns the executing instruction and keep the unit boundaries independent. | Agreed; supersedes the earlier ALU-owned arrangement; interfaces described in Sections 3.5 and 3.6 |
+| D-264 | Keep DE/EX and EX/MEM registers in the EX stage parent; EX owns only local execution control/tracking, its functional units, and the first shared arithmetic instance. | Separate pipeline storage and instruction identity from stage execution while preserving one-time unit issue, backpressure, and age-qualified cancellation. | Agreed; EX component and parent-register fixture described in Section 3.7 |
