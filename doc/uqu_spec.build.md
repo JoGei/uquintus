@@ -4,7 +4,7 @@
 
 Build/configuration contracts and project organization. A shared component
 simulation/lint flow supports the register file, ALU, arithmetic datapath, native
-multiply/divide, EX, MEM/LSU, PMP checker, CSR register file, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
+multiply/divide, EX, MEM/LSU, WB, PMP checker, CSR register file, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -304,6 +304,8 @@ verif/
       ex_model.py         # EX token and parent-pipeline scoreboard model
       lsu_model.py        # Byte memory/native access expectations for LSU/MEM
       mem_model.py        # MEM stage/parent fixture token and result model
+      csregfile_model.py  # Architectural CSR words/events shared by CSR and WB
+      wb_model.py         # WB commitment and CSR/GPR reference state
     gpregfile/      # General-purpose register-file tests
     csregfile/      # Decoded CSR state, access, counters, and event tests
     arith/          # Shared extended arithmetic tests
@@ -315,6 +317,8 @@ verif/
     lsu/            # Native OBI LSU tests
     mem/            # MEM routing, transaction, fault, and flush tests
     mem_pipeline/   # MEM with parent-owned EX/MEM, MEM/WB, and PMP fixture
+    wb/             # WB commitment, fault, CSR, and retirement tests
+    wb_pipeline/    # WB with parent-owned MEM/WB and sibling GPR storage
     pmp/            # Concurrent IF/MEM PMP checks and bytewise reference
     core/           # Full-core simulation tests
   formal/           # Formal harnesses, properties, and riscv-formal integration

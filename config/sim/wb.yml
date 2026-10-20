@@ -1,0 +1,18 @@
+top_module: uqu_stage_wb
+bender_target: wb
+test_module: test_uqu_stage_wb
+parameters:
+  - ISA_E
+  - ISA_M
+  - ISA_C
+  - ISA_ZFINX
+  - ISA_F
+  - ISA_A
+  - ISA_UMODE
+  - ISA_PMP
+  - XIF
+  - DEBUG
+tests:
+  - directed
+  - control
+  - randomized

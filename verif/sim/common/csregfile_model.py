@@ -1,4 +1,4 @@
-"""Architectural CSR words and event transitions, independent of RTL packing."""
+"""Architectural CSR words/events shared by CSR and WB component scoreboards."""
 
 MASK = (1 << 32) - 1
 MASK64 = (1 << 64) - 1

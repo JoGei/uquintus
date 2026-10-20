@@ -30,9 +30,15 @@ sources:
   - target: mem_pipeline_test
     files:
       - verif/sim/mem_pipeline/uqu_mem_pipeline_tb.v
-  - target: any(csregfile, rtl)
+  - target: any(csregfile, wb, wb_pipeline_test, rtl)
     files:
       - src/uquintus/uqu_csregfile.v
+  - target: any(wb, wb_pipeline_test, rtl)
+    files:
+      - src/uquintus/uqu_stage_wb.v
+  - target: wb_pipeline_test
+    files:
+      - verif/sim/wb_pipeline/uqu_wb_pipeline_tb.v
   - target: any(pmp, mem_pipeline_test, rtl)
     files:
       - src/uquintus/uqu_pmp.v
@@ -45,6 +51,6 @@ sources:
   - target: muldiv_test
     files:
       - verif/sim/muldiv/uqu_muldiv_tb.v
-  - target: any(gpregfile, rtl)
+  - target: any(gpregfile, wb_pipeline_test, rtl)
     files:
       - src/uquintus/uqu_gpregfile.v

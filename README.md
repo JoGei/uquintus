@@ -11,6 +11,7 @@ Implemented standalone components:
 | Architectural CSR register file | [uqu_csregfile.v](src/uquintus/uqu_csregfile.v) | [CSR interface and tests](verif/sim/csregfile/README.md) |
 | Load/store unit | [uqu_lsu.v](src/uquintus/uqu_lsu.v) | [LSU interface and tests](verif/sim/lsu/README.md) |
 | Memory stage | [uqu_stage_mem.v](src/uquintus/uqu_stage_mem.v) | [MEM interface and tests](verif/sim/mem/README.md) |
+| Write-back stage | [uqu_stage_wb.v](src/uquintus/uqu_stage_wb.v) | [WB interface and tests](verif/sim/wb/README.md) |
 | Core-owned two-port PMP checker | [uqu_pmp.v](src/uquintus/uqu_pmp.v) | [PMP interface and tests](verif/sim/pmp/README.md) |
 | Execute stage | [uqu_stage_ex.v](src/uquintus/uqu_stage_ex.v) | [EX interface and tests](verif/sim/ex/README.md) |
 | Base integer ALU | [uqu_alu.v](src/uquintus/uqu_alu.v) | [ALU interface and tests](verif/sim/alu/README.md) |
@@ -35,6 +36,8 @@ make test COMPONENT=alu CONFIG=rv32i
 make test COMPONENT=lsu CONFIG=rv32i
 make test COMPONENT=mem CONFIG=rv32i
 make test COMPONENT=mem_pipeline CONFIG=rv32i
+make test COMPONENT=wb CONFIG=rv32i
+make test COMPONENT=wb_pipeline CONFIG=rv32i
 make test COMPONENT=pmp CONFIG=rv32i
 make test COMPONENT=csregfile CONFIG=rv32i
 make test COMPONENT=ex CONFIG=rv32im
@@ -57,7 +60,8 @@ settings live in `config/sim/<component>.yml`; examples are
 [exec_arith.yml](config/sim/exec_arith.yml), [ex.yml](config/sim/ex.yml),
 [ex_pipeline.yml](config/sim/ex_pipeline.yml), [lsu.yml](config/sim/lsu.yml),
 [pmp.yml](config/sim/pmp.yml), [csregfile.yml](config/sim/csregfile.yml),
-[mem.yml](config/sim/mem.yml), and [mem_pipeline.yml](config/sim/mem_pipeline.yml).
+[mem.yml](config/sim/mem.yml), [mem_pipeline.yml](config/sim/mem_pipeline.yml),
+[wb.yml](config/sim/wb.yml), and [wb_pipeline.yml](config/sim/wb_pipeline.yml).
 The CSR component supports optional U/C/PMP/Zfinx CSR state; debug CSR support
 remains deferred and `DEBUG=1` fails elaboration. To test enabled PMP matching, use a complete
 hardware configuration with `ISA_PMP: 1`; `rv32i` tests its disabled bypass.

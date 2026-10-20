@@ -6,6 +6,8 @@ Verilog-2005 and completes CSR evaluation combinationally with one-edge updates.
 The parent owns WB serialization, current privilege, retirement qualification,
 trap selection, redirects, and age-qualified cancellation. No complete WB or
 core controller is implemented by this component.
+The [WB stage](../wb/README.md) now instantiates this unit and qualifies its
+commit/retirement events; the full-core parent still owns global arbitration.
 
 Parameters are `ISA_E`, `ISA_M`, `ISA_C`, `ISA_ZFINX`, `ISA_F`, `ISA_A`,
 `ISA_UMODE`, `ISA_PMP`, and `DEBUG`. I/E, M, C, and U determine hardwired `misa`.

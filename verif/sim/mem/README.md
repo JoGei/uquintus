@@ -141,3 +141,5 @@ tracking bit, one LSU, no parent boundary payloads or PMP instance inside MEM,
 no latches/memories, no combinational OBI-response bypass, and no combinational
 flush-to-OBI-request withdrawal. Full-core hazard/forwarding, WB/controller/fence
 integration, custom memory/atomics/integrity, and non-OBI adapters remain pending.
+The [WB stage](../wb/README.md) is available separately; MEM-to-WB full-core
+integration remains pending.

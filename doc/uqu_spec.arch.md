@@ -919,6 +919,68 @@ top-level tracking state bit plus one LSU, no boundary payload/PMP storage in
 MEM, and no combinational OBI-response bypass or flush withdrawal of request.
 Full-core WB/controller/fence and hazard/forwarding integration remain pending.
 
+### 3.10. WB stage, commitment, and owned CSR state
+
+`src/uquintus/uqu_stage_wb.v` owns one `uqu_csregfile`, native/CSR result
+selection, GPR write generation, and acceptance-qualified architectural events.
+It shall own no MEM/WB payload/valid registers and add no local state beyond
+the CSR unit. The core parent shall own MEM/WB, the GPR file, current privilege,
+global arbitration/serialization, redirects, and the one two-port PMP block.
+The [WB component guide](../verif/sim/wb/README.md) defines the initial bindings.
+
+`kind_i` selects ordinary result/token (`0`), native CSR (`1`), MRET (`2`), or
+deferred XIF control (`3`, illegal in the baseline). A live token may wait in
+the parent while WB reports its legality. `valid_o && ready_i` shall authorize
+either successful retirement or synchronous fault entry. The parent shall
+consume that instruction once; a held token shall cause no repeated effects.
+An empty slot may fill while the controller withholds commitment. Normal
+instructions may retire on consecutive cycles without a local result buffer.
+Fence and other serialization requirements shall constrain controller readiness,
+not add instruction decoding or independent event arbitration inside WB.
+
+On successful acceptance, native GPR writes, required CSR updates, committed
+FP flags, and retirement counting shall belong to that same instruction/edge.
+x0 shall never write; actual E-mode destinations x16..x31 shall fault without
+aliasing. Unused destination fields shall not fault. A successful CSR returns
+its architectural pre-update read value. Ordinary primary destination data may
+be advertised through `result_valid_o` while held, but CSR data shall become
+forwardable only on successful commitment, since counter read values can change
+while waiting. The existing hazard/forwarding block still owns matching and
+configured path selection.
+
+Existing exceptions take priority over malformed normalized controls and CSR
+access failures. The live `exception_valid_o` report and its PC/cause/tval shall
+not depend on controller readiness or accepted external trap input. A reported
+fault shall update trap state only when acknowledged through
+`exception_fire_o`; it shall not retire or update an ordinary GPR/CSR/FP result.
+The controller shall redirect from this accepted event without echoing it
+through the external trap input. Legal MRET acceptance shall restore CSR state
+and retire once; the parent shall sample pre-edge MPP/mepc for mode/PC changes.
+
+External `trap_i` denotes a previously arbitrated precise architectural event,
+normally an interrupt at a drained boundary, not a raw pending interrupt. It
+suppresses WB acceptance and updates CSR trap state even while the owning WB
+token is canceled. The controller shall prioritize older WB faults before
+asserting such an external event and provide a valid current privilege even
+with no live MEM/WB token. Reset dominates all events. WB's own accepted
+fault/MRET shall consume the token and clear/block younger parent slots; it
+shall not be fed combinationally back into its own `flush_i`, which would cancel
+the acceptance or form a control loop.
+
+The initial implementation requires `XIF = DEBUG = ISA_F = ISA_A = 0`; enabling
+these unsupported configurations shall fail elaboration. Deferred XIF paired
+write-back shall not be emulated through partial updates: the baseline exposes
+only active primary writes and hardwires secondary write outputs to zero.
+Optional U/C/Zfinx-CSR/PMP state retains the CSR module's existing configuration
+and minimal storage budget. An enabled Zfinx CSR path does not implement an FPU.
+
+The [WB parent fixture](../verif/sim/wb_pipeline/README.md) verifies a real
+MEM/WB slot and sibling GPR file with a minimal privilege-transition stub.
+Development regressions cover all sixteen U/C/Zfinx-CSR/PMP combinations and
+FF/latch GPR backends; synthesis confirms no additional WB storage or boundary
+registers. Full-core arbitration/draining, XIF/debug, RVFI, and software-level
+architectural verification remain separate work.
+
 ## 4. Configurable operand forwarding
 
 **Status:** Agreed
@@ -2341,9 +2403,10 @@ faults discarding `MRET`, and illegal U-mode attempts with no return side effect
 CSR access checks described above. Its [component guide](../verif/sim/csregfile/README.md)
 defines the complete implemented CSR map, ports, state budget, event priorities,
 and regression scope. It does not own WB pipeline registers, current execution
-privilege, trap selection, or redirect arithmetic. The parent shall serialize
-instructions, qualify retirement, and supply one-shot CSR commitment and
-accepted trap/MRET/FP events.
+privilege, trap selection, or redirect arithmetic. The WB stage in Section 3.10
+now supplies qualified CSR commitment, retirement and trap/MRET/FP events.
+The core parent still serializes instructions, retains current privilege,
+arbitrates global events and owns redirects.
 
 A live CSR query returns its required pre-update read value or an
 illegal-instruction report combinationally. Explicit writes require a legal
@@ -2447,12 +2510,12 @@ be resolved when their implementation milestone is undertaken:
 
 | Area | Remaining work |
 | --- | --- |
-| Execution/control | EX and MEM stages and parent-register fixtures implemented; connect full-core pipeline/controller sequencing, forwarding/hazards, and evaluate timing of enabled forwarding paths. |
+| Execution/control | EX, MEM and native WB stages and parent-register/GPR fixtures implemented; connect full-core pipeline/controller sequencing, forwarding/hazards, and evaluate timing of enabled forwarding paths. |
 | Memory access | MEM/LSU, registered load readiness, and parent-owned PMP routing verified in a fixture; connect the future IF stage, CSR-owned PMP state, precise-effect permission control, and fences in the full core. |
 | Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
-| ISA/CSR/PMP | Decoded CSR state/access checks, optional PMP/FP state, counters and trap/MRET event updates are implemented as a component; integrate with WB/controller and the two-port PMP checker, preserve instruction-age/retirement rules, and implement the deferred debug CSR profile. |
+| ISA/CSR/PMP | WB owns decoded CSR state/access checks, optional PMP/FP state, counters and accepted trap/MRET updates; integrate with the full-core controller and two-port PMP checker, preserve instruction-age/retirement rules, and implement deferred XIF/debug profiles. |
 | Frontend | Decompressor implementation, detailed prefetch/fault association and redirect tracking, and future predictor implementations; preserve agreed initial IF placement and request persistence. |
 | Milestones | Implementation order and acceptance criteria for optional ISA features, PMP, XIF, latch storage, and non-default configurations after the baseline milestone. |
 
@@ -2600,3 +2663,4 @@ later decisions determine the active contract.
 | D-267 | Implement CSRs as explicitly decoded state fields, allocating storage only for architecturally mutable fields in the selected configuration; assemble read values from state/constants/inputs/aliases and inspect representative synthesized storage. | Avoid a general writable CSR array and storage for hardwired, reserved, aliased, or disabled-feature payloads while preserving all architectural access and update semantics. | Implemented; standalone bindings and measured state budget in Section 18.2 |
 | D-268 | Implement the initial decoded CSR register file with one-shot WB commitment, explicit accepted architectural events, compact M/U/mtvec/mcause fields, optional Zfinx/PMP state, reserved PMP W-only writes legalized by clearing W, and explicit rejection of deferred debug/full-F/atomic configurations. | Provide the baseline CSR component with measured configuration-dependent storage while preserving architectural access semantics and leaving global pipeline arbitration in the parent. | Implemented under D-267; exact bindings and local priorities in Section 18.2 |
 | D-269 | Keep EX/MEM and MEM/WB registers in the MEM stage's parent; MEM owns one LSU and local one-shot issue tracking, exposes the parent PMP query, and blocks replacement completion/issue while killed bus work drains without stalling older WB. | Preserve precise transaction/identity association and shared PMP ownership with minimal stage-local control. | Implemented; stage and parent-register fixture in Section 3.9 |
+| D-270 | Make WB own the CSR unit and native result/commit logic while MEM/WB, GPR storage, current privilege, arbitration and redirects remain in the core parent; qualify architectural token effects with one acceptance and defer XIF/debug explicitly. | Keep native WB precise and stateless around existing CSR storage, with independent fault reporting and no repeated held-token effects. | Implemented; initial stage/parent fixture and event contract in Section 3.10 |

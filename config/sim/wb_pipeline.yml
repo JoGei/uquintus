@@ -1,0 +1,20 @@
+top_module: uqu_wb_pipeline_tb
+bender_target: wb_pipeline_test
+test_module: test_uqu_wb_pipeline
+parameters:
+  - ISA_E
+  - ISA_M
+  - ISA_C
+  - ISA_ZFINX
+  - ISA_F
+  - ISA_A
+  - ISA_UMODE
+  - ISA_PMP
+  - XIF
+  - DEBUG
+  - XIF_NUM_RS
+  - XIF_DUALWRITE
+  - MUA_REGFILE_IMPL
+tests:
+  - pipeline
+  - traps

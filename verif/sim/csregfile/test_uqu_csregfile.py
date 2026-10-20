@@ -3,11 +3,14 @@
 import json
 import os
 import random
+from pathlib import Path
+import sys
 
 import cocotb
 from cocotb.triggers import Timer
 from pyuvm import uvm_root, uvm_test
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from csregfile_model import CSRModel, INPUTS, MASK
 
 
