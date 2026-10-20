@@ -8,6 +8,7 @@ Implemented standalone components:
 | Component | RTL | Verification guide |
 | --- | --- | --- |
 | General-purpose register file | [uqu_gpregfile.v](src/uquintus/uqu_gpregfile.v) | [Register-file tests and interface](verif/sim/gpregfile/README.md) |
+| Load/store unit | [uqu_lsu.v](src/uquintus/uqu_lsu.v) | [LSU interface and tests](verif/sim/lsu/README.md) |
 | Execute stage | [uqu_ex.v](src/uquintus/uqu_ex.v) | [EX interface and tests](verif/sim/ex/README.md) |
 | Base integer ALU | [uqu_alu.v](src/uquintus/uqu_alu.v) | [ALU interface and tests](verif/sim/alu/README.md) |
 | Native multiply/divide | [uqu_muldiv.v](src/uquintus/uqu_muldiv.v) | [MUL/DIV interface and tests](verif/sim/muldiv/README.md) |
@@ -28,6 +29,7 @@ make lint COMPONENT=gpregfile CONFIG=rv32i
 make test COMPONENT=arith CONFIG=rv32i
 make lint COMPONENT=arith CONFIG=rv32i
 make test COMPONENT=alu CONFIG=rv32i
+make test COMPONENT=lsu CONFIG=rv32i
 make test COMPONENT=ex CONFIG=rv32im
 make test COMPONENT=ex_pipeline CONFIG=rv32im
 make test COMPONENT=exec_arith CONFIG=rv32im
@@ -46,7 +48,7 @@ settings live in `config/sim/<component>.yml`; examples are
 [gpregfile.yml](config/sim/gpregfile.yml), [arith.yml](config/sim/arith.yml),
 [alu.yml](config/sim/alu.yml), [muldiv.yml](config/sim/muldiv.yml),
 [exec_arith.yml](config/sim/exec_arith.yml), [ex.yml](config/sim/ex.yml),
-and [ex_pipeline.yml](config/sim/ex_pipeline.yml).
+[ex_pipeline.yml](config/sim/ex_pipeline.yml), and [lsu.yml](config/sim/lsu.yml).
 Use `make test-runner` to
 check the shared tooling without running an HDL simulator.
 

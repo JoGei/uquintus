@@ -1,0 +1,8 @@
+top_module: uqu_lsu
+bender_target: lsu
+test_module: test_uqu_lsu
+parameters: []
+tests:
+  - directed
+  - randomized
+  - control

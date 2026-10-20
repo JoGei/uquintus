@@ -826,6 +826,45 @@ boundary registers outside EX, including throughput, metadata, stalls, older
 MEM draining, and EX cancellation. Full-core pipeline control and forwarding
 remain separate implementation work.
 
+### 3.8. MEM-owned load/store unit
+
+`src/uquintus/uqu_lsu.v` implements the blocking native LSU for the MEM stage.
+The LSU owns one access's private request/response tracking and registered
+completion; pipeline EX/MEM and MEM/WB storage remains outside the unit.
+The MEM stage itself remains implementation work. It shall issue the access
+once, associate its completion with the parent-held instruction, and transfer
+result/exception metadata onward without repeating the transaction.
+
+The unit accepts a native valid/ready request carrying load/store selection,
+instruction funct3, effective address, store data, original instruction, and an
+internal access-denial indication. A separate `request_permit_i` gates external
+request presentation until older instructions are safe under Section 9.2.
+Access-denial checks shall be complete at native acceptance. Invalid normalized
+control, misalignment, or access denial shall complete with exception metadata
+without issuing OBI. Misalignment shall take priority over access denial.
+
+The native OBI data port shall preserve the declarations and transaction rules
+in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories).
+The LSU registers its request before presentation, aligns only the bus address,
+places byte enables/store data, and retains the original effective address.
+Granted loads and stores shall wait for completion. Bus data/error shall be
+captured regardless of pipeline stalls; selected/extended load results and
+exceptions shall be exposed only after that capture. This provides registered
+load-result storage under Section 4 without an external-response bypass.
+
+An owning flush before OBI request presentation may cancel the private access.
+Once request is presented, flush shall not withdraw it, including before grant.
+The LSU shall finish the grant/response obligation and discard a killed access's
+completion without raising a stale exception. Held native completions may be
+discarded immediately. `busy_o` shall account for transaction and completion
+storage, including killed bus work. Reset may clear this tracking only under
+the coordinated system-reset contract. There shall be no bus timeout or retry.
+
+The [LSU component guide](../verif/sim/lsu/README.md) defines ports, fault priority,
+request permission, byte lanes, completion timing, and verification. PMP checks,
+MEM-stage pipeline control, fences, custom memory operations, atomics, integrity,
+and non-OBI bus adapters remain separate implementation work.
+
 ## 4. Configurable operand forwarding
 
 **Status:** Agreed
@@ -2231,7 +2270,8 @@ be resolved when their implementation milestone is undertaken:
 
 | Area | Remaining work |
 | --- | --- |
-| Execution/control | Internal module/event interfaces, detailed readiness wiring and controller sequencing, retained load-result placement, and timing evaluation of enabled forwarding paths. |
+| Execution/control | Internal module/event interfaces, MEM-stage integration, readiness/controller sequencing, LSU-result forwarding qualification, and timing evaluation of enabled forwarding paths. |
+| Memory access | Native blocking LSU and registered completion storage implemented; connect the future MEM stage, internal protection checker, precise-effect permission control, and fences. |
 | Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |

@@ -21,6 +21,9 @@ sources:
   - target: ex_pipeline_test
     files:
       - verif/sim/ex_pipeline/uqu_ex_pipeline_tb.v
+  - target: any(lsu, rtl)
+    files:
+      - src/uquintus/uqu_lsu.v
   - target: alu_test
     files:
       - verif/sim/alu/uqu_alu_tb.v
