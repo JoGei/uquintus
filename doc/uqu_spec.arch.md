@@ -861,7 +861,7 @@ storage, including killed bus work. Reset may clear this tracking only under
 the coordinated system-reset contract. There shall be no bus timeout or retry.
 
 The [LSU component guide](../verif/sim/lsu/README.md) defines ports, fault priority,
-request permission, byte lanes, completion timing, and verification. PMP checks,
+request permission, byte lanes, completion timing, and verification. PMP integration,
 MEM-stage pipeline control, fences, custom memory operations, atomics, integrity,
 and non-OBI bus adapters remain separate implementation work.
 
@@ -1316,9 +1316,41 @@ memory interfaces shall not require privilege attributes, PMP rules, or PMP
 status to perform these checks on the core's behalf.
 
 The CSR module shall own PMP configuration/address storage and CSR update
-semantics under [architecture, Section 18](uqu_spec.arch.md#18-native-csr-instruction-execution). A separate internal PMP permission-checking block
-shall consume that state through explicit connections and enforce permissions
-before memory requests. Exact internal port layout remains TBD.
+semantics under [architecture, Section 18](uqu_spec.arch.md#18-native-csr-instruction-execution).
+The pipeline-stage parent, at core scope, shall own one stateless `uqu_pmp`
+block. It shall connect CSR-owned PMP state to this block once and route IF and
+MEM request addresses/control into its two independent check ports. Each stage
+shall consume its corresponding permission result before presenting a memory
+request. Neither stage nor the PMP block shall duplicate architectural PMP
+storage.
+
+The PMP block shall decode the sixteen regions' bounds/masks once and share
+them between independent IF and MEM comparison, priority, and permission logic.
+Both checks shall be combinational and concurrent, without arbitration,
+request handshakes, or coupling between the requesters. IF/MEM shall not each
+instantiate a complete PMP block.
+
+The standalone checker is implemented in `src/uquintus/uqu_pmp.v`. Its packed
+inputs carry sixteen eight-bit configuration entries and sixteen 32-bit address
+entries, with entry zero in the least significant bits. The IF port consumes
+`if_addr_i`, `if_size_i` (log2 bytes), and `if_priv_m_i`, and checks execution
+permission implicitly. The MEM port consumes `mem_addr_i`, `mem_size_i`,
+`mem_access_i` (R/W/X requirement mask), and `mem_priv_m_i`. Byte addresses and
+byte/halfword/word sizes describe the original accesses before bus alignment.
+The block produces `if_allow_o` and `mem_allow_o`; each stage qualifies its
+result with a live access and generates the appropriate access-fault metadata.
+In MEM, `!mem_allow_o` shall feed the LSU's
+`req_access_fault_i` before native request acceptance. It shall not replace the
+independent precise-effect `request_permit_i` input.
+
+Effective-privilege selection remains outside the checker: IF uses current
+execution privilege, while MEM accounts for `MPRV`/`MPP`. CSR write legalization,
+lock enforcement on CSR writes (including the preceding TOR bound), and reset
+remain CSR-unit responsibilities. The checker uses `L` only to determine whether
+matching permissions also constrain M-mode accesses. Full IF/MEM/CSR integration
+remains implementation work; standalone checker availability does not establish
+complete architectural PMP support. The [PMP component guide](../verif/sim/pmp/README.md)
+defines the ports, permission rules, and component regressions.
 
 The elaboration-time parameter `ISA_PMP` shall enable this feature and default
 to `0`. With `ISA_PMP = 0`, PMP permission-checking and writable PMP-entry
@@ -1403,7 +1435,16 @@ Custom shared-LSU access shall be deferred under [interfaces, Section 5.1](uqu_s
 integration of such accesses shall preserve the same internal permission
 checks. Protection of an independently connected coprocessor memory path
 shall be a system-integration responsibility outside this initial profile.
-The PMP implementation milestone and remaining CSR field details remain TBD.
+The checker follows the standard lowest-numbered any-byte match rule. That
+entry must cover the entire access; partial coverage fails even in M-mode with
+`L = 0`, without falling back to another entry. A complete match allows M-mode
+when unlocked; otherwise all requested permission bits must be set. An unmatched
+access succeeds in M-mode and fails in U-mode when PMP is enabled, including
+when all entries are OFF. `ISA_PMP = 0` instead permits every access through
+the checker and removes its checking logic at elaboration.
+
+The remaining PMP CSR field details and full-core implementation milestone
+remain TBD.
 
 ## 9. Precise synchronous exceptions
 
@@ -2041,8 +2082,8 @@ These events shall include the applicable trap/interrupt entry, `MRET`, cycle
 and retirement counting, and floating-point exception/status updates. Event
 acceptance and update arbitration shall preserve the existing instruction-age,
 commitment, reset, and precise-exception rules. The central controller shall
-continue to arbitrate global events, and a separate PMP checker shall consume
-the CSR module's PMP state. The module may use internal submodules while
+continue to arbitrate global events, and the core-owned two-port PMP block shall
+consume the CSR module's PMP state. The module may use internal submodules while
 retaining this ownership boundary; exact ports and event formats remain TBD.
 
 The CSR module shall be able to report an exception for an invalid access.
@@ -2271,7 +2312,7 @@ be resolved when their implementation milestone is undertaken:
 | Area | Remaining work |
 | --- | --- |
 | Execution/control | Internal module/event interfaces, MEM-stage integration, readiness/controller sequencing, LSU-result forwarding qualification, and timing evaluation of enabled forwarding paths. |
-| Memory access | Native blocking LSU and registered completion storage implemented; connect the future MEM stage, internal protection checker, precise-effect permission control, and fences. |
+| Memory access | Native blocking LSU, registered completion storage, and reusable PMP checker implemented; connect the future IF/MEM stages, CSR-owned PMP state, precise-effect permission control, and fences. |
 | Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
@@ -2418,3 +2459,5 @@ later decisions determine the active contract.
 | D-262 | Default `MUA_MUL` to `iterative` alongside `MUA_DIV = iterative`, retaining `MUA_MULDIV_ITERUNROLL = 8`; preserve parallel multiplication as an explicit configuration option. | Share the iterative arithmetic chain between MUL and DIV in the default M-enabled implementation. | Agreed; supersedes the multiplier defaults in D-158 and D-164 |
 | D-263 | Place the first shared `uqu_arith` instance and its input mux in parent EX, with ALU and MUL/DIV as siblings exposing combinational arithmetic ports; retain MUL/DIV's additional `F - 1` slices and existing execution timings. | Make resource ownership explicit in the stage that already owns the executing instruction and keep the unit boundaries independent. | Agreed; supersedes the earlier ALU-owned arrangement; interfaces described in Sections 3.5 and 3.6 |
 | D-264 | Keep DE/EX and EX/MEM registers in the EX stage parent; EX owns only local execution control/tracking, its functional units, and the first shared arithmetic instance. | Separate pipeline storage and instruction identity from stage execution while preserving one-time unit issue, backpressure, and age-qualified cancellation. | Agreed; EX component and parent-register fixture described in Section 3.7 |
+| D-265 | Instantiate the same stateless PMP checker separately in IF and MEM, consuming PMP configuration/address state owned solely by the CSR unit through core-parent connections. | Check instruction and data accesses independently while sharing implementation and keeping architectural protection state in one place. | Superseded by D-266: core-owned two-port block with shared region decoding |
+| D-266 | Place one stateless two-port PMP block in the pipeline-stage parent at core scope; share region decoding from CSR-owned state and perform concurrent independent IF/MEM address, priority, and permission checks. | Share configuration decoding explicitly while preserving simultaneous instruction/data checks and single ownership of architectural protection state. | Agreed; standalone dual-port block implemented, full-core wiring pending |

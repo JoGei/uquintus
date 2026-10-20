@@ -182,6 +182,9 @@ by the core.
 PMP permission checks and effective-privilege handling shall remain inside the
 core as defined in [architecture, Section 8.1](uqu_spec.arch.md#81-internal-pmp-and-memory-fault-boundary). The native memory ports shall not expose
 privilege attributes or PMP configuration/status for external enforcement.
+The core-owned two-port PMP block shall consume IF/MEM access addresses and
+control and return each stage's permission result; CSR state connects only to
+that block, with shared region decoding internal to it.
 The core shall consume external bus-error responses and combine them with
 internally detected access failures under its precise-exception contract.
 

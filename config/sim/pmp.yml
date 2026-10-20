@@ -1,0 +1,10 @@
+top_module: uqu_pmp
+bender_target: pmp
+test_module: test_uqu_pmp
+parameters:
+  - ISA_PMP
+tests:
+  - directed
+  - priority
+  - randomized
+  - concurrent

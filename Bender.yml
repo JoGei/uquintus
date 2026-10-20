@@ -24,6 +24,9 @@ sources:
   - target: any(lsu, rtl)
     files:
       - src/uquintus/uqu_lsu.v
+  - target: any(pmp, rtl)
+    files:
+      - src/uquintus/uqu_pmp.v
   - target: alu_test
     files:
       - verif/sim/alu/uqu_alu_tb.v
