@@ -1,4 +1,4 @@
-# Complete architectural configuration; only the register-file component exists.
+# Complete architectural configuration for the default RV32I profile.
 ISA_E: 0
 ISA_M: 0
 ISA_C: 0
@@ -17,7 +17,7 @@ MUA_BRANCH_PREDICTOR: none
 MUA_REGFILE_IMPL: ff
 MUA_IF_BUFFER_WORDS: 2
 MUA_HARDENED: 0
-MUA_MUL: parallel
+MUA_MUL: iterative
 MUA_DIV: iterative
 MUA_MULDIV_ITERUNROLL: 8
 XIF: 0

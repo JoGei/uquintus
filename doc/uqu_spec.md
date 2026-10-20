@@ -16,8 +16,9 @@ and layouts retain their proposal status. **TBD** means an unresolved follow-up;
 it does not grant permission to change an agreed architectural contract.
 
 The repository contains specifications and standalone
-[register-file](../verif/sim/gpregfile/README.md) and
-[shared arithmetic](../verif/sim/arith/README.md) components with a common
+[register-file](../verif/sim/gpregfile/README.md),
+[shared arithmetic](../verif/sim/arith/README.md), and
+[native multiply/divide](../verif/sim/muldiv/README.md) components with a common
 simulation/lint flow. Their guides describe implementation and test scope.
 The complete processor, full-core verification, and ASIC build flow
 remain to be implemented.
@@ -184,7 +185,7 @@ the ISA parameter `ISA_M` shall remain `0` in this milestone.
 | Instruction-fetch buffer | `MUA_IF_BUFFER_WORDS = 2`; continue filling during downstream stalls subject to capacity and control-flow restrictions; one outstanding fetch request independently of depth. |
 | Register file | Default flip-flop backend with combinational DE reads. |
 | Hardening | `MUA_HARDENED = 0`; OBI parity/checksum support is a future implementation feature. |
-| Multiply/divide parameters | `MUA_MUL = parallel`, `MUA_DIV = iterative`, `MUA_MULDIV_ITERUNROLL = 8`; all explicitly set but inactive with `ISA_M = 0`. |
+| Multiply/divide parameters | `MUA_MUL = iterative`, `MUA_DIV = iterative`, `MUA_MULDIV_ITERUNROLL = 8`; all explicitly set but inactive with `ISA_M = 0`. |
 | Memory interfaces | Separate external 32-bit OBI v1.6.0 instruction/data interfaces, variable latency, one outstanding request per port, reserved response capacity with no response backpressure, blocking MEM, little-endian accesses. |
 | External fence synchronization | `fence_req_o`/`fence_ack_i` for data/I/O ordering; retain inactive `fencei_req_o`/`fencei_ack_i` ports with `ISA_ZIFENCEI = 0`. Acknowledge immediately when integration already guarantees the required ordering ([architecture, Section 16](uqu_spec.arch.md#16-optional-instruction-fetch-fence) and [architecture, Section 19](uqu_spec.arch.md#19-conservative-data-memory-fence)). |
 | Clock and reset | Single clock, active-low synchronous minimal reset, reset-entry address input. |

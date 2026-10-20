@@ -1,0 +1,12 @@
+top_module: uqu_muldiv_tb
+bender_target: muldiv_test
+test_module: test_uqu_muldiv
+parameters:
+  - ISA_M
+  - MUA_MUL
+  - MUA_DIV
+  - MUA_MULDIV_ITERUNROLL
+tests:
+  - directed
+  - randomized
+  - control

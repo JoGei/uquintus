@@ -3,9 +3,15 @@ package:
   name: uquintus
 
 sources:
-  - target: any(arith, rtl)
+  - target: any(arith, muldiv, muldiv_test, rtl)
     files:
       - src/uquintus/uqu_arith.v
+  - target: any(muldiv, muldiv_test, rtl)
+    files:
+      - src/uquintus/uqu_muldiv.v
+  - target: muldiv_test
+    files:
+      - verif/sim/muldiv/uqu_muldiv_tb.v
   - target: any(gpregfile, rtl)
     files:
       - src/uquintus/uqu_gpregfile.v

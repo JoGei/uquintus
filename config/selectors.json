@@ -1,4 +1,12 @@
 {
+  "MUA_MUL": {
+    "parallel": {"value": 0, "macro": "UQU_MUL_PARALLEL"},
+    "parallel+stages+2": {"value": 1, "macro": "UQU_MUL_PARALLEL_2"},
+    "iterative": {"value": 2, "macro": "UQU_MUL_ITERATIVE"}
+  },
+  "MUA_DIV": {
+    "iterative": {"value": 0, "macro": "UQU_DIV_ITERATIVE"}
+  },
   "MUA_REGFILE_IMPL": {
     "ff": {"value": 0, "macro": "UQU_RF_FF"},
     "latch": {"value": 1, "macro": "UQU_RF_LATCH"}

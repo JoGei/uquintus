@@ -3,8 +3,8 @@
 **Status:** First specification draft finalized, 2026-10-20
 
 Build/configuration contracts and project organization. A shared component
-simulation/lint flow supports the register file and arithmetic datapath;
-full-core and ASIC flows remain to be implemented. See the
+simulation/lint flow supports the register file, arithmetic datapath, and native
+multiply/divide; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -69,8 +69,8 @@ Enumerated hardware selectors shall use readable YAML labels. In particular,
 defined choices, and `MUA_REGFILE_IMPL` shall use `ff` or `latch`. Their default
 YAML selections shall be `none` and `ff`, respectively. `MUA_MUL` shall use
 `parallel`, `parallel+stages+2`, or `iterative` as defined in [architecture, Section 3](uqu_spec.arch.md#3-classical-five-stage-pipeline).
-`MUA_DIV` shall use `iterative`. Their default YAML selections shall be
-`parallel` and `iterative`, respectively. The separate integer setting
+`MUA_DIV` shall use `iterative`. Both default YAML selections shall be
+`iterative`, sharing the iterative arithmetic chain. The separate integer setting
 `MUA_MULDIV_ITERUNROLL` shall use `1`, `2`, `4`, `8`, `16`, or `32`, defaulting
 to `8`, and shall govern every selected iterative operation. Selector labels
 containing the former `+unroll+<factor>` suffix shall fail configuration
@@ -81,17 +81,21 @@ Configuration helpers
 shall validate the labels and translate them into integer RTL parameter values,
 using a consistent mapping across simulation, formal, and synthesis flows.
 Unknown or unsupported labels shall produce a clear configuration error.
-The register-file encodings are `ff = 0` and `latch = 1`; encodings for other
-selectors remain TBD. A single canonical selector definition
-shall supply both the YAML-label translation and the RTL encoding constants.
+The register-file encodings are `ff = 0` and `latch = 1`. Multiplier encodings
+are `parallel = 0`, `parallel+stages+2 = 1`, and `iterative = 2`; divider
+`iterative = 0`. Predictor encodings remain TBD. A single canonical selector
+definition shall supply both the YAML-label translation and the RTL encoding constants.
 The build shall generate guarded Verilog `.vh` macro headers from this
 definition, following the
 [shared-constant conventions](uqu_spec.style.md#3-identifiers-and-symbols).
 Configuration helpers shall obtain their label-to-integer mappings from the
 same definition rather than maintain an
-independent copy. The initial register-file catalog is `config/selectors.json`,
-with the shared generator in `verif/sim/common/hw_config.py`; details for other selectors remain
-TBD. Generated headers shall use the applicable build output directory
+independent copy. The register-file and MUL/DIV catalog is `config/selectors.json`,
+with the shared generator in `verif/sim/common/hw_config.py`; predictor encoding
+remains a follow-up. Complete initial presets are `config/rv32i.yml`,
+`config/rv32im.yml`, and `config/rv32im_iterative.yml`. The baseline keeps M disabled; both M-enabled presets currently select the
+shared iterative MUL/DIV chain with unroll factor eight.
+Generated headers shall use the applicable build output directory
 in [build, Section 6](uqu_spec.build.md#6-build-output-naming). Selector definitions shall not supply implicit hardware
 configuration defaults: each configuration shall still set all parameters.
 
@@ -298,6 +302,7 @@ verif/
       hw_config.py        # Shared configuration validation and header generation
     gpregfile/      # General-purpose register-file tests
     arith/          # Shared extended arithmetic tests
+    muldiv/         # Native MUL/DIV tests and local arithmetic wrapper
     alu/            # Example: test_uqu_alu.py and any local environment
     lsu/            # LSU tests and any local environment
     core/           # Full-core simulation tests
