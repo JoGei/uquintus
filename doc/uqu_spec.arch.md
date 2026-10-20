@@ -316,16 +316,36 @@ readable YAML value and default shall be `iterative`, using
 The unroll factor shall specify how many successive binary division steps
 are implemented combinationally per iteration. Factor one shall reuse one
 step per iteration; factor 32 shall fully unroll the 32 division steps.
-Operand preparation and sign handling shall be integrated combinationally into
-the first division iteration, with result sign correction and selection in the
-last iteration. These operations shall not require separate setup or completion
-cycles. Architectural special-case results, including division by zero and
-signed overflow, shall use the same fixed execution latency as other operands.
-The execution latency, once operands are available, shall therefore
-be `32 / F` EX cycles: 32, 16, 8, 4, 2, or 1 for factors 1, 2, 4, 8, 16,
-or 32, respectively. Factor 32 shall complete division in one EX execution
-cycle, including preparation and sign correction. Hazards and downstream
-backpressure may still extend the instruction's residence in EX. All four
+Division shall use a magnitude-based setup phase of `ceil(2 / F)` EX cycles,
+followed by `32 / F` iteration cycles and one completion cycle for sign
+correction and result selection. The total execution latency, once operands
+are available, shall be exactly `ceil(2 / F) + 32 / F + 1` EX cycles.
+The ceiling is mathematical ceiling division; an RTL integer expression may
+use `(2 + F - 1) / F` for this setup count.
+
+With `F = 1`, the shared ALU arithmetic instance shall prepare the dividend
+and divisor magnitudes sequentially in two setup cycles. With `F >= 2`, two
+existing arithmetic slices shall prepare those independent magnitudes in
+parallel during one setup cycle. Setup steering shall supply each slice's
+operand independently and capture both results and the original operand signs;
+it shall not instantiate additional data adders or negation units. The
+completion cycle shall correct the sign of the selected quotient or remainder,
+or pass through the selected unsigned result, using shared arithmetic.
+
+| Unroll factor F | Setup | Iterations | Completion | Total EX cycles |
+| --- | --- | --- | --- | --- |
+| 1 | 2 | 32 | 1 | 35 |
+| 2 | 1 | 16 | 1 | 18 |
+| 4 | 1 | 8 | 1 | 10 |
+| 8 | 1 | 4 | 1 | 6 |
+| 16 | 1 | 2 | 1 | 4 |
+| 32 | 1 | 1 | 1 | 3 |
+
+Architectural special-case results, including division by zero and signed
+overflow, shall use the same setup, iteration, and completion schedule as other
+operands. Unsigned instructions and cases requiring no sign correction shall
+also reserve these phases. Hazards and downstream backpressure may still
+extend the instruction's residence in EX. All four
 division/remainder instructions shall take exactly the configured number of
 execution cycles, independent of operand values, signedness, or special cases.
 No early termination or early result-availability indication shall be exposed,
@@ -339,8 +359,8 @@ Each instruction shall perform its own computation and retain the specified
 fixed execution latency and separate architectural retirement.
 
 The defaults `MUA_DIV = iterative` and `MUA_MULDIV_ITERUNROLL = 8` shall give
-a fixed divider execution latency of four EX cycles when `ISA_M = 1`. The same
-four-cycle latency shall apply to multiplication when `MUA_MUL = iterative`
+a fixed divider execution latency of six EX cycles when `ISA_M = 1`.
+Multiplication shall take four cycles when `MUA_MUL = iterative`
 with that unroll setting. This default shall exercise and demonstrate the
 unroll configuration.
 
@@ -371,7 +391,8 @@ remain implementation details to define.
 ALU sharing shall preserve the fixed execution latencies specified above.
 The detailed signed algorithms and their mapping onto the shared ALU remain
 TBD; operand preparation and final correction shall not silently introduce
-dedicated data adders at factor one or extra setup/completion cycles. Only the
+dedicated data adders at factor one or cycles beyond the specified MUL and DIV
+schedules. Only the
 instruction occupying EX shall own the shared datapath during native MUL/DIV
 execution; older MEM/WB instructions shall remain able to drain under the
 existing pipeline rules.
@@ -597,6 +618,39 @@ core's synchronous reset contract. No dependency revision or configuration is
 selected; operation coverage, timing, reset/flush behavior, and flow compatibility
 remain to be evaluated before implementation selection. An imported FPU shall
 meet the immediate cancellation requirement above.
+
+### 3.4. Shared extended arithmetic primitive
+
+The shared combinational add/sub component shall be named `uqu_arith`, in
+`src/uquintus/uqu_arith.v`. The ALU shall use its arithmetic instance for the
+first iterative MUL/DIV step; additional unrolled steps shall use further
+instances of the same primitive. Physical sharing shall follow Section 3.
+
+The initial implementation has two 33-bit operands, a subtraction selector,
+and a raw carry input. It supplies the low 33 result bits, carry-out beyond
+bit 32, and a borrow output. Addition computes `A + B + carry_i`; subtraction
+computes `A - B - (1 - carry_i)`, so ordinary subtraction uses `carry_i = 1`.
+In subtraction mode, carry-out means no borrow; the borrow output is zero
+during addition. These are datapath signals, not architectural condition flags.
+
+The primitive has no clock, reset, state, or instruction handshake. Native
+execution handshakes belong to the enclosing execution unit. Bitwise ALU
+operations, variable shifts, and comparison/result selection remain in the ALU;
+MUL/DIV-specific fixed-shift wiring, operand steering, state, and iteration
+control belong to the surrounding MUL/DIV logic. For a signed RV32 operand,
+the enclosing logic can compute its magnitude by selecting `a_i = 0`,
+`b_i = {operand[31], operand}`, and driving both `sub_i` and `carry_i` with
+`operand[31]`. Nonnegative values pass through addition with zero; negative
+values are negated by subtraction from zero. Unsigned operands shall instead
+be zero-extended and passed through addition with zero. The 33-bit result
+represents `abs(-2^31) = 2^31` without signed overflow. Magnitude computation
+requires operand/control steering around the existing primitive, with no new
+absolute-value operation or dedicated negation datapath. Complete signed
+MUL/DIV algorithms and phase-control RTL remain implementation follow-ups;
+the divider phase counts are fixed in Section 3.
+
+See the [arithmetic component guide](../verif/sim/arith/README.md) for ports,
+carry conventions, and standalone verification scope.
 
 ## 4. Configurable operand forwarding
 
@@ -2081,9 +2135,9 @@ later decisions determine the active contract.
 | D-152 | Select single-cycle or internally registered multi-cycle multiplication through `MUA_MUL`, using YAML labels `single_cycle` and `multi_cycle`; retain the blocking EX policy for multi-cycle multiplication. | Allow multiplier timing experiments without changing the ISA or the five-stage pipeline contract. | Selector choices superseded by D-158; blocking EX policy retained |
 | D-153 | Select the divider implementation through `MUA_DIV`, applying to signed/unsigned division and remainder; ignore `MUA_MUL` and `MUA_DIV` when `ISA_M = 0` while requiring explicit values in hardware configurations. | Configure multiply/divide microarchitecture independently of enabling the software-visible M extension. | Agreed; current parameter forms/defaults defined by D-158 and D-162; divider timing by D-155 and D-157; selector encodings and implementation details TBD |
 | D-154 | Use one iterative divider family: `MUA_DIV = iterative` means unroll factor one, and `iterative+unroll+<factor>` selects 2, 4, 8, 16, or 32 successive division steps per iteration; factor 32 fully unrolls the division steps. | Explore division latency and combinational depth through one implementation family; allow generate-based RTL without fixing its structure yet. | Unroll configuration syntax superseded by D-162; iteration semantics retained |
-| D-155 | Integrate divider operand preparation into the first iteration and result sign correction/selection into the last combinationally, with no extra setup or completion cycles; provide execution latency of `32 / factor` EX cycles, including special-case results within that budget. | Make full unrolling a single-cycle execution option and avoid separate sign-handling cycles. | Agreed; fixed latency and no early completion defined by D-157 |
-| D-156 | Default `MUA_MUL` to `single_cycle` and `MUA_DIV` to `iterative+unroll+8`, including explicit inactive settings when `ISA_M = 0`. | Use single-cycle multiplication and exercise divider parametrization with a four-cycle baseline when the M extension is enabled. | Multiplier default superseded by D-158; divider/unroll parameter forms superseded by D-162, with factor-eight timing retained |
-| D-157 | Require fixed, operand-independent native multiplication and division execution latency for each selected implementation; division/remainder always takes exactly `32 / factor` EX cycles, with no early completion or early result availability, including special cases. | Keep multiply/divide execution timing predictable while preserving separate pipeline stall and backpressure contracts. | Agreed; multiplier family/timing contracts defined by D-158 and D-159 |
+| D-155 | Integrate divider operand preparation into the first iteration and result sign correction/selection into the last combinationally, with no extra setup or completion cycles; provide execution latency of `32 / factor` EX cycles, including special-case results within that budget. | Make full unrolling a single-cycle execution option and avoid separate sign-handling cycles. | Superseded by D-261; fixed operand-independent timing retained |
+| D-156 | Default `MUA_MUL` to `single_cycle` and `MUA_DIV` to `iterative+unroll+8`, including explicit inactive settings when `ISA_M = 0`. | Use single-cycle multiplication and exercise divider parametrization with a four-cycle baseline when the M extension is enabled. | Multiplier default superseded by D-158; divider/unroll parameter forms superseded by D-162; divider timing superseded by D-261 |
+| D-157 | Require fixed, operand-independent native multiplication and division execution latency for each selected implementation; division/remainder always takes exactly `32 / factor` EX cycles, with no early completion or early result availability, including special cases. | Keep multiply/divide execution timing predictable while preserving separate pipeline stall and backpressure contracts. | Operand-independent timing and no early completion retained; divider cycle count superseded by D-261; multiplier timing defined by D-158 and D-159 |
 | D-158 | Replace the multiplier outcome selectors with `parallel[+stages+<N>]` and `iterative[+unroll+<factor>]`, defaulting to `parallel`; initially infer parallel multiplication using `*`, partition registered parallel arithmetic across `N` EX cycles, and perform `32 / factor` arithmetic iterations for radix-2 iterative multiplication with factors 1, 2, 4, 8, 16, or 32. | Select multiplier architecture and its configuration while deriving execution timing and retaining constant-time, blocking EX behavior. | Iterative unroll selector syntax superseded by D-162; parallel default retained and stage count limited by D-164; iterative timing defined by D-159; RTL structure and selector encodings TBD |
 | D-159 | Integrate iterative-multiplier preparation/sign handling into the first iteration and final accumulation/correction/result selection into the last, with no extra setup or completion cycles; execute all four multiply instructions in exactly `32 / factor` EX cycles. | Give iterative multiplication the same fixed iteration-to-cycle mapping as division, including single-cycle execution at factor 32. | Agreed; exact RTL structure TBD |
 | D-160 | Execute multiply instructions independently, without high/low instruction fusion or reuse of a previous instruction's product. | Retain independent execution, fixed latency, and retirement for every multiply instruction. | Agreed |
@@ -2144,4 +2198,6 @@ later decisions determine the active contract.
 | D-239 | Apply the native immediate owning-instruction flush cancellation rule to the FPU: clear affected busy/result validity at the active edge, suppress result and flag updates, and release EX without waiting for completion; pending interrupts retain completion-before-entry behavior. | Keep FPU flush behavior consistent with native MUL/DIV and prevent stale results or flags from reaching another instruction. | Agreed; imported-unit cancellation wiring and validation remain implementation work |
 | D-240 | Focus the current floating-point implementation on scalar Zfinx with FP32 and required integer conversions; defer packed SIMD and additional FP formats, including FP8 and FP16. | Bound the initial FPU integration to the selected ISA rather than adopting every capability offered by an imported unit. | Agreed; latency policy defined by D-241; FPU implementation selection remains open |
 | D-241 | Allow backend-defined and potentially operand-dependent FPU latency without fixed-cycle padding; use request/result handshakes and backpressure to start once, retain completed data/status, and advance EX only when the result is available and MEM can accept it. | Keep FPU integration independent of an unselected implementation and configuration while preserving correct blocking pipeline behavior. | Agreed; exact backend latencies remain TBD; native integer MUL/DIV fixed-latency requirements retained |
+| D-260 | Name the shared extended add/sub component `uqu_arith`; keep ALU logic/variable shifts and MUL/DIV-specific steering/fixed shifts in their enclosing blocks. | Reuse a small arithmetic primitive while preserving physical ALU sharing for the first iterative step. | Agreed; initial 33-bit implementation and carry convention described in Section 3.4 |
+| D-261 | Give DIV/DIVU/REM/REMU exactly `ceil(2/F) + 32/F + 1` EX cycles: two sequential magnitude preparations at F=1 or two parallel preparations in one cycle at F>=2, followed by the iterations and one completion cycle; use existing arithmetic slices and reserve all phases for unsigned and special cases too. | Reuse available unrolled arithmetic for operand preparation while keeping latency operand-independent. | Agreed; supersedes the divider timing in D-155 and D-157; default F=8 gives six cycles; iterative MUL timing remains D-159 |
 | D-251 | Fix enabled PMP capacity at sixteen configurable entries, numbered zero through fifteen, and remove the external ISA_PMP_REGIONS parameter; retain optional ISA_PMP with default zero and fixed four-byte granularity. | Provide one standard PMP capacity without region-count configuration or alternative-count implementation work. | Agreed; supersedes D-145 and D-146 |
