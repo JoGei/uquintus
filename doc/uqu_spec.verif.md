@@ -377,6 +377,89 @@ riscv-formal core binding/proofs, broader software coverage and configuration CI
 remain required follow-ups. Passing the initial native programs shall not be reported as
 completion of the first milestone's acceptance criteria.
 
+### 2.5. Formal RVFI integration goal
+
+**Status:** Agreed goal; implementation and proof execution deferred under D-291
+
+The project shall provide a core-specific formal integration following the
+[`riscv-formal` core integrations](https://github.com/YosysHQ/riscv-formal/tree/main/cores)
+and [verification procedure](https://yosyshq.readthedocs.io/projects/riscv-formal/en/latest/procedure.html).
+RVFI is the shared observation contract; the current cocotb environment and
+JSONL trace writer do not constitute this formal integration.
+
+Reuse the passive instruction and CSR collectors in `verif/common/` across
+simulation and formal verification. Observation logic shall report actual
+execution, including consumed operands, committed results and memory effects;
+it shall not substitute expected results. RVFI need not be generated inside the
+processor RTL or added to production core ports. A formal-compatible connection
+method shall be selected and validated with the chosen frontend; the current
+simulation wrapper's hierarchical references are not assumed portable.
+
+The formal integration shall provide:
+
+- A core-specific wrapper connecting the actual processor and shared collectors
+  to the framework's RVFI checkers, without cocotb or simulation file I/O.
+- A symbolic OBI environment for instruction and data ports, with explicit
+  protocol, memory-consistency, error and reset assumptions. Symbolic inputs
+  represent permitted choices rather than seeded simulation stimulus. Any
+  fairness assumptions needed for progress checks shall be documented separately
+  from safety assumptions and shall not exclude permitted core behavior merely
+  to obtain a passing result.
+- A pinned `checks.cfg` or equivalent supported configuration defining the ISA,
+  core parameters, enabled CSR channels, checks, assumptions, proof strategy
+  and depths. GNU Make shall invoke the selected open-source toolchain and
+  retain reproducible results and counterexample artifacts.
+- Applicable instruction-semantic checks together with register, PC, ordering
+  and causality checks. Add RVFI_BUS observations and applicable bus checks to
+  connect the retirement trace to real instruction/data transactions, including
+  fault reporting; a self-consistent RVFI trace alone does not establish this
+  connection. CSR and privileged-state checks shall have an explicit scope.
+
+The initial scope remains RV32I as defined in Section 2. Completion requires the
+selected toolchain to run the documented check set successfully for the stated
+core configuration. Reports shall distinguish bounded checks from unbounded
+proofs and state all assumptions, depths, exclusions and remaining coverage.
+Simulation regressions, collector structural checks and passing bounded checks
+shall not be described as an unrestricted proof of the processor. Optional
+extensions and configurations require their own coverage before being included
+in a formal-verification claim.
+
+### 2.6. ELF software execution
+
+**Status:** Initial native ELF execution implemented; external suites and Spike
+comparison remain follow-ups
+
+A reusable ELF execution environment shall load statically linked little-endian
+RISC-V ELF32 `PT_LOAD` segments and zero their memory tails, including BSS, into
+one shared instruction/data memory image. The independent instruction oracle
+shall retain a separate image updated at architectural stores. A word-aligned
+executable ELF entry shall drive `boot_addr_i`. Malformed images, unsupported
+ABI flags, dynamic linking, overlapping segments and unsupported load/run
+address mappings shall fail explicitly.
+
+Bare-metal startup/linker files and programs shall live in `verif/sw/`, with
+compiler ISA/ABI selection derived from hardware YAML. The initial environment
+shall use an aligned, zero-initialized 8-byte `tohost` symbol in writable memory:
+an aligned 32-bit store to its low word reports `1` for pass or
+`(code << 1) | 1` for a nonzero failure code, keeping the upper word zero.
+Completion shall be recognized only when that store successfully retires;
+granted requests shall not imply completion. No production core ports are added
+for test completion. Host syscalls and console communication remain deferred.
+
+The [ELF target](../verif/sim/core_elf/README.md) shall reuse native randomized
+OBI timing, the actual core/RVFI wrapper and independent execution/CSR checks.
+A configurable cycle watchdog, software failure or checker mismatch shall
+produce a failed run and nonzero regression exit. Retain the input ELF snapshot
+and hash, configuration, seed, execution status/cycle/PC diagnostics, logs and
+RVFI trace, including on failure. Default limits and the initial sparse-memory
+and software-initialization contracts are defined in the execution guide.
+
+Verify initialized data, BSS, shared memory visibility, stack/calls and explicit
+failure/timeout fixtures before integrating external instruction suites.
+`riscv-tests`, architectural tests and Spike comparison remain separate
+follow-ups; ELF execution alone does not establish architectural compliance or
+complete the first milestone's verification acceptance criteria.
+
 ## 3. Supported-configuration CI coverage
 
 **Status:** CI requirement agreed; detailed build flow TBD
@@ -406,6 +489,9 @@ Section 2.1 with additional component DUT manifests and independently runnable
 suites under Section 2.2; define full-core integration and supported tool versions.
 Implement the retirement/trap comparison and verification monitors, separating
 simulation file I/O from formal-compatible observation logic.
+After selecting the formal toolchain under D-291, implement the shared-collector
+formal wrapper, symbolic OBI environment, RVFI_BUS observations and checker
+configuration specified in Section 2.5.
 
 Coverage for privilege, CSRs, memory side effects, Zfinx, custom instructions,
 paired writeback, and debug must be explicit. Initial RV32I formal checking
@@ -437,6 +523,8 @@ later decisions determine the active contract.
 | D-256 | Use cocotb and pyuvm project-wide for component, subsystem, and full-core simulation testbenches, including simple leaf tests; allow lightweight tests without unnecessary UVM component hierarchies. | Keep one shared testbench structure while scaling verification complexity to the DUT. | Agreed; finalizes D-254, with runner and compatible versions TBD |
 | D-257 | Place component simulation tests in `verif/sim/<component>/` and full-core tests in `verif/sim/core/`, initially using `test_<module>.py`; keep local environments and HDL wrappers beside their tests and shared utilities in `verif/common/`. | Make tests easy to locate and run independently while growing their structure only as needed. | Agreed; simulation-specific shared helper/wrapper placement refined by D-259 |
 | D-259 | Put shared component-testing Make helpers, simulation utilities, and reusable HDL wrappers in `verif/sim/common/`; use `config/sim/<component>.yml` for DUT/test metadata and shared configuration helpers rather than separate component runner scripts. | Make invocation responsibilities explicit and reuse the flow as components are added. | Agreed; utilities shared with formal verification may remain in `verif/common/` |
-| D-290 | Add a verification-only single-channel RV32 RVFI collector, simulation core wrapper and separate SV JSONL writer; preserve actual consumed operands and raw memory responses, with explicit fault/handler/reset semantics. | Establish architectural observations without changing core RTL/ports or hiding forwarding errors; reuse the collector for later formal binding. | Implemented; Section 1.1; native simulation checks and trace reader available; CSR channels, formal core binding/proofs and Spike adapter remain unfinished |
+| D-290 | Add a verification-only single-channel RV32 RVFI collector, simulation core wrapper and separate SV JSONL writer; preserve actual consumed operands and raw memory responses, with explicit fault/handler/reset semantics. | Establish architectural observations without changing core RTL/ports or hiding forwarding errors; reuse the collector for later formal binding. | Implemented; Section 1.1; CSR channels added under D-292; formal core binding/proofs and Spike adapter remain unfinished |
 | D-291 | Defer formal core binding and proof execution until a working open-source formal toolchain and configuration are selected; retain the planned riscv-formal direction and current RVFI simulation checks. | Avoid implementing a tool-specific formal harness before selecting its actual frontend, orchestration and solver; distinguish simulation/structural checks from proofs. | Deferred pending toolchain selection; qualifies implementation timing under D-071 |
 | D-292 | Add native per-CSR RVFI channels with actual pre-/post-state, registered event alignment, 64-bit counter aliases, implicit trap/MRET updates and sparse JSONL diagnostics checked against the CSR model. | Observe CSR behavior without duplicating WARL/locking logic or changing processor RTL; preserve the formal deferral under D-291. | Implemented; Section 1.2; native simulation coverage and structural checks; formal binding/proofs remain deferred |
+| D-293 | Make a reusable RVFI formal integration a verification goal: shared passive collectors, a formal-compatible core wrapper, symbolic OBI environment, RVFI_BUS observations and documented riscv-formal checker configuration. | Reuse execution observations across simulation and formal verification while checking their connection to actual core and bus behavior and stating the demonstrated proof scope. | Agreed goal; Section 2.5; implementation and proof execution remain deferred under D-291 |
+| D-294 | Add reusable ELF32 software execution with shared instruction/data RAM, PT_LOAD zero-fill, bare-metal startup/linker files, retired-store tohost completion, configurable watchdog and preserved ELF/RVFI diagnostics. | Establish a compiler-built software execution foundation reusable by later ISA suites without adding test-completion ports to the processor. | Implemented initial native environment; Section 2.6; external suites and Spike comparison remain follow-ups |

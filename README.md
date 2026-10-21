@@ -50,6 +50,8 @@ in `verif/requirements.txt` through your environment. Then run:
 make test COMPONENT=core CONFIG=rv32i
 make test COMPONENT=core CONFIG=rv32im
 make lint COMPONENT=core CONFIG=rv32i
+make sw CONFIG=rv32i RISCV_CC=clang
+make test COMPONENT=core_elf CONFIG=rv32i ELF=build/uquintus-rv32i/sw/smoke/program.elf
 make test COMPONENT=ifetch CONFIG=rv32i
 make test COMPONENT=pipeline_ctrl CONFIG=rv32i
 make test COMPONENT=pipeline_ctrl CONFIG=rv32i_zifencei
@@ -97,6 +99,8 @@ make test COMPONENT=muldiv CONFIG=rv32im_iterative
 Use `PYTHON` and `BENDER` to select executables, `TEST=<name>` to select a test
 from the component manifest, and `SEED` to reproduce randomized stimulus.
 The build does not install dependencies or manage containers.
+The optional [ELF program flow](verif/sim/core_elf/README.md) also requires an
+external RISC-V GCC or Clang/LLD; directed component/core tests do not.
 Run `make clean` to remove the generated `build/` directory.
 
 Compressed decoding uses `MUA_C_IMPL: decompress | decode_compressed` and, for

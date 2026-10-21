@@ -89,6 +89,10 @@ RVFI collector and JSONL writer. Bender target `rtl` continues to select only
 processor Verilog sources.
 Select one program suite with `TEST=<name>`; use `WAVES=1` for waveforms.
 Custom complete hardware YAML files use the same `CONFIG=<path>` argument.
+The separate [ELF execution target](../core_elf/README.md) reuses this environment
+with shared instruction/data RAM and compiler-built programs. It is selected
+with `COMPONENT=core_elf ELF=<path>`; the directed suites here retain their
+separate instruction/data images and require no RISC-V compiler.
 
 `core_env.py` supplies separate instruction/data agents with randomized grants
 and response delays. It checks persistent requests, word alignment, outstanding

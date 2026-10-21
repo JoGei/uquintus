@@ -1,0 +1,35 @@
+top_module: uqu_core_tb
+bender_target: core_test
+test_module: test_uqu_elf
+parameters:
+- ISA_E
+- ISA_M
+- ISA_C
+- ISA_ZFINX
+- ISA_F
+- ISA_A
+- ISA_UMODE
+- ISA_ZIFENCEI
+- ISA_PMP
+- MUA_FORWARDING
+- MUA_FORWARD_EX_TO_DE
+- MUA_FORWARD_MEM_TO_DE
+- MUA_FORWARD_MEM_TO_EX
+- MUA_FORWARD_WB_TO_EX
+- MUA_DE_OPERAND_RETENTION
+- MUA_C_IMPL
+- MUA_C_DECOMPRESS_STAGE
+- MUA_BRANCH_PREDICTOR
+- MUA_REGFILE_IMPL
+- MUA_IF_BUFFER_WORDS
+- MUA_HARDENED
+- MUA_MUL
+- MUA_DIV
+- MUA_MULDIV_ITERUNROLL
+- XIF
+- XIF_NUM_RS
+- XIF_DUALWRITE
+- DEBUG
+tests:
+- execute
+requires_elf: true

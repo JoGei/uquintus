@@ -1,0 +1,81 @@
+"""ELF execution using the native core's existing pyuvm/RVFI environment."""
+import json
+import os
+from pathlib import Path
+import sys
+
+import cocotb
+from cocotb.triggers import Timer
+from pyuvm import uvm_root
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from core.core_env import CoreTest, MASK
+from elf_image import completion_code, load_elf
+
+
+class ELFTest(CoreTest):
+    def build_phase(self):
+        super().build_phase()
+        self.image = load_elf(os.environ['UQU_ELF'])
+        self.image.validate_core(self.params)
+        self.tohost = self.image.tohost
+        # Both independent OBI agents see the same RAM. The oracle owns a
+        # separate copy, updated only by architectural stores at retirement.
+        self.memory = self.image.memory()
+        self.code = self.memory
+        self.model_memory = dict(self.memory)
+        self.model_code = self.model_memory
+        self.exit_code = None
+        self.last_retired = None
+        self.max_cycles = int(os.environ['UQU_MAX_CYCLES'])
+
+    def retire(self, pc, original, write, rd_actual, data_actual):
+        # Keep all existing independent instruction/CSR and RVFI checks active.
+        before = self.word(self.model_memory, self.tohost, 8)
+        super().retire(pc, original, write, rd_actual, data_actual)
+        self.last_retired = pc
+        value = self.word(self.model_memory, self.tohost, 8)
+        if value != before:
+            record = self.rvfi_records[-1]
+            assert record['mem_addr'] == self.tohost and record['mem_wmask'] == 15, (
+                'tohost completion requires an aligned 32-bit store to its low word', record)
+            assert value <= MASK, 'tohost upper word must remain zero'
+            self.exit_code = completion_code(value)
+
+    async def run_phase(self):
+        self.raise_objection()
+        status, detail = 'failed', None
+        try:
+            await self.reset(boot=self.image.entry)
+            start = self.cycles
+            while self.exit_code is None and self.cycles - start < self.max_cycles:
+                await self.cycle()
+            if self.exit_code is None:
+                raise AssertionError(
+                    f'ELF watchdog expired after {self.max_cycles} cycles; '
+                    f'next PC={self.pc:08x}, last retired={self.last_retired}, '
+                    f'instructions={len(self.retired)}; see rvfi.jsonl')
+            assert self.exit_code == 0, f'ELF reported failure code {self.exit_code}; see rvfi.jsonl'
+            assert not self.faults and not self.accesses, 'uncompleted/faulting memory operations'
+            status = 'passed'
+        except BaseException as error:
+            detail = str(error)
+            raise
+        finally:
+            # Flush the last accepted event even if its Python checker failed
+            # before the normal falling edge. The SV sink flushes each record.
+            self.dut.clk_i.value = 0
+            await Timer(1, units='ns')
+            Path('execution.json').write_text(json.dumps({
+                'status': status, 'detail': detail, 'exit_code': self.exit_code,
+                'cycles': self.cycles, 'retired': len(self.retired),
+                'entry': self.image.entry, 'tohost': self.tohost,
+                'next_pc': self.pc, 'last_retired_pc': self.last_retired,
+                'max_cycles': self.max_cycles,
+            }, indent=2) + '\n')
+            self.drop_objection()
+
+
+@cocotb.test()
+async def execute(dut):
+    await uvm_root().run_test('ELFTest')

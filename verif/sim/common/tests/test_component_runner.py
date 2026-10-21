@@ -47,6 +47,16 @@ class ComponentRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown hardware parameters"):
             parameters_for_component({}, ["UNKNOWN"], catalog)
 
+    def test_elf_requirement_is_an_explicit_manifest_capability(self):
+        manifest = load_component('core_elf')
+        self.assertTrue(manifest['requires_elf'])
+        self.assertEqual(manifest['parameters'], load_component('core')['parameters'])
+        self.assertEqual(manifest['tests'], ['execute'])
+        manifest['requires_elf'] = 'yes'
+        (self.directory / 'bad.yml').write_text(yaml.safe_dump(manifest))
+        with self.assertRaisesRegex(ValueError, 'boolean'):
+            load_component('bad', self.directory)
+
     def test_retention_parameter_is_explicit_and_boolean(self):
         catalog = json.loads((ROOT / "config/selectors.json").read_text())
         config = load_configuration(ROOT / "config/rv32i.yml", catalog)

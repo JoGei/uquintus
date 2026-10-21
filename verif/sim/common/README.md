@@ -14,6 +14,11 @@ for `.sv` verification files, recording these language options in run metadata.
 epochs, order, PC continuity, handler markers and basic RVFI invariants.
 `rvfi_csrs.py` reads the native CSR channel catalog and uses the shared CSR model
 to check pre-/post-state, access masks, counter aliases and implicit updates.
+`elf_image.py` loads and validates static little-endian RV32 ELF segments,
+zero-fill tails, symbols and the test completion encoding without simulator or
+ELF-library dependencies. `software_build.py` is the shared Make helper behind
+`make sw`, deriving compiler ISA/ABI arguments from the hardware YAML. See the
+[ELF execution guide](../core_elf/README.md).
 
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
 standalone and shared-parent scoreboards. `decode_model.py` supplies the shared
@@ -49,6 +54,10 @@ To add a component:
    `test_module`, `parameters`, and `tests`. Parameters name the subset of the
    complete hardware configuration consumed by that DUT; `parameters: []` is
    valid for a component without configurable parameters.
+   The optional boolean `requires_elf: true` declares an ELF-consuming target;
+   the runner then requires `ELF=<path>`, validates it before simulator build,
+   snapshots it and records its hash/entry/segments and `MAX_CYCLES` watchdog.
+   Tests receive `UQU_ELF` and `UQU_MAX_CYCLES` alongside resolved parameters.
 4. Run `make test COMPONENT=<component> CONFIG=<hardware-config>`.
 
 The runner needs no component-specific Python branch. See

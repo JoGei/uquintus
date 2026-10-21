@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 
 import yaml
 
+from elf_image import load_elf
 from hw_config import load_configuration, parameters_for_component, write_header
 
 
@@ -34,8 +35,11 @@ def load_component(name, directory=None):
         raise ValueError(f"unknown component {name!r}: missing {path}")
     component = yaml.safe_load(path.read_text())
     expected = {"top_module", "bender_target", "test_module", "parameters", "tests"}
-    if not isinstance(component, dict) or set(component) != expected:
-        raise ValueError(f"component manifest must contain exactly {sorted(expected)}")
+    if (not isinstance(component, dict) or not expected <= set(component) or
+            set(component) - expected - {'requires_elf'}):
+        raise ValueError(f"component manifest must contain {sorted(expected)}; optional: requires_elf")
+    if 'requires_elf' in component and type(component['requires_elf']) is not bool:
+        raise ValueError('component requires_elf must be a boolean')
     for key, pattern in {
         "top_module": r"[A-Za-z_][A-Za-z0-9_$]*",
         "bender_target": r"[A-Za-z_][A-Za-z0-9_-]*",
@@ -99,6 +103,8 @@ def main():
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--test", default="all", help="all or a test named by the component manifest")
     parser.add_argument("--waves", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--elf", help="statically linked RV32 ELF for a requires_elf component")
+    parser.add_argument("--max-cycles", type=int, default=100000, help="ELF execution watchdog")
     args = parser.parse_args()
     component = load_component(args.component)
     if args.test != "all" and args.test not in component["tests"]:
@@ -115,6 +121,19 @@ def main():
         if not shutil.which(tool):
             raise ValueError(f"required tool not found: {tool}; provide it externally")
     parameters = parameters_for_component(config, component["parameters"], catalog)
+    if args.max_cycles <= 0:
+        raise ValueError('--max-cycles must be positive')
+    elf_path = None
+    image = None
+    if args.action == 'test' and component.get('requires_elf', False):
+        if not args.elf:
+            raise ValueError('this component requires ELF=<path>; build with make sw or supply an ELF')
+        elf_path = Path(args.elf).resolve()
+        image = load_elf(elf_path)
+        image.validate_core(parameters)
+        image.tohost  # Validate completion storage before compiling the simulator.
+    elif args.elf:
+        raise ValueError('ELF is only supported for tests of a requires_elf component')
     run_dir = ROOT / "build" / f"uquintus-{config_path.stem}" / args.sim / args.component / (
         f"{args.action}-{args.test}-seed{args.seed}-{uuid.uuid4().hex[:12]}")
     run_dir.mkdir(parents=True)
@@ -147,6 +166,17 @@ def main():
         "status": "running",
     }
     metadata_path = run_dir / "run.json"
+    extra_env = {"UQU_COMPONENT_PARAMS": json.dumps(parameters)}
+    if elf_path is not None:
+        program = run_dir / 'program.elf'
+        shutil.copyfile(elf_path, program)
+        metadata['elf'] = {
+            'source': str(elf_path), 'sha256': hashlib.sha256(program.read_bytes()).hexdigest(),
+            'entry': image.entry, 'tohost': image.tohost, 'max_cycles': args.max_cycles,
+            'segments': [{'address': s.address, 'file_size': len(s.data),
+                          'memory_size': s.size, 'flags': s.flags} for s in image.segments],
+        }
+        extra_env.update(UQU_ELF=str(program), UQU_MAX_CYCLES=str(args.max_cycles))
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"Artifacts: {run_dir}", flush=True)
     try:
@@ -183,7 +213,7 @@ def main():
                 testcase=",".join(selected_tests),
                 seed=args.seed, build_dir=run_dir / "obj", test_dir=run_dir,
                 results_xml=str(results), waves=bool(args.waves),
-                extra_env={"UQU_COMPONENT_PARAMS": json.dumps(parameters)},
+                extra_env=extra_env,
                 log_file=run_dir / "simulation.log",
             )
             metadata["tests_passed"] = check_results(results, selected_tests)

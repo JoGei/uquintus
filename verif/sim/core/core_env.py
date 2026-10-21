@@ -61,6 +61,7 @@ class CoreTest(uvm_test):
         self.params = json.loads(os.environ['UQU_COMPONENT_PARAMS'])
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
         self.code = {}
+        self.model_code = self.code
         self.memory = {}
         self.model_memory = {}
         self.errors = {'imem': set(), 'dmem': set()}
@@ -118,7 +119,7 @@ class CoreTest(uvm_test):
 
     def retire(self, pc, original, write, rd_actual, data_actual):
         assert pc == self.pc, f'retirement PC {pc:08x}, expected {self.pc:08x}'
-        raw = self.word(self.code, pc)
+        raw = self.word(self.model_code, pc)
         size = 2 if self.params['ISA_C'] and raw & 3 != 3 else 4
         if size == 2:
             raw &= 65535
@@ -243,7 +244,7 @@ class CoreTest(uvm_test):
             assert r['insn']==(0 if fetch_fault else o['wb_original_q']), r
             assert r['rd_addr']==(o['wb_waddr0'] if o['wb_we0'] else 0)
             assert r['rd_wdata']==(o['wb_wdata0'] if o['wb_we0'] else 0)
-            raw = self.word(self.code,self.pc)
+            raw = self.word(self.model_code,self.pc)
             instr = raw
             if self.params['ISA_C'] and raw & 3 != 3:
                 decoded = compressed(raw & 65535)

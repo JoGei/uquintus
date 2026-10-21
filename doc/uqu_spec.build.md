@@ -7,7 +7,8 @@ simulation/lint flow supports the register file, ALU, arithmetic datapath, nativ
 multiply/divide, native decoder, DE branch unit, DE/EX hazard unit, pipeline
 controller, IF, DE, EX,
 MEM/LSU, instruction-word fetch/buffer/aligner, WB, PMP checker, CSR register file, and shared-arithmetic/prefetch/parent-register
-fixtures; full-core and ASIC flows remain to be implemented. See the
+fixtures, native full-core regression and ELF software execution; the ASIC flow
+remains to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -51,6 +52,22 @@ defined in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-
 For the selected tools' roles, see the
 [Bender documentation](https://pulp-platform.github.io/bender/) and
 [GNU Make manual](https://www.gnu.org/software/make/manual/html_node/Rule-Introduction.html).
+
+### 1.1. Bare-metal software build and execution
+
+`make sw CONFIG=<hw> SW=<program> RISCV_CC=<compiler>` shall build the program
+under `verif/sw/` with an externally supplied RISC-V GCC or Clang/LLD, deriving
+ISA/ABI flags from the validated hardware configuration. The common helper
+shall live under `verif/sim/common/`; outputs shall use
+`build/uquintus-<hw>/sw/<program>/` and record compiler version, command, input
+hashes, ELF, map and build diagnostics. No target shall install dependencies.
+
+`make test COMPONENT=core_elf CONFIG=<hw> ELF=<path>` shall execute a supplied
+ELF through the existing Bender/Verilator/RVFI flow. `MAX_CYCLES` shall control
+the simulation watchdog; it shall not introduce a processor timeout. The
+[execution guide](../verif/sim/core_elf/README.md) defines commands, artifacts and
+the loader/completion contract specified in
+[verification, Section 2.6](uqu_spec.verif.md#26-elf-software-execution).
 
 ## 2. Shared core configuration and separate build targets
 
