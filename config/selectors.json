@@ -1,4 +1,8 @@
 {
+  "MUA_BRANCH_PREDICTOR": {
+    "none": {"value": 0, "macro": "UQU_BP_NONE"},
+    "static_not_taken": {"value": 1, "macro": "UQU_BP_STATIC_NOT_TAKEN"}
+  },
   "MUA_C_IMPL": {
     "decompress": {"value": 0, "macro": "UQU_C_IMPL_DECOMPRESS"},
     "decode_compressed": {"value": 1, "macro": "UQU_C_IMPL_DECODE_COMPRESSED"}

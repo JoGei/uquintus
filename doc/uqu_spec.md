@@ -19,6 +19,7 @@ The repository contains specifications and standalone
 [DE stage](../verif/sim/de/README.md),
 [core-owned hazard/forwarding](../verif/sim/hazard/README.md),
 [native decoder](../verif/sim/decode/README.md),
+[instruction-fetch stage](../verif/sim/if/README.md),
 [instruction-word fetch engine](../verif/sim/ifetch/README.md),
 [instruction aligner](../verif/sim/if_aligner/README.md),
 [fetched-word buffer](../verif/sim/if_buffer/README.md),
@@ -39,6 +40,9 @@ simulation/lint flow and a [shared-parent arithmetic fixture](../verif/sim/exec_
 A [prefetch fixture](../verif/sim/if_prefetch/README.md) connects the actual
 fetcher, word buffer and aligner with capacity reservation, PC/fetch pointers,
 fault containment and redirect/drain control under memory and consumer stalls.
+An [IF/DE parent fixture](../verif/sim/if_pipeline/README.md) connects actual IF
+outputs through parent-owned storage to DE, with accepted branch feedback and
+both compressed expansion placements/direct decoding.
 A [DE parent fixture](../verif/sim/de_pipeline/README.md) verifies DE with real
 IF/DE and DE/EX storage, GPR reads/writes and shared forwarding/hazard logic.
 A [parent-register fixture](../verif/sim/ex_pipeline/README.md) verifies EX

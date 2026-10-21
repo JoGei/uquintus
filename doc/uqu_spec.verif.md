@@ -198,8 +198,12 @@ Placement coverage shall include mixed 16-/32-bit tokens, stalls/backpressure,
 permission, flush, earlier fetch-fault priority, original PC/bits/length and
 PC+2 versus PC+4 links. See the
 [placement fixture](../verif/sim/de_pipeline/README.md) and
-[direct decoder tests](../verif/sim/decode_c/README.md). Bus fetching and
-word-boundary stitching remain separate frontend verification work.
+[direct decoder tests](../verif/sim/decode_c/README.md). The
+[production IF tests](../verif/sim/if/README.md) and
+[IF/DE parent fixture](../verif/sim/if_pipeline/README.md) add real bus fetching,
+word-boundary stitching, capacity reservation, accepted branch redirects and
+discarded fault responses across all three compressed paths. Full-core
+retirement/trap comparison remains separate integration work.
 
 Runs shall report the selected component, test/suite, configuration, simulator
 and tool versions, and seed needed to reproduce a failure. Simulation failures,

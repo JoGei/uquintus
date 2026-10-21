@@ -7,6 +7,7 @@ Implemented standalone components:
 
 | Component | RTL | Verification guide |
 | --- | --- | --- |
+| Instruction-fetch stage | [uqu_stage_if.v](src/uquintus/uqu_stage_if.v) | [IF interface and tests](verif/sim/if/README.md) |
 | Instruction-word fetch engine | [uqu_ifetch.v](src/uquintus/uqu_ifetch.v) | [Ifetch interface and tests](verif/sim/ifetch/README.md) |
 | Instruction selection and alignment | [uqu_if_aligner.v](src/uquintus/uqu_if_aligner.v) | [Aligner interface and tests](verif/sim/if_aligner/README.md) |
 | Fetched-word buffer | [uqu_if_buffer.v](src/uquintus/uqu_if_buffer.v) | [Buffer interface and tests](verif/sim/if_buffer/README.md) |
@@ -38,6 +39,11 @@ in `verif/requirements.txt` through your environment. Then run:
 
 ```sh
 make test COMPONENT=ifetch CONFIG=rv32i
+make test COMPONENT=if CONFIG=rv32i
+make test COMPONENT=if CONFIG=rv32ic
+make test COMPONENT=if CONFIG=rv32ic_decompress_de
+make test COMPONENT=if CONFIG=rv32ic_decoder_c
+make test COMPONENT=if_pipeline CONFIG=rv32ic
 make test COMPONENT=ifetch_pmp CONFIG=rv32i_pmp
 make test COMPONENT=if_aligner CONFIG=rv32i
 make test COMPONENT=if_aligner CONFIG=rv32ic
@@ -82,8 +88,10 @@ Compressed decoding uses `MUA_C_IMPL: decompress | decode_compressed` and, for
 decompression, `MUA_C_DECOMPRESS_STAGE: if | de`. The three `rv32ic*` profiles
 above select the corresponding paths; the default is `decompress/if`.
 All hardware configurations explicitly set both selectors, even with C disabled.
-DE mode selection and direct decoding are implemented; production IF/frontend
-integration remains pending.
+IF expansion, DE expansion and direct decoding are implemented. The
+[IF/DE fixture](verif/sim/if_pipeline/README.md) checks real stage outputs across
+parent-owned boundary storage and feeds accepted DE branch redirects back to IF.
+The complete-core controller and pipeline integration remain pending.
 
 Make invokes the shared component-testing helper in
 [verif/sim/common/](verif/sim/common/README.md). Component-specific DUT and test
@@ -92,6 +100,7 @@ settings live in `config/sim/<component>.yml`; examples are
 [ifetch.yml](config/sim/ifetch.yml), [ifetch_pmp.yml](config/sim/ifetch_pmp.yml),
 [if_aligner.yml](config/sim/if_aligner.yml),
 [if_buffer.yml](config/sim/if_buffer.yml), [if_prefetch.yml](config/sim/if_prefetch.yml),
+[if.yml](config/sim/if.yml), [if_pipeline.yml](config/sim/if_pipeline.yml),
 [hazard.yml](config/sim/hazard.yml), [branch.yml](config/sim/branch.yml), [decode.yml](config/sim/decode.yml), [gpregfile.yml](config/sim/gpregfile.yml), [arith.yml](config/sim/arith.yml),
 [alu.yml](config/sim/alu.yml), [muldiv.yml](config/sim/muldiv.yml),
 [exec_arith.yml](config/sim/exec_arith.yml), [ex.yml](config/sim/ex.yml),

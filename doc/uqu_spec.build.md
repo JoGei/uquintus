@@ -4,7 +4,7 @@
 
 Build/configuration contracts and project organization. A shared component
 simulation/lint flow supports the register file, ALU, arithmetic datapath, native
-multiply/divide, native decoder, DE branch unit, DE/EX hazard unit, DE, EX,
+multiply/divide, native decoder, DE branch unit, DE/EX hazard unit, IF, DE, EX,
 MEM/LSU, instruction-word fetch/buffer/aligner, WB, PMP checker, CSR register file, and shared-arithmetic/prefetch/parent-register
 fixtures; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
@@ -93,16 +93,17 @@ using a consistent mapping across simulation, formal, and synthesis flows.
 Unknown or unsupported labels shall produce a clear configuration error.
 The register-file encodings are `ff = 0` and `latch = 1`. Multiplier encodings
 are `parallel = 0`, `parallel+stages+2 = 1`, and `iterative = 2`; divider
-`iterative = 0`. Predictor encodings remain TBD. A single canonical selector
+`iterative = 0`. Predictor encodings are `none = 0` and `static_not_taken = 1`.
+A single canonical selector
 definition shall supply both the YAML-label translation and the RTL encoding constants.
 The build shall generate guarded Verilog `.vh` macro headers from this
 definition, following the
 [shared-constant conventions](uqu_spec.style.md#3-identifiers-and-symbols).
 Configuration helpers shall obtain their label-to-integer mappings from the
 same definition rather than maintain an
-independent copy. The register-file and MUL/DIV catalog is `config/selectors.json`,
-with the shared generator in `verif/sim/common/hw_config.py`; predictor encoding
-remains a follow-up. Complete initial presets are `config/rv32i.yml`,
+independent copy. The register-file, MUL/DIV, compressed-decoding and predictor
+catalog is `config/selectors.json`, with the shared generator in
+`verif/sim/common/hw_config.py`. Complete initial presets are `config/rv32i.yml`,
 `config/rv32im.yml`, and `config/rv32im_iterative.yml`. The baseline keeps M disabled; both M-enabled presets currently select the
 shared iterative MUL/DIV chain with unroll factor eight.
 All hardware presets explicitly set boolean `MUA_DE_OPERAND_RETENTION`,

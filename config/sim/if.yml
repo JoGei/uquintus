@@ -1,0 +1,15 @@
+top_module: uqu_stage_if
+bender_target: if
+test_module: test_uqu_stage_if
+parameters:
+  - ISA_C
+  - MUA_C_IMPL
+  - MUA_C_DECOMPRESS_STAGE
+  - MUA_BRANCH_PREDICTOR
+  - MUA_IF_BUFFER_WORDS
+tests:
+  - stream
+  - control
+  - faults
+  - redirects
+  - compressed

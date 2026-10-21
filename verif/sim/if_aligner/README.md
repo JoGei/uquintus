@@ -118,3 +118,5 @@ With C disabled, second-word inputs and compressed-length selection are removed;
 the high half of word1 is unused in both configurations. Invalid `ISA_C` values
 fail elaboration. These tests cover the aligner, not a hardware FIFO, actual
 IF/DE registers, OBI/PMP transactions, the complete IF stage or full-core execution.
+The [IF stage](../if/README.md) and [IF/DE fixture](../if_pipeline/README.md)
+provide production frontend/control and actual boundary/DE integration tests.

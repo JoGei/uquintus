@@ -209,8 +209,9 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 
 Enumerated selectors use readable YAML labels translated into integer RTL
 values through the canonical definition in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets); their exact numeric
-encodings are defined for MUL/DIV, compressed decoding and the register file in
-`config/selectors.json`; predictor encoding remains TBD.
+encodings are defined for MUL/DIV, compressed decoding, branch prediction and
+the register file in `config/selectors.json`. Predictor encodings are
+`none = 0` and `static_not_taken = 1`.
 `MUA_MULDIV_ITERUNROLL` is an integer factor passed to RTL
 unchanged. Every hardware configuration shall explicitly set all parameters,
 including inactive ones, under [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
@@ -227,8 +228,8 @@ labels shall still be validated and mapped through the canonical catalog.
 `MUA_C_DECOMPRESS_STAGE` uses `if = 0`, `de = 1`. The three effective C-enabled
 paths and parent payload rules are defined in Section 15.1. Presets
 `rv32ic`, `rv32ic_decompress_de` and `rv32ic_decoder_c` select them respectively.
-All three paths are implemented at component/DE level; the production IF and
-complete core remain integration work.
+All three paths are implemented in IF/DE with parent-register tests in
+Section 15.5. Complete-core integration remains pending.
 
 `MUA_HARDENED` is a planned future feature. Every hardware configuration shall
 explicitly set it to zero until its implementation is supported. An enabled
@@ -1737,16 +1738,17 @@ than as prediction being disabled. In this mode, a taken branch requires
 discarding younger instructions on the sequential path.
 
 Even in `none` mode, an instruction fetch may already have been accepted before
-decode recognizes the branch. The core shall continue to handle its response;
-the detailed rules for retaining or discarding fetched instructions remain TBD.
+decode recognizes the branch. The frontend shall continue to handle its response
+and retain its data until consumed or invalidated. An accepted redirect shall
+discard buffered old-path data and drain any old transaction as in Section 15.5.
 
 All settings shall preserve the behavior required by the configured ISA.
 Misprediction recovery shall redirect instruction fetch and prevent discarded
 instructions from changing architectural state. With prediction disabled, the
 pipeline shall still handle control hazards correctly.
 
-Additional predictor implementations and mode encodings,
-predictor interfaces, and recovery timing remain TBD. Branch and jump resolution
+The two baseline modes are implemented in Section 15.5. Additional predictor
+implementations, interfaces and encodings remain TBD. Branch and jump resolution
 in decode is defined in [architecture, Section 6](uqu_spec.arch.md#6-resolve-branches-and-jumps-in-decode).
 
 Prediction and resolution are distinct: a BTB-based implementation can predict
@@ -2520,7 +2522,8 @@ instruction PC, length, and fault information needed for correct execution and
 tracing. Compressed decoding is defined in [architecture, Section 15.1](uqu_spec.arch.md#151-configurable-compressed-instruction-decoding).
 Selected-word assembly and fault portions are defined in Section 15.3; the
 fetched-word buffer and prefetch fixture are defined in Section 15.4. Production
-IF/core integration and global redirect handling remain pending.
+IF and accepted redirect handling are defined in Section 15.5; full-core event
+arbitration remains integration work.
 
 Fetch shall continue filling available buffer space during downstream pipeline
 stalls. A downstream stall alone shall not suppress new instruction requests:
@@ -2554,8 +2557,8 @@ those choices for uquintus.
 
 ### 15.1. Configurable compressed-instruction decoding
 
-**Status:** Three strategies implemented at component/DE level; production IF
-and full-core integration pending
+**Status:** Three strategies implemented in IF/DE and checked across actual
+parent-owned boundary storage; full-core integration pending
 
 `ISA_C` selects the software-visible extension. Two independent elaboration
 selectors configure its implementation without changing the ISA:
@@ -2688,7 +2691,8 @@ permissions, independent privilege, concurrent bus progress, retained outcomes
 and discarded IF error responses. Standalone ifetch tests cover permission,
 bus waits/errors, backpressure, killed drains and reset. The aligner is defined
 in Section 15.3 and buffering in Section 15.4. The prefetch fixture combines
-them; the complete IF stage and full-core integration remain pending.
+them; production IF is defined in Section 15.5. Full-core integration remains
+pending.
 
 ### 15.3. Stateless instruction aligner
 
@@ -2737,7 +2741,8 @@ The implementation and regressions cover C-disabled/enabled selection, all
 16-bit prefixes at both halfword positions, missing/error word combinations,
 informative fault portions, wraparound, and mixed-length stream consumption
 under stalls. Fetch/buffer/aligner integration is covered in Section 15.4;
-production stage integration and architectural verification remain pending.
+production IF is implemented in Section 15.5. Architectural verification remains
+pending.
 
 ### 15.4. Fetched-word buffer and prefetch integration
 
@@ -2790,8 +2795,84 @@ scoreboards check reservation, address association, independent fetch and
 instruction progression, mixed-length reuse, response errors, discarded
 transactions and repeated flushes. Capacities 2, 3, 4, 5 and 8 are exercised,
 with C disabled/enabled for integration. This does not implement the production
-IF stage, IF/DE storage, compressed expansion placement, prediction, privileged
-control, debug or FENCE.I integration. PMP remains the one core-owned checker.
+IF stage or IF/DE storage. Production IF, expansion placement and the two
+baseline prediction modes are implemented in Section 15.5; privileged control,
+debug and FENCE.I arbitration remain core integration work. PMP remains the one
+core-owned checker.
+
+### 15.5. Instruction-fetch stage and parent boundary
+
+`src/uquintus/uqu_stage_if.v` shall own the frontend instruction PC, sequential
+word-fetch pointer, run state, fault-delivery containment and instances of
+`uqu_ifetch`, `uqu_if_buffer`, `uqu_if_aligner` and, when selected, the IF
+decompressor. It shall not own the IF/DE register, current privilege, PMP state
+or checker, global event arbitration, architectural trap entry or DE branch
+execution. The [stage guide](../verif/sim/if/README.md) defines exact ports and
+tests. Its parameters shall be `ISA_C`, both compressed strategy selectors,
+`MUA_BRANCH_PREDICTOR` and `MUA_IF_BUFFER_WORDS`.
+
+Each active reset edge shall establish a running frontend at the aligned
+`boot_addr_i` under the core boot contract. Later boot-input changes shall not
+redirect it. An accepted `redirect_valid_i` shall immediately suppress old
+delivery and new native acceptance, invalidate the buffer/fetch engine and
+install `redirect_addr_i` as the instruction PC with its containing word as
+the fetch pointer. Repeated redirects shall replace that target while old bus
+work drains. A plain `flush_i` shall invalidate and stop until a redirect, so
+it cannot resume an unspecified old stream. Reset shall take priority over
+redirect, redirect over plain flush, and all over ordinary transfers. A
+presented request shall still retain its address through grant and drain under
+Section 15.2; replacement native acceptance shall wait for engine readiness.
+
+`fetch_enable_i` shall control new native acceptance and presentation of private
+requests, independently of downstream readiness. `request_permit_i` shall add
+private bus-presentation permission, without preventing native PMP denial.
+Neither shall retract a presented request. In `none` mode, `branch_pending_i`
+shall likewise stop new requests/private presentation for a recognized unresolved
+DE branch/jump. `static_not_taken` shall ignore that branch hold and continue
+sequential prefetch. Both modes shall retain already fetched words/completions
+until consumption or invalidation. Dynamic prediction remains future work.
+
+`permit_i` shall independently gate token delivery. `valid_o && ready_i` shall
+be the sole instruction/fault transfer. A successful transfer shall advance PC
+by the original length and release a head word only when the aligner indicates
+it is fully consumed. Prefetch shall fill reserved capacity during delivery
+stalls. The private engine result shall occupy reserved capacity rather than
+extend `MUA_IF_BUFFER_WORDS`. `fetch_busy_o` shall report engine transaction
+ownership, including private waits, retained results and killed drains; it
+shall not report buffered instructions or architectural pipeline occupancy.
+
+IF shall expose original PC/bits/length and normalized instruction separately.
+`decompress/if` shall expand after alignment; unsupported compressed encodings
+shall yield cause 2 with original bits as tval. `decompress/de` and
+`decode_compressed` shall carry raw bits and leave compressed legality to DE.
+Fetch faults shall take priority, preserve the aligner's fault-portion address,
+and use zero instruction/length placeholders. Native legality and RV32E register
+legality shall remain in DE. Invalid/faulting normalized instructions shall be
+zero; an expansion fault shall retain original compressed identity.
+
+A transferred IF fault shall hold PC, release no word, block new work and emit
+no further token until invalidation/restart. This is local containment, not
+trap arbitration; an older redirect shall be able to discard it. Misaligned
+current PCs shall raise a diagnostic and suppress selection/new fetches without
+reattributing an originating branch/return/debug alignment exception.
+
+For each native acceptance, IF shall issue a combinational core-PMP query with
+aligned address, size 2 (four bytes) and supplied current fetch privilege.
+`pmp_allow_i` shall not affect query validity/address. The fetch engine shall
+capture its denial before any bus presentation. No PMP instance or CSR storage
+shall appear inside IF, and no privilege information shall cross OBI. Core
+privilege/protection transitions and required invalidations remain externally
+controlled.
+
+The [IF/DE fixture](../verif/sim/if_pipeline/README.md) shall register actual IF
+outputs in parent-owned storage and feed real DE. It shall test held boundary
+metadata, original-length links, taken/not-taken branches and wrong-path faults
+in all three compressed strategies. A DE branch accepted for transfer shall
+redirect IF in that cycle without echoing a flush into its own DE transaction.
+External core events shall retain priority. Full-core debug/trap/FENCE.I
+arbitration and the deferred standard CV-X-IF compressed channel remain outside
+this implementation; supplied hold, permit, flush and redirect ports shall
+support later controller integration.
 
 ## 16. Optional instruction-fetch fence
 
@@ -3259,13 +3340,13 @@ be resolved when their implementation milestone is undertaken:
 
 | Area | Remaining work |
 | --- | --- |
-| Execution/control | DE/EX/MEM/WB stages, shared hazards and parent-register/GPR fixtures implemented; connect full-core pipeline/controller sequencing, XIF issue/ID/kill tracking and evaluate timing of enabled forwarding paths. |
-| Memory access | MEM/LSU, registered load readiness, and parent-owned PMP routing verified in a fixture; connect the future IF stage, CSR-owned PMP state, precise-effect permission control, and fences in the full core. |
+| Execution/control | IF/DE/EX/MEM/WB stages, shared hazards and parent-register/GPR fixtures implemented; connect full-core pipeline/controller sequencing, XIF issue/ID/kill tracking and evaluate timing of enabled forwarding paths. |
+| Memory access | MEM/LSU, registered load readiness, IF PMP query and parent-owned PMP routing verified at component/fixture level; connect CSR-owned PMP state, both stages, precise-effect permission control, and fences in the full core. |
 | Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
 | ISA/CSR/PMP | WB owns decoded CSR state/access checks, optional PMP/FP state, counters and accepted trap/MRET updates; integrate with the full-core controller and two-port PMP checker, preserve instruction-age/retirement rules, and connect XIF issue/tracking and the core debug controller to implemented WB endpoints. |
-| Frontend | Integrate selected compressed-decode strategy, prefetch/fault association, redirect tracking and future predictors; preserve original instruction identity and request persistence. |
+| Frontend | IF owns selected expansion placement, prefetch/fault association, redirect tracking and none/static_not_taken behavior; integrate full-core event arbitration, future dynamic predictors and the deferred standard XIF compressed channel. |
 | Milestones | Implementation order and acceptance criteria for optional ISA features, PMP, XIF, latch storage, and non-default configurations after the baseline milestone. |
 
 Full F and its separate register file are deferred in favor of Zfinx. `ISA_A`
@@ -3324,7 +3405,7 @@ later decisions determine the active contract.
 | D-119 | Initially hardwire `mvendorid`, `marchid`, and `mimpid` to zero as standard read-only identification CSRs. | Use permitted initial values while deferring project-specific identifiers. | Agreed |
 | D-139 | Configure instruction-fetch buffer capacity through `MUA_IF_BUFFER_WORDS`, defaulting to two 32-bit word slots while retaining one outstanding fetch request. | Support instruction reuse and assembly with an adjustable buffer size independent of bus concurrency. | Agreed; supported capacities defined by D-217, prefetch policy defined by D-140 |
 | D-140 | Continue filling available instruction-buffer space during downstream stalls, subject to capacity, one outstanding request, and control-flow/synchronization restrictions. | Overlap fetch latency with pipeline stalls while retaining precise fault handling and correct redirect recovery. | Agreed; detailed frontend control implementation TBD |
-| D-141 | Implement compressed-instruction expansion in a separate module, initially in IF before the IF/DE register, retaining original encoding, PC, length, and fault metadata. | Reuse the native DE decoder and keep decompression placement easy to revisit after timing evaluation. | Native component implemented under D-282; configurable strategies under D-283; full IF integration and timing evaluation pending |
+| D-141 | Implement compressed-instruction expansion in a separate module, initially in IF before the IF/DE register, retaining original encoding, PC, length, and fault metadata. | Reuse the native DE decoder and keep decompression placement easy to revisit after timing evaluation. | Native component under D-282; strategies under D-283; IF integration under D-287; full-core integration and timing evaluation pending |
 | D-142 | Keep PMP CSRs and permission checks inside the core before memory requests; expose no privilege/PMP attributes for external enforcement, and consume external bus faults through the normal error responses. | Make protection a core responsibility while keeping the memory interface independent of PMP implementation. | Agreed; enable/default defined by D-143 and fixed capacity by D-251; remaining field details and milestone open |
 | D-143 | Select internal PMP through `ISA_PMP`, defaulting to `0`; omit permission-checking logic and writable PMP-entry storage when disabled. | Keep PMP optional and preserve the default implementation scope. | Agreed; disabled CSR behavior defined by D-144; fixed sixteen-entry enabled capacity by D-251 |
 | D-144 | When `ISA_PMP = 0`, keep standard PMP CSRs accessible in M-mode with reads returning zero and permitted writes ignored; retain normal CSR privilege checks. | Allow software probing without writable PMP-entry storage. | Agreed |
@@ -3424,7 +3505,8 @@ later decisions determine the active contract.
 | D-279 | Implement the standalone hazard unit with normalized producer inputs, DE/EX source resolution, movement-qualified guarantees and optional DE operand retention; add explicit boolean configuration support and a retained-RV32I preset. | Make the agreed dependency policies executable and testable before assembling DE or the full core. | Implemented; Section 4.2.5 and hazard component guide; forty-profile regression, lint, configuration guards and optimized storage checks; core/stage integration pending |
 | D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented; Section 3.12; component and native parent-fixture regressions, lint and optimized-state/signal-dependency checks; full-core controller/frontend/XIF ID integration pending |
 | D-282 | Implement stateless integer RV32C expansion with explicit original bits, compressed/illegal/HINT flags, C-disabled bypass and unchanged native words; preserve HINT register fields for downstream RV32E checks. | Reuse the decoder and DE, retain precise fault/link identity and eliminate expansion logic when C is disabled. | Implemented; Section 15.1; exhaustive halfword and decoder/DE integration tests; fetch assembly and optional XIF compressed-channel integration pending |
-| D-283 | Select compressed decoding through MUA_C_IMPL = decompress or decode_compressed, with MUA_C_DECOMPRESS_STAGE = if or de for expansion placement; default to decompress/if and ignore the selectors when C is disabled. | Compare expansion placement against parallel direct decoding while preserving ISA, original instruction identity, shared DE execution control and standard XIF ownership. | Component/DE paths implemented and tested; Section 15.1; full frontend/core integration and PPA evaluation pending |
-| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented; Section 15.2; standalone and real shared-PMP/LSU fixture tests; aligner under D-285, buffer/prefetch fixture under D-286; production IF/core integration pending |
-| D-285 | Implement stateless uqu_if_aligner over two ordered words with original instruction/length, next-PC and qualified-consumption suggestions; contain fetch faults with the correct first/second portion address and leave storage, PMP, decode and transfer control outside. | Separate word selection/assembly from transaction handling and configurable compressed decoding while preserving precise fault identity and word reuse. | Implemented; Section 15.3; C-disabled/enabled exhaustive prefix, error/availability, randomized and stream checks; buffer/prefetch fixture under D-286; production IF/core integration pending |
-| D-286 | Implement uqu_if_buffer as a fetched-word FIFO with two read windows, simultaneous pop/push, non-power-of-two capacity and minimal reset; keep prefetch addresses, response reservation and redirect control in IF, verified by a real fetch/buffer/aligner fixture. | Separate storage from instruction selection and bus handling, reserve capacity without duplicate tracking for the one-writer/one-outstanding baseline, and preserve killed-response obligations. | Implemented; Section 15.4; standalone deque tests and C-disabled/enabled prefetch integration at depths 2, 3, 4, 5 and 8; production IF/core integration pending |
+| D-283 | Select compressed decoding through MUA_C_IMPL = decompress or decode_compressed, with MUA_C_DECOMPRESS_STAGE = if or de for expansion placement; default to decompress/if and ignore the selectors when C is disabled. | Compare expansion placement against parallel direct decoding while preserving ISA, original instruction identity, shared DE execution control and standard XIF ownership. | IF/DE paths implemented and tested; Sections 15.1 and 15.5; full-core integration and PPA evaluation pending |
+| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented; Section 15.2; standalone and real shared-PMP/LSU fixture tests; aligner under D-285, buffer/prefetch fixture under D-286; production IF under D-287; full-core integration pending |
+| D-285 | Implement stateless uqu_if_aligner over two ordered words with original instruction/length, next-PC and qualified-consumption suggestions; contain fetch faults with the correct first/second portion address and leave storage, PMP, decode and transfer control outside. | Separate word selection/assembly from transaction handling and configurable compressed decoding while preserving precise fault identity and word reuse. | Implemented; Section 15.3; C-disabled/enabled exhaustive prefix, error/availability, randomized and stream checks; buffer/prefetch fixture under D-286; production IF under D-287; full-core integration pending |
+| D-286 | Implement uqu_if_buffer as a fetched-word FIFO with two read windows, simultaneous pop/push, non-power-of-two capacity and minimal reset; keep prefetch addresses, response reservation and redirect control in IF, verified by a real fetch/buffer/aligner fixture. | Separate storage from instruction selection and bus handling, reserve capacity without duplicate tracking for the one-writer/one-outstanding baseline, and preserve killed-response obligations. | Implemented; Section 15.4; standalone deque tests and C-disabled/enabled prefetch integration at depths 2, 3, 4, 5 and 8; production IF under D-287; full-core integration pending |
+| D-287 | Assemble uqu_stage_if around fetch, word storage, alignment and selected IF expansion; own frontend pointers/containment while leaving IF/DE, PMP and global arbitration in the core; implement none/static_not_taken control with canonical encodings 0/1. | Make native frontend behavior concrete with reserved capacity, independent request/delivery holds, precise original instruction identity and persistent stale-transaction draining. | Implemented; Section 15.5; standalone and real IF/DE/DE parent-fixture tests across compressed paths, both branch modes and variable depths; full-core and standard XIF compressed-channel integration remain pending |

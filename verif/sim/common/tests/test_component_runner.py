@@ -106,6 +106,30 @@ class ComponentRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not exist"):
             bender_include_dirs({"include_dirs": ["missing"]}, self.directory)
 
+    def test_branch_predictor_is_explicit_and_encoded(self):
+        from hw_config import write_header
+
+        catalog = json.loads((ROOT / "config/selectors.json").read_text())
+        config = load_configuration(ROOT / "config/rv32i.yml", catalog)
+        name = "MUA_BRANCH_PREDICTOR"
+        path = self.directory / "predictor.yml"
+        for setting,value in (("none",0),("static_not_taken",1)):
+            path.write_text(yaml.safe_dump(dict(config, **{name:setting})))
+            checked = load_configuration(path,catalog)
+            self.assertEqual(parameters_for_component(checked,[name],catalog),{name:value})
+        for invalid in (0,True,"dynamic","NONE"):
+            path.write_text(yaml.safe_dump(dict(config, **{name:invalid})))
+            with self.assertRaisesRegex(ValueError,name):
+                load_configuration(path,catalog)
+        del config[name]
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError,"missing=.*"+name):
+            load_configuration(path,catalog)
+        write_header(catalog,self.directory)
+        header = (self.directory / "uqu_config.vh").read_text()
+        self.assertIn("`define UQU_BP_NONE 0",header)
+        self.assertIn("`define UQU_BP_STATIC_NOT_TAKEN 1",header)
+
     def test_results_require_exact_selected_tests(self):
         path = self.directory / "results.xml"
         path.write_text('<testsuites><testsuite><testcase name="smoke"/>'

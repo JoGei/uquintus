@@ -6,28 +6,34 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
-      - target: any(if_buffer, if_prefetch_test, rtl)
+      - target: any(if_buffer, if, if_pipeline_test, if_prefetch_test, rtl)
         files:
           - src/uquintus/uqu_if_buffer.v
-      - target: any(if_aligner, if_prefetch_test, rtl)
+      - target: any(if_aligner, if, if_pipeline_test, if_prefetch_test, rtl)
         files:
           - src/uquintus/uqu_if_aligner.v
-      - target: any(ifetch, ifetch_pmp_test, if_prefetch_test, rtl)
+      - target: any(ifetch, if, if_pipeline_test, ifetch_pmp_test, if_prefetch_test, rtl)
         files:
           - src/uquintus/uqu_ifetch.v
       - target: if_prefetch_test
         files:
           - verif/sim/if_prefetch/uqu_if_prefetch_tb.v
+      - target: any(if, if_pipeline_test, rtl)
+        files:
+          - src/uquintus/uqu_stage_if.v
+      - target: if_pipeline_test
+        files:
+          - verif/sim/if_pipeline/uqu_if_pipeline_tb.v
       - target: ifetch_pmp_test
         files:
           - verif/sim/ifetch_pmp/uqu_ifetch_pmp_tb.v
-      - target: any(decompressor, decompressor_test, de, de_pipeline_test, rtl)
+      - target: any(decompressor, decompressor_test, if, if_pipeline_test, de, de_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_decompressor.v
-      - target: any(decode_c, decompressor_test, de, de_pipeline_test, rtl)
+      - target: any(decode_c, decompressor_test, de, de_pipeline_test, if_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_decoder_c.v
-      - target: any(decompressor_test, de, de_pipeline_test, rtl)
+      - target: any(decompressor_test, de, de_pipeline_test, if_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_decoder_select.v
       - target: decompressor_test
@@ -36,13 +42,13 @@ sources:
       - target: any(hazard, de_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_hazard.v
-      - target: any(decode, branch_test, de, de_pipeline_test, decompressor_test, rtl)
+      - target: any(decode, branch_test, de, de_pipeline_test, if_pipeline_test, decompressor_test, rtl)
         files:
           - src/uquintus/uqu_decoder.v
-      - target: any(branch, branch_test, de, de_pipeline_test, decompressor_test, rtl)
+      - target: any(branch, branch_test, de, de_pipeline_test, if_pipeline_test, decompressor_test, rtl)
         files:
           - src/uquintus/uqu_branch.v
-      - target: any(de, de_pipeline_test, decompressor_test, rtl)
+      - target: any(de, de_pipeline_test, if_pipeline_test, decompressor_test, rtl)
         files:
           - src/uquintus/uqu_stage_de.v
       - target: de_pipeline_test

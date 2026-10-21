@@ -53,5 +53,7 @@ requests must retain their addresses across all control changes.
 
 Depths 2, 3, 4, 5 and 8 are covered with C disabled/enabled. There is no decoder,
 decompressor, IF/DE register, predictor, privileged controller, debug controller,
-FENCE.I handshake or architectural retirement in this fixture. Those integrations
-remain with the production IF/core work.
+FENCE.I handshake or architectural retirement in this fixture. Production
+[IF](../if/README.md) and the [IF/DE fixture](../if_pipeline/README.md) now cover
+frontend control, expansion and DE branch feedback. Full-core arbitration and
+architectural retirement remain integration work.

@@ -117,5 +117,6 @@ combinational bus-response-to-result path or flush-to-bus withdrawal path.
 The [word buffer](../if_buffer/README.md) and
 [prefetch fixture](../if_prefetch/README.md) add real fetch/buffer/aligner
 integration with capacity reservation, fault containment and redirect draining.
-Production IF-stage/core integration, RVFI and software-level verification
-remain pending.
+Production [IF](../if/README.md) and its [parent-register fixture](../if_pipeline/README.md)
+add configured expansion and accepted DE branch feedback. Full-core integration,
+RVFI and software-level verification remain pending.
