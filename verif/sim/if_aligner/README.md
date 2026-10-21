@@ -25,8 +25,9 @@ The aligner is the same for `decompress/if`, `decompress/de` and
 | `word1_valid_i`, `word1_data_i[31:0]`, `word1_error_i` | The next consecutive word, at containing-word address +4 modulo 2^32. |
 
 The parent must supply words for those addresses, not merely arbitrary FIFO
-slots. A future word buffer owns address association, storage, occupancy and
-response capture. The [ifetch engine](../ifetch/README.md) supplies aligned words
+slots. The [word buffer](../if_buffer/README.md) owns storage and occupancy;
+IF control guarantees address association and reserves response capacity.
+The [ifetch engine](../ifetch/README.md) supplies aligned words
 and errors after checking the denial from the one core-owned PMP. Neither
 requesting memory nor checking protection occurs in the aligner.
 
@@ -97,7 +98,7 @@ instruction encoding. Fetch faults take priority over downstream illegality.
 
 ## Verification
 
-The local [byte-window oracle](aligner_model.py) slices a little-endian byte
+The shared [byte-window oracle](../common/if_aligner_model.py) slices a little-endian byte
 image and checks required-word availability/error membership independently of
 the RTL's bit concatenations.
 

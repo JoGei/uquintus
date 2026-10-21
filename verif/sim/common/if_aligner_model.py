@@ -1,4 +1,4 @@
-"""Byte-window instruction selection oracle; no RTL control/concatenation reuse."""
+"""Byte-window oracle shared by standalone alignment and real prefetch tests."""
 
 MASK = (1 << 32)-1
 

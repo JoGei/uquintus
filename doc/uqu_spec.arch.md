@@ -2518,8 +2518,9 @@ as required in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruc
 number of permitted outstanding requests. The buffer shall preserve the
 instruction PC, length, and fault information needed for correct execution and
 tracing. Compressed decoding is defined in [architecture, Section 15.1](uqu_spec.arch.md#151-configurable-compressed-instruction-decoding).
-Selected-word assembly and fault portions are defined in Section 15.3; buffer
-integration and redirect handling remain pending.
+Selected-word assembly and fault portions are defined in Section 15.3; the
+fetched-word buffer and prefetch fixture are defined in Section 15.4. Production
+IF/core integration and global redirect handling remain pending.
 
 Fetch shall continue filling available buffer space during downstream pipeline
 stalls. A downstream stall alone shall not suppress new instruction requests:
@@ -2686,8 +2687,8 @@ core checker to the real ifetch and LSU engines, checking execute versus R/W
 permissions, independent privilege, concurrent bus progress, retained outcomes
 and discarded IF error responses. Standalone ifetch tests cover permission,
 bus waits/errors, backpressure, killed drains and reset. The aligner is defined
-in Section 15.3; word buffering, complete IF stage and full-core integration
-remain pending.
+in Section 15.3 and buffering in Section 15.4. The prefetch fixture combines
+them; the complete IF stage and full-core integration remain pending.
 
 ### 15.3. Stateless instruction aligner
 
@@ -2735,8 +2736,62 @@ reset, ready input or internal acceptance tracking belongs to the aligner.
 The implementation and regressions cover C-disabled/enabled selection, all
 16-bit prefixes at both halfword positions, missing/error word combinations,
 informative fault portions, wraparound, and mixed-length stream consumption
-under stalls. Full buffer/stage integration and architectural verification
-remain pending.
+under stalls. Fetch/buffer/aligner integration is covered in Section 15.4;
+production stage integration and architectural verification remain pending.
+
+### 15.4. Fetched-word buffer and prefetch integration
+
+`src/uquintus/uqu_if_buffer.v` shall store raw aligned fetched words in FIFO
+order, retaining address, data and word-level error. Its sole parameter shall
+be `MUA_IF_BUFFER_WORDS`, with the capacity rules in Section 15. The same storage
+shall serve C-disabled and C-enabled configurations and all compressed-decoding
+strategies. The [component guide](../verif/sim/if_buffer/README.md) defines ports
+and cycle behavior. The FIFO shall expose its oldest two entries independently
+of new input data; it shall not provide an empty combinational bypass.
+
+An input valid/ready handshake shall insert one word. A parent-qualified pop
+shall release at most one existing head. Empty pops shall do nothing, including
+when an input is accepted on that edge. Full queues shall support simultaneous
+head removal and tail insertion. Head/tail pointers shall wrap explicitly at
+the configured depth, including non-power-of-two depths. Invalid read windows
+shall expose zero fields; error words shall expose zero data. Reset and flush
+shall invalidate control only, without resetting payload arrays. During reset
+or flush, input readiness and output validities shall be suppressed.
+
+The FIFO shall not own an instruction PC, fetch-address generator, redirect
+policy, instruction decoder, PMP checker or bus interface. IF control shall
+ensure the oldest word contains the current instruction PC and the second word
+is its consecutive successor before supplying the aligner. The parent shall
+pop only when an instruction transfer consumes the old head according to
+the aligner's suggestion; a low-half compressed instruction shall retain it.
+Fault words shall remain associated with their original addresses until used
+or discarded. Only the aligner shall turn selected fetch errors into tokens.
+
+IF shall start a native fetch only with an idle engine and free buffer capacity,
+including space released by a qualified simultaneous pop. With one outstanding
+transaction and no other FIFO writer, this shall reserve space implicitly:
+occupancy cannot increase before that engine's result is inserted. The engine's
+private response slot shall hold the reserved word, not permit an extra word
+beyond the configured capacity. Buffered words plus a busy fetch engine shall
+never exceed `MUA_IF_BUFFER_WORDS`. The fetch address shall advance by four only
+on native acceptance; the instruction PC shall advance only on accepted
+instruction transfer. Consumer stalls alone shall not stop prefetch filling.
+
+On an accepted invalidation/redirect, the parent shall flush both engine and
+FIFO, replace the instruction PC and sequential fetch pointer, and prevent any
+discarded response from refilling the FIFO. Presented OBI requests shall still
+finish and drain under Section 15.2. A replacement request shall wait until
+the engine is idle. A transferred fault shall be contained until redirect;
+it shall not be delivered repeatedly or advance the instruction PC.
+
+The [prefetch fixture](../verif/sim/if_prefetch/README.md) connects real fetch,
+buffer and aligner RTL to a verification-only controller. Deque/byte-window
+scoreboards check reservation, address association, independent fetch and
+instruction progression, mixed-length reuse, response errors, discarded
+transactions and repeated flushes. Capacities 2, 3, 4, 5 and 8 are exercised,
+with C disabled/enabled for integration. This does not implement the production
+IF stage, IF/DE storage, compressed expansion placement, prediction, privileged
+control, debug or FENCE.I integration. PMP remains the one core-owned checker.
 
 ## 16. Optional instruction-fetch fence
 
@@ -3370,5 +3425,6 @@ later decisions determine the active contract.
 | D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented; Section 3.12; component and native parent-fixture regressions, lint and optimized-state/signal-dependency checks; full-core controller/frontend/XIF ID integration pending |
 | D-282 | Implement stateless integer RV32C expansion with explicit original bits, compressed/illegal/HINT flags, C-disabled bypass and unchanged native words; preserve HINT register fields for downstream RV32E checks. | Reuse the decoder and DE, retain precise fault/link identity and eliminate expansion logic when C is disabled. | Implemented; Section 15.1; exhaustive halfword and decoder/DE integration tests; fetch assembly and optional XIF compressed-channel integration pending |
 | D-283 | Select compressed decoding through MUA_C_IMPL = decompress or decode_compressed, with MUA_C_DECOMPRESS_STAGE = if or de for expansion placement; default to decompress/if and ignore the selectors when C is disabled. | Compare expansion placement against parallel direct decoding while preserving ISA, original instruction identity, shared DE execution control and standard XIF ownership. | Component/DE paths implemented and tested; Section 15.1; full frontend/core integration and PPA evaluation pending |
-| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented; Section 15.2; standalone and real shared-PMP/LSU fixture tests; aligner under D-285; buffer and IF/core integration pending |
-| D-285 | Implement stateless uqu_if_aligner over two ordered words with original instruction/length, next-PC and qualified-consumption suggestions; contain fetch faults with the correct first/second portion address and leave storage, PMP, decode and transfer control outside. | Separate word selection/assembly from transaction handling and configurable compressed decoding while preserving precise fault identity and word reuse. | Implemented; Section 15.3; C-disabled/enabled exhaustive prefix, error/availability, randomized and stream checks; word buffer and IF/core integration pending |
+| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented; Section 15.2; standalone and real shared-PMP/LSU fixture tests; aligner under D-285, buffer/prefetch fixture under D-286; production IF/core integration pending |
+| D-285 | Implement stateless uqu_if_aligner over two ordered words with original instruction/length, next-PC and qualified-consumption suggestions; contain fetch faults with the correct first/second portion address and leave storage, PMP, decode and transfer control outside. | Separate word selection/assembly from transaction handling and configurable compressed decoding while preserving precise fault identity and word reuse. | Implemented; Section 15.3; C-disabled/enabled exhaustive prefix, error/availability, randomized and stream checks; buffer/prefetch fixture under D-286; production IF/core integration pending |
+| D-286 | Implement uqu_if_buffer as a fetched-word FIFO with two read windows, simultaneous pop/push, non-power-of-two capacity and minimal reset; keep prefetch addresses, response reservation and redirect control in IF, verified by a real fetch/buffer/aligner fixture. | Separate storage from instruction selection and bus handling, reserve capacity without duplicate tracking for the one-writer/one-outstanding baseline, and preserve killed-response obligations. | Implemented; Section 15.4; standalone deque tests and C-disabled/enabled prefetch integration at depths 2, 3, 4, 5 and 8; production IF/core integration pending |

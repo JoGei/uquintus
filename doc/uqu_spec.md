@@ -21,6 +21,7 @@ The repository contains specifications and standalone
 [native decoder](../verif/sim/decode/README.md),
 [instruction-word fetch engine](../verif/sim/ifetch/README.md),
 [instruction aligner](../verif/sim/if_aligner/README.md),
+[fetched-word buffer](../verif/sim/if_buffer/README.md),
 [compressed expansion/strategy selection](../verif/sim/decompressor/README.md),
 [direct compressed decoder](../verif/sim/decode_c/README.md),
 [DE branch unit](../verif/sim/branch/README.md),
@@ -35,6 +36,9 @@ The repository contains specifications and standalone
 [two-port PMP checker](../verif/sim/pmp/README.md), and
 [native multiply/divide](../verif/sim/muldiv/README.md) components with a common
 simulation/lint flow and a [shared-parent arithmetic fixture](../verif/sim/exec_arith/README.md).
+A [prefetch fixture](../verif/sim/if_prefetch/README.md) connects the actual
+fetcher, word buffer and aligner with capacity reservation, PC/fetch pointers,
+fault containment and redirect/drain control under memory and consumer stalls.
 A [DE parent fixture](../verif/sim/de_pipeline/README.md) verifies DE with real
 IF/DE and DE/EX storage, GPR reads/writes and shared forwarding/hazard logic.
 A [parent-register fixture](../verif/sim/ex_pipeline/README.md) verifies EX

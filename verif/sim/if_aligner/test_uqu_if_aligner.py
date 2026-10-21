@@ -3,12 +3,15 @@ import itertools
 import json
 import os
 import random
+from pathlib import Path
+import sys
 
 import cocotb
 from cocotb.triggers import Timer
 from pyuvm import uvm_root, uvm_test
 
-from aligner_model import MASK, select
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
+from if_aligner_model import MASK, select
 
 
 class AlignerTest(uvm_test):

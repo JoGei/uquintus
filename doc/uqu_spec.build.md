@@ -5,7 +5,7 @@
 Build/configuration contracts and project organization. A shared component
 simulation/lint flow supports the register file, ALU, arithmetic datapath, native
 multiply/divide, native decoder, DE branch unit, DE/EX hazard unit, DE, EX,
-MEM/LSU, instruction-word fetch/aligner, WB, PMP checker, CSR register file, and shared-arithmetic/parent-register
+MEM/LSU, instruction-word fetch/buffer/aligner, WB, PMP checker, CSR register file, and shared-arithmetic/prefetch/parent-register
 fixtures; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
 

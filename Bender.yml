@@ -6,12 +6,18 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
-      - target: any(if_aligner, rtl)
+      - target: any(if_buffer, if_prefetch_test, rtl)
+        files:
+          - src/uquintus/uqu_if_buffer.v
+      - target: any(if_aligner, if_prefetch_test, rtl)
         files:
           - src/uquintus/uqu_if_aligner.v
-      - target: any(ifetch, ifetch_pmp_test, rtl)
+      - target: any(ifetch, ifetch_pmp_test, if_prefetch_test, rtl)
         files:
           - src/uquintus/uqu_ifetch.v
+      - target: if_prefetch_test
+        files:
+          - verif/sim/if_prefetch/uqu_if_prefetch_tb.v
       - target: ifetch_pmp_test
         files:
           - verif/sim/ifetch_pmp/uqu_ifetch_pmp_tb.v

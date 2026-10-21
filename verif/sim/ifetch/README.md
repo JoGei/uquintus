@@ -114,6 +114,8 @@ The [shared-PMP fixture](../ifetch_pmp/README.md) connects one real core-owned
 checker to both real engines. Standalone and fixture lint use Verilog-2005.
 Synthesis finds 67 storage bits, only four with synchronous reset; no latches,
 combinational bus-response-to-result path or flush-to-bus withdrawal path.
-These are component/integration checks. The aligner is separately implemented;
-prefetch buffering, IF-stage integration, fault containment, RVFI and
-software-level verification remain pending.
+The [word buffer](../if_buffer/README.md) and
+[prefetch fixture](../if_prefetch/README.md) add real fetch/buffer/aligner
+integration with capacity reservation, fault containment and redirect draining.
+Production IF-stage/core integration, RVFI and software-level verification
+remain pending.

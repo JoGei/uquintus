@@ -23,6 +23,8 @@ shared by the standalone stage and parent-register fixture.
 fetch engine and shared-PMP fixture. `pmp_model.py` provides the independent
 byte-interval permission model shared by standalone PMP and concurrent IF/LSU
 tests; protection implementation remains in the one core-owned RTL checker.
+`if_aligner_model.py` supplies byte-window selection and fault-portion expectations
+to standalone alignment and real fetch/buffer/aligner integration tests.
 `csregfile_model.py` supplies architectural CSR words/events to both CSR and WB
 tests. `wb_model.py` adds commitment, fault and architectural GPR expectations
 shared by the WB stage and its parent-register/GPR fixture.
