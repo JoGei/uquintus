@@ -7,6 +7,7 @@ Implemented standalone components:
 
 | Component | RTL | Verification guide |
 | --- | --- | --- |
+| Instruction-word fetch engine | [uqu_ifetch.v](src/uquintus/uqu_ifetch.v) | [Ifetch interface and tests](verif/sim/ifetch/README.md) |
 | Compressed-instruction expander | [uqu_decompressor.v](src/uquintus/uqu_decompressor.v) | [Decompressor interface and tests](verif/sim/decompressor/README.md) |
 | Direct compressed decoder | [uqu_decoder_c.v](src/uquintus/uqu_decoder_c.v) | [Direct decode interface and tests](verif/sim/decode_c/README.md) |
 | Decode stage | [uqu_stage_de.v](src/uquintus/uqu_stage_de.v) | [DE interface and tests](verif/sim/de/README.md) |
@@ -34,6 +35,8 @@ Provide Bender, Verilator, GNU Make, a C++ compiler, and the Python dependencies
 in `verif/requirements.txt` through your environment. Then run:
 
 ```sh
+make test COMPONENT=ifetch CONFIG=rv32i
+make test COMPONENT=ifetch_pmp CONFIG=rv32i_pmp
 make test COMPONENT=decompressor CONFIG=rv32ic
 make test COMPONENT=decompressor CONFIG=rv32ic_decompress_de
 make test COMPONENT=decompressor CONFIG=rv32ic_decoder_c
@@ -80,6 +83,7 @@ Make invokes the shared component-testing helper in
 [verif/sim/common/](verif/sim/common/README.md). Component-specific DUT and test
 settings live in `config/sim/<component>.yml`; examples are
 [decompressor.yml](config/sim/decompressor.yml), [decode_c.yml](config/sim/decode_c.yml), [de.yml](config/sim/de.yml), [de_pipeline.yml](config/sim/de_pipeline.yml),
+[ifetch.yml](config/sim/ifetch.yml), [ifetch_pmp.yml](config/sim/ifetch_pmp.yml),
 [hazard.yml](config/sim/hazard.yml), [branch.yml](config/sim/branch.yml), [decode.yml](config/sim/decode.yml), [gpregfile.yml](config/sim/gpregfile.yml), [arith.yml](config/sim/arith.yml),
 [alu.yml](config/sim/alu.yml), [muldiv.yml](config/sim/muldiv.yml),
 [exec_arith.yml](config/sim/exec_arith.yml), [ex.yml](config/sim/ex.yml),
@@ -92,6 +96,8 @@ standard CV-X-IF commit/results, paired writes and debug execution endpoints.
 Use [rv32i_xif_debug.yml](config/rv32i_xif_debug.yml) to exercise both optional WB
 features (`make test COMPONENT=wb CONFIG=rv32i_xif_debug`). To test enabled PMP matching, use a complete
 hardware configuration with `ISA_PMP: 1`; `rv32i` tests its disabled bypass.
+The [rv32i_pmp preset](config/rv32i_pmp.yml) enables the checker for reproducible
+PMP/CSR tests and the [shared IF/LSU fixture](verif/sim/ifetch_pmp/README.md).
 Use `make test-runner` to
 check the shared tooling without running an HDL simulator.
 

@@ -2641,6 +2641,52 @@ The [decompressor/strategy guide](../verif/sim/decompressor/README.md),
 [direct decoder guide](../verif/sim/decode_c/README.md) and
 [DE guide](../verif/sim/de/README.md) define concrete ports and regressions.
 
+### 15.2. Instruction-word fetch engine and core-owned PMP
+
+`src/uquintus/uqu_ifetch.v` is the IF-owned, read-only word transaction engine.
+Its [component guide](../verif/sim/ifetch/README.md) defines exact ports and
+timing. It owns one private request/result slot, not the prefetch buffer,
+instruction aligner or core-parent IF/DE register. It has no ISA, prediction,
+PMP or compressed-decode parameters.
+
+The requester shall present a containing-word address through `req_addr_i`;
+the engine shall capture `{req_addr_i[31:2],2'b00}` and ignore the low bits.
+This operation shall not replace instruction-PC alignment checking. The core
+shall check that same aligned four-byte word for execute permission using the
+IF port of its existing shared `uqu_pmp`, with fetch privilege derived by IF/core.
+The resulting denial shall reach `req_access_fault_i` before native acceptance.
+The MEM parent shall independently use the other checker port for LSU address,
+size, R/W access and effective privilege. PMP configuration/address state shall
+connect only to the core-owned checker; neither engine shall instantiate PMP
+or expose privilege attributes on the memory bus.
+
+A denied request shall produce a registered error word without asserting the
+bus. An allowed request may wait privately for `request_permit_i`, separately
+from protection. Once presented on OBI, request/address shall remain stable
+through stalls, permission changes and flush until grant. One response slot
+shall be reserved, grant/response waits shall have no timeout, and each response
+shall be captured regardless of consumer readiness. `res_valid_o`, aligned
+`res_addr_o`, `res_data_o` and `res_error_o` shall retain the completion until
+consumed or discarded. Bus errors shall be sampled only with response valid;
+there shall be no combinational response-data bypass. Data shall be zero on
+an error, and all result fields zero while invalid.
+
+Flush shall cancel private permission waits or retained results, but an already
+presented request shall still finish its handshake and drain its response.
+Discarded words, including their errors, shall produce no result or trap.
+Reset shall clear only transaction control under the coordinated bus-reset
+contract. IF/core shall own redirect targets, invalidation and request holds.
+The later buffer/aligner shall associate each word error with a surviving
+instruction and its faulting byte portion before generating cause 1; a word
+error alone shall not perform architectural trap entry.
+
+The [shared-PMP fixture](../verif/sim/ifetch_pmp/README.md) connects exactly one
+core checker to the real ifetch and LSU engines, checking execute versus R/W
+permissions, independent privilege, concurrent bus progress, retained outcomes
+and discarded IF error responses. Standalone ifetch tests cover permission,
+bus waits/errors, backpressure, killed drains and reset. The word buffer,
+aligner, complete IF stage and full-core integration remain pending.
+
 ## 16. Optional instruction-fetch fence
 
 **Status:** DE serialization, WB completion/restart, and request/acknowledgement
@@ -3273,3 +3319,4 @@ later decisions determine the active contract.
 | D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented; Section 3.12; component and native parent-fixture regressions, lint and optimized-state/signal-dependency checks; full-core controller/frontend/XIF ID integration pending |
 | D-282 | Implement stateless integer RV32C expansion with explicit original bits, compressed/illegal/HINT flags, C-disabled bypass and unchanged native words; preserve HINT register fields for downstream RV32E checks. | Reuse the decoder and DE, retain precise fault/link identity and eliminate expansion logic when C is disabled. | Implemented; Section 15.1; exhaustive halfword and decoder/DE integration tests; fetch assembly and optional XIF compressed-channel integration pending |
 | D-283 | Select compressed decoding through MUA_C_IMPL = decompress or decode_compressed, with MUA_C_DECOMPRESS_STAGE = if or de for expansion placement; default to decompress/if and ignore the selectors when C is disabled. | Compare expansion placement against parallel direct decoding while preserving ISA, original instruction identity, shared DE execution control and standard XIF ownership. | Component/DE paths implemented and tested; Section 15.1; full frontend/core integration and PPA evaluation pending |
+| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented; Section 15.2; standalone and real shared-PMP/LSU fixture tests; buffer, aligner and IF/core integration pending |

@@ -1,0 +1,8 @@
+top_module: uqu_ifetch_pmp_tb
+bender_target: ifetch_pmp_test
+test_module: test_uqu_ifetch_pmp
+parameters:
+  - ISA_PMP
+tests:
+  - permissions
+  - concurrent

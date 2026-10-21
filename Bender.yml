@@ -6,6 +6,12 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
+      - target: any(ifetch, ifetch_pmp_test, rtl)
+        files:
+          - src/uquintus/uqu_ifetch.v
+      - target: ifetch_pmp_test
+        files:
+          - verif/sim/ifetch_pmp/uqu_ifetch_pmp_tb.v
       - target: any(decompressor, decompressor_test, de, de_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_decompressor.v
@@ -54,7 +60,7 @@ sources:
       - target: ex_pipeline_test
         files:
           - verif/sim/ex_pipeline/uqu_ex_pipeline_tb.v
-      - target: any(lsu, mem, mem_pipeline_test, rtl)
+      - target: any(lsu, mem, mem_pipeline_test, ifetch_pmp_test, rtl)
         files:
           - src/uquintus/uqu_lsu.v
       - target: any(mem, mem_pipeline_test, rtl)
@@ -72,7 +78,7 @@ sources:
       - target: wb_pipeline_test
         files:
           - verif/sim/wb_pipeline/uqu_wb_pipeline_tb.v
-      - target: any(pmp, mem_pipeline_test, rtl)
+      - target: any(pmp, mem_pipeline_test, ifetch_pmp_test, rtl)
         files:
           - src/uquintus/uqu_pmp.v
       - target: alu_test

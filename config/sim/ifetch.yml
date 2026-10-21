@@ -1,0 +1,8 @@
+top_module: uqu_ifetch
+bender_target: ifetch
+test_module: test_uqu_ifetch
+parameters: []
+tests:
+  - directed
+  - randomized
+  - control

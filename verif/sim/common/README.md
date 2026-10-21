@@ -19,6 +19,10 @@ EX outcomes to the stage and parent-register fixture scoreboards.
 `lsu_model.py` provides byte-addressed memory and native load/store expectations
 shared by LSU and MEM tests. `mem_model.py` adds MEM token/result expectations
 shared by the standalone stage and parent-register fixture.
+`ifetch_model.py` describes aligned word/error outcomes for the instruction
+fetch engine and shared-PMP fixture. `pmp_model.py` provides the independent
+byte-interval permission model shared by standalone PMP and concurrent IF/LSU
+tests; protection implementation remains in the one core-owned RTL checker.
 `csregfile_model.py` supplies architectural CSR words/events to both CSR and WB
 tests. `wb_model.py` adds commitment, fault and architectural GPR expectations
 shared by the WB stage and its parent-register/GPR fixture.
