@@ -6,9 +6,15 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
-      - target: any(decode, rtl)
+      - target: any(decode, branch_test, rtl)
         files:
           - src/uquintus/uqu_decoder.v
+      - target: any(branch, branch_test, rtl)
+        files:
+          - src/uquintus/uqu_branch.v
+      - target: branch_test
+        files:
+          - verif/sim/branch/uqu_branch_tb.v
       - target: any(arith, alu, alu_test, exec_arith_test, muldiv, muldiv_test, ex, ex_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_arith.v

@@ -12,7 +12,7 @@ execution. Stable input produces stable output.
 | --- | --- |
 | DE-owned decoder | Instruction recognition, static encoding/configuration legality, register-use/destination intent, immediate extraction, EX/MEM/WB and system controls. |
 | DE operand selection | Read GPR values through core-owned storage; select forwarded values, register/immediate/PC operands, CSR source and effective rounding mode. |
-| DE branch/target unit | Compare conditional branches; calculate branch/JAL/JALR targets and PC+instruction-length link; check target alignment. Not part of this decoder. |
+| DE branch/target unit | Compare conditional branches; calculate branch/JAL/JALR targets and PC+instruction-length link; check target alignment. Implemented separately by [uqu_branch](../branch/README.md). |
 | DE XIF issue logic | Parallel extension recognition, source delivery, acceptance and per-slot issue tracking; interpret native decode alongside extension responses. Not implemented here. |
 | Core parent | GPR file, current privilege/Debug Mode, pipeline boundary registers/identity, shared hazards/forwarding, controller/draining and redirects. |
 | WB/CSR unit | CSR address/access checks and precise updates, native/custom retirement and architectural debug state. |
@@ -112,8 +112,9 @@ EX endpoint still refuses enabled Zfinx elaboration until a backend is supplied.
 
 The decoder takes no PC, privilege, debug, CSR data or register values. DE/core
 must apply ECALL privilege-specific causes, MRET/DRET permission checks,
-WFI/TW policy, dynamic frm validation, fetch/decompression faults and branch
-alignment. CSR address/privilege/read-only checks remain in the CSR unit at WB;
+WFI/TW policy, dynamic frm validation and fetch/decompression faults. The
+[branch unit](../branch/README.md) supplies target-alignment diagnostics; DE
+converts them into precise exception metadata. CSR address/privilege/read-only checks remain in the CSR unit at WB;
 even an unmapped CSR address is structurally a native CSR instruction.
 EBREAK reaches WB as its own class so debug-break controls can select debug
 entry versus a breakpoint trap. No interrupt/debug entry is generated here.

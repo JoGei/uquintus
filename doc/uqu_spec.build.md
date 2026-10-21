@@ -4,7 +4,7 @@
 
 Build/configuration contracts and project organization. A shared component
 simulation/lint flow supports the register file, ALU, arithmetic datapath, native
-multiply/divide, native decoder, EX, MEM/LSU, WB, PMP checker, CSR register file, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
+multiply/divide, native decoder, DE branch unit, EX, MEM/LSU, WB, PMP checker, CSR register file, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -313,6 +313,7 @@ verif/
       mem_model.py        # MEM stage/parent fixture token and result model
       csregfile_model.py  # Architectural CSR words/events shared by CSR and WB
       wb_model.py         # WB commitment and CSR/GPR reference state
+    branch/         # Branch targets/conditions/alignment and decoder-fed fixture
     decode/         # Native encoding/operand/control tests and local ISA oracle
     gpregfile/      # General-purpose register-file tests
     csregfile/      # Decoded CSR state, access, counters, and event tests

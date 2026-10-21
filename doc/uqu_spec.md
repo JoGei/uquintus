@@ -17,6 +17,7 @@ it does not grant permission to change an agreed architectural contract.
 
 The repository contains specifications and standalone
 [native decoder](../verif/sim/decode/README.md),
+[DE branch unit](../verif/sim/branch/README.md),
 [register-file](../verif/sim/gpregfile/README.md),
 [CSR register-file](../verif/sim/csregfile/README.md),
 [shared arithmetic](../verif/sim/arith/README.md),

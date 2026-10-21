@@ -1352,6 +1352,37 @@ implementation follow-ups; the agreed stall, forwarding, and request-persistence
 rules shall remain applicable. Behavior with
 prediction disabled is defined by `none` mode in [architecture, Section 5](uqu_spec.arch.md#5-configurable-branch-prediction).
 
+
+### 6.1. Branch resolution component
+
+`src/uquintus/uqu_branch.v` is the stateless branch/target component owned by
+the future DE stage. Its [guide](../verif/sim/branch/README.md) defines the
+normalized interface and tests. Decoder branch kind/funct3/immediate connect
+directly; PC/original length and available source values come from the parent.
+The unit implements all six branch comparisons, PC-relative branch/JAL targets,
+JALR target formation with bit-zero clearing, and original-length jump links.
+All address arithmetic wraps at 32 bits. ISA_C selects IALIGN and permits a
+two-byte original-length flag; a 32-bit instruction still increments by four.
+
+Target alignment is checked only for a taken, non-illegal control transfer.
+The resolved target remains visible for diagnostic tval even when misaligned,
+while successful next-PC/link candidates are suppressed. Reserved conditional
+funct3 and compressed-length metadata with C disabled report illegal control.
+The enclosing DE stage creates the precise exception metadata and coordinates
+its WB handling; the unit generates no architectural event or write itself.
+
+One magnitude comparison serves signed/unsigned conditions, and separate target
+and link/fallthrough addition paths avoid borrowing the concurrently active EX
+ALU. No clock, pipeline state, predictor or BTB belongs to this component.
+Prediction/target buffers belong in the IF frontend and feed carried prediction
+metadata; DE/core owns comparison with actual next PC and accepted recovery.
+Combinational outputs may remain asserted while DE waits, so transfer and
+redirect qualification remain in the parent/stage controller as specified above.
+
+The component regression includes a direct instance and a decoder-fed sibling,
+with C disabled/enabled, negative offsets, signed boundaries, PC wraparound,
+JALR alignment and two-/four-byte links. Synthesis checks retain no storage.
+
 ## 7. Trap on misaligned data accesses
 
 **Status:** Agreed
@@ -2722,4 +2753,5 @@ later decisions determine the active contract.
 | D-269 | Keep EX/MEM and MEM/WB registers in the MEM stage's parent; MEM owns one LSU and local one-shot issue tracking, exposes the parent PMP query, and blocks replacement completion/issue while killed bus work drains without stalling older WB. | Preserve precise transaction/identity association and shared PMP ownership with minimal stage-local control. | Implemented; stage and parent-register fixture in Section 3.9 |
 | D-270 | Make WB own the CSR unit and native result/commit logic while MEM/WB, GPR storage, current privilege, arbitration and redirects remain in the core parent; qualify architectural token effects with one acceptance and defer XIF/debug explicitly. | Keep native WB precise and stateless around existing CSR storage, with independent fault reporting and no repeated held-token effects. | XIF/debug deferral superseded by D-271; stage/parent fixture and event contract in Section 3.10 |
 | D-271 | Complete WB standard CV-X-IF commit/result and conditional paired-write support, plus debug-only CSR state, EBREAK/DRET and debug exception routing; retain parent-owned pipeline registers, issue tracking, privilege/Debug Mode and global control. | Complete optional WB functionality with one XIF permission bit, no result queue or proprietary coprocessor channels, and compact debug state. | Implemented; extends D-268 and D-270; exact bindings and tests in the WB component guide |
-| D-272 | Implement a stateless native decoder under DE, alongside DE-owned operand and branch/target logic; retain core-owned GPR storage, boundary registers and shared control. Separate static native recognition/register legality from XIF recognition and runtime permission checks. | Begin DE with a reusable combinational component and preserve existing stage/parent responsibilities and precise-exception handling. | Implemented decoder and component regressions; enclosing DE stage and branch/XIF logic remain pending, Section 3.11 |
+| D-272 | Implement a stateless native decoder under DE, alongside DE-owned operand and branch/target logic; retain core-owned GPR storage, boundary registers and shared control. Separate static native recognition/register legality from XIF recognition and runtime permission checks. | Begin DE with a reusable combinational component and preserve existing stage/parent responsibilities and precise-exception handling. | Implemented decoder and component regressions; branch component added by D-273; enclosing DE stage and XIF logic remain pending, Section 3.11 |
+| D-273 | Implement uqu_branch as a stateless DE component for comparisons, targets, links and alignment diagnostics; retain prediction/BTB in IF and transfer-qualified redirects and precise trap sequencing in DE/core. | Reuse native decoder controls while separating execution truth from frontend prediction and keeping branch arithmetic independent of EX. | Implemented; C-disabled/enabled component and decoder-fed tests, Section 6.1 |
