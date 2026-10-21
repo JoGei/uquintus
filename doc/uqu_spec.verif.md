@@ -202,8 +202,9 @@ PC+2 versus PC+4 links. See the
 [production IF tests](../verif/sim/if/README.md) and
 [IF/DE parent fixture](../verif/sim/if_pipeline/README.md) add real bus fetching,
 word-boundary stitching, capacity reservation, accepted branch redirects and
-discarded fault responses across all three compressed paths. Full-core
-retirement/trap comparison remains separate integration work.
+discarded fault responses across all three compressed paths. Initial full-core
+retirement/trap programs are described in Section 2.4; Spike/RVFI integration
+remains separate work.
 
 The [pipeline-controller tests](../verif/sim/pipeline_ctrl/README.md) shall
 separately exercise stage movement, age-qualified fault barriers, older-safety
@@ -282,6 +283,29 @@ unimplemented components.
 GNU Make shall remain the project entry point; pytest or another outer
 regression runner remains an implementation proposal rather than a selected
 dependency.
+
+### 2.4. Initial native full-core regression
+
+[`verif/sim/core/`](../verif/sim/core/README.md) shall exercise the actual
+`uqu_core`, using the common runner and `config/sim/core.yml`. Independent
+instruction/data memory agents shall vary grant and response latency, check
+request persistence and transaction limits, inject access faults and coordinate
+discard of pending work on reset.
+
+An initial instruction interpreter shall check original instruction identity,
+retirement order, GPR results, memory effects, selected CSR state and precise
+trap PC/cause/value. Programs shall exercise integer dependencies, branches,
+subword accesses, serialization, synchronous faults, M/U transitions, IRQ drain
+and vectored restart, configured M/C/PMP/fences, and reset during pending data
+access. Configurations shall distinguish disabled behavior from enabled-feature
+coverage. FPU and core XIF/debug adapters shall reject enabled elaboration
+until implemented.
+
+This initial interpreter is not the selected Spike reference or an RVFI
+adapter. Spike comparison, SystemVerilog trace instrumentation, riscv-formal,
+broader software coverage and supported-configuration CI remain required
+follow-ups. Passing the initial native programs shall not be reported as
+completion of the first milestone's acceptance criteria.
 
 ## 3. Supported-configuration CI coverage
 

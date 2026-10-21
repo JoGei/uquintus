@@ -15,7 +15,7 @@ Only decisions explicitly marked **agreed** are requirements. Proposed principle
 and layouts retain their proposal status. **TBD** means an unresolved follow-up;
 it does not grant permission to change an agreed architectural contract.
 
-The repository contains specifications and standalone
+The repository contains the [native core](../verif/sim/core/README.md), specifications and standalone
 [DE stage](../verif/sim/de/README.md),
 [core-owned hazard/forwarding](../verif/sim/hazard/README.md),
 [core-owned pipeline controller](../verif/sim/pipeline_ctrl/README.md),
@@ -57,8 +57,11 @@ implementation and test scope.
 A [controller parent fixture](../verif/sim/pipeline_ctrl_parent/README.md)
 connects actual boundary storage, MEM/LSU and WB/CSR to the controller, testing
 effect permission, precise drains, CSR-driven IRQ re-evaluation and fences.
-The complete processor, full-core verification, and ASIC build flow
-remain to be implemented.
+The native core now connects the actual stages with parent-owned storage,
+GPRs, hazards, shared PMP and controller. Initial full-core program regressions
+check native execution under variable-latency memory. Core XIF/debug adapters,
+the FPU, Spike/RVFI/formal acceptance and the ASIC build flow remain unfinished;
+this integration does not complete the first milestone's verification criteria.
 
 ## Document index
 

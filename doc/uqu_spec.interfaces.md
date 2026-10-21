@@ -1148,6 +1148,10 @@ This table collects the agreed port names for the first milestone. Directions
 are relative to the core; the referenced sections remain authoritative for
 behavior, timing, and integration requirements.
 
+These native ports are implemented by `src/uquintus/uqu_core.v`; its
+[integration guide](../verif/sim/core/README.md) records connections and current
+feature guards. Optional core XIF/debug adapters and the FPU remain unfinished.
+
 | Function | Port(s) | Direction | Width | Definition |
 | --- | --- | --- | --- | --- |
 | Clock | `clk_i` | Input | 1 | [interfaces, Section 2](uqu_spec.interfaces.md#2-single-clock-domain) |

@@ -661,8 +661,8 @@ MEM/LSU and WB/CSR units. It verifies stalled older-safety permission, actual
 memory and CSR faults, younger cancellation with older progress, IRQ
 re-evaluation across CSR/MRET, DE-fault preemption, post-trap drain priority,
 and retained fence acknowledgements. Standalone age/protocol tests and
-flattened combinational-loop checks complement this integration. Full
-`uqu_core`, optional adapters and architectural software execution remain
+flattened combinational-loop checks complement this integration. The native
+`uqu_core` integration is defined in Section 3.13; optional adapters remain
 implementation work.
 
 ### 3.3. Native Zfinx execution and FPU implementation
@@ -1225,6 +1225,40 @@ stream scoreboard checks both parent registers under backpressure and permission
 stalls, with original bits/length, PC wraparound and call links preserved. All native
 strategies remain combinational; synthesis confirms that unselected compressed
 units are removed and invalid selector encodings fail elaboration.
+
+### 3.13. Native core integration
+
+`src/uquintus/uqu_core.v` connects the actual five stage modules and owns all
+four boundary registers, the GPR file, shared hazard logic, one dual-port PMP
+checker, the pipeline controller, current privilege and architectural resume PC.
+WB retains ownership of CSR storage; MEM retains ownership of the LSU. The
+[core guide](../verif/sim/core/README.md) defines exact connections and runnable
+program regressions.
+
+Parent boundary registers shall obey controller enables and replacement
+validity. Payload storage shall remain unreset. Original instruction bits, PC,
+length and token privilege shall remain associated through retirement/trap.
+EX shall retain an operand obtained while held so a disappearing WB bypass
+cannot corrupt a consumer admitted under an availability guarantee. LSU
+addresses and uncommitted CSR placeholders shall not become register producer
+values; loads become forwardable after successful response registration.
+
+The core shall connect WB's live non-faulting proof to younger MEM request
+permission. WB's own accepted exception/MRET shall redirect and clear the
+boundary without feeding back into its own local flush. Current privilege
+shall change on accepted machine entry or MRET; MEM shall apply MPRV/MPP
+before its shared-PMP query while IF uses current execution privilege.
+
+The initial integration supports native RV32I+Zicsr/M/U and implemented
+E/M/C/PMP/Zifencei and microarchitecture options. FPU, XIF-ID/cleanup and debug
+sequencing remain separate work: enabling Zfinx, F, A, XIF, debug or hardening
+shall fail elaboration until the relevant implementation exists. Disabled
+standard XIF declarations remain inactive. No proprietary coprocessor signals
+or synthesizable trace outputs are introduced by this integration.
+
+Initial retirement-program tests use a Python instruction interpreter and
+independent variable-latency instruction/data agents. They do not replace the
+agreed Spike, RVFI or formal acceptance requirements.
 
 ## 4. Configurable operand forwarding
 
@@ -3600,3 +3634,4 @@ later decisions determine the active contract.
 | D-286 | Implement uqu_if_buffer as a fetched-word FIFO with two read windows, simultaneous pop/push, non-power-of-two capacity and minimal reset; keep prefetch addresses, response reservation and redirect control in IF, verified by a real fetch/buffer/aligner fixture. | Separate storage from instruction selection and bus handling, reserve capacity without duplicate tracking for the one-writer/one-outstanding baseline, and preserve killed-response obligations. | Implemented; Section 15.4; standalone deque tests and C-disabled/enabled prefetch integration at depths 2, 3, 4, 5 and 8; production IF under D-287; full-core integration pending |
 | D-287 | Assemble uqu_stage_if around fetch, word storage, alignment and selected IF expansion; own frontend pointers/containment while leaving IF/DE, PMP and global arbitration in the core; implement none/static_not_taken control with canonical encodings 0/1. | Make native frontend behavior concrete with reserved capacity, independent request/delivery holds, precise original instruction identity and persistent stale-transaction draining. | Implemented; Section 15.5; standalone and real IF/DE/DE parent-fixture tests across compressed paths, both branch modes and variable depths; full-core and standard XIF compressed-channel integration remain pending |
 | D-288 | Implement core-owned uqu_pipeline_ctrl with separate occupancy/completion, parent-owned slot enables/validity, age-qualified fault flushes, live IRQ drain/dispatch, serial metadata, older-WB memory safety proof and two-bit fence request/ack tracking; keep WB readiness independent of result completion and preserve WB's own accepted event. | Make native global sequencing executable without duplicating pipeline/CSR/unit state or creating protocol feedback paths; provide normalized drain/admission hooks for later optional adapters. | Implemented; Section 3.2.1; standalone and real parent/MEM/WB regressions, fence-disabled/enabled profiles and loop/storage checks; full core, XIF-ID and debug adapters remain integration work |
+| D-289 | Integrate native uqu_core with actual five stages, parent-owned boundaries/GPR/hazards/shared PMP/control, precise WB recovery, live privilege and MPRV-aware data checks; reject unfinished optional backends/adapters at elaboration. | Make the agreed first native implementation executable while keeping unsupported features explicit and preserving the existing component contracts. | Implemented; Section 3.13; full-core program regressions available; Spike/RVFI/formal, FPU, core XIF/debug adapters and ASIC flow remain unfinished |

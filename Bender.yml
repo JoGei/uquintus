@@ -6,6 +6,9 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
+      - target: rtl
+        files:
+          - src/uquintus/uqu_core.v
       - target: any(pipeline_ctrl, pipeline_ctrl_test, rtl)
         files:
           - src/uquintus/uqu_pipeline_ctrl.v

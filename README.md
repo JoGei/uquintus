@@ -3,10 +3,16 @@
 A configurable, single-issue, in-order RV32 RISC-V processor targeting open-source
 ASIC flows. The specification is in [doc/uqu_spec.md](doc/uqu_spec.md).
 
-Implemented standalone components:
+The [native processor core](verif/sim/core/README.md) connects all five stages
+with core-owned pipeline registers, hazards, PMP and control. Native execution
+supports the implemented E/M/C, M/U, PMP and Zifencei configurations; FPU,
+core XIF and debug adapters remain unfinished and reject enabled elaboration.
+
+Implemented components:
 
 | Component | RTL | Verification guide |
 | --- | --- | --- |
+| Native processor core | [uqu_core.v](src/uquintus/uqu_core.v) | [Core interface and programs](verif/sim/core/README.md) |
 | Core pipeline control | [uqu_pipeline_ctrl.v](src/uquintus/uqu_pipeline_ctrl.v) | [Controller interface and tests](verif/sim/pipeline_ctrl/README.md) |
 | Instruction-fetch stage | [uqu_stage_if.v](src/uquintus/uqu_stage_if.v) | [IF interface and tests](verif/sim/if/README.md) |
 | Instruction-word fetch engine | [uqu_ifetch.v](src/uquintus/uqu_ifetch.v) | [Ifetch interface and tests](verif/sim/ifetch/README.md) |
@@ -39,6 +45,9 @@ Provide Bender, Verilator, GNU Make, a C++ compiler, and the Python dependencies
 in `verif/requirements.txt` through your environment. Then run:
 
 ```sh
+make test COMPONENT=core CONFIG=rv32i
+make test COMPONENT=core CONFIG=rv32im
+make lint COMPONENT=core CONFIG=rv32i
 make test COMPONENT=ifetch CONFIG=rv32i
 make test COMPONENT=pipeline_ctrl CONFIG=rv32i
 make test COMPONENT=pipeline_ctrl CONFIG=rv32i_zifencei
