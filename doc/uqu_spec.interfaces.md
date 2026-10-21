@@ -548,11 +548,21 @@ dependencies or extension backpressure.
 
 With `ISA_E = 1`, the unavailable-integer-register checks in [architecture, Section 2](uqu_spec.arch.md#2-isa-and-microarchitecture-configuration-parameters) shall
 also apply to custom instructions, including used third-source and paired-write
-destinations. No offload issue handshake shall accept an instruction that uses
-`x16`–`x31`; it shall instead follow the normal illegal-instruction trap path.
-Checks shall account for the operands actually used by the custom operation,
-without rejecting immediate or unused fields merely because their bit patterns
-resemble unavailable register indices.
+destinations. The attached coprocessor shall be RV32E-aware and reject encodings
+whose actually used sources or written destinations name `x16`–`x31`, even when
+it must reject without waiting for unavailable operands. Such instructions shall
+follow the normal illegal-instruction trap path. Checks shall not reject
+immediate or unused fields merely because their bit patterns resemble unavailable
+register indices.
+
+This is an integration requirement: the standard issue response identifies
+used registers, and its fields shall not feed combinationally back into CPU
+issue/register request outputs. DE shall defensively validate accepted
+read/write requirements. If a noncompliant coprocessor accepts an unavailable
+register, the core shall contain the instruction, issue its standard kill
+notification and transfer an illegal-instruction token only after cleanup is
+acknowledged by the core/WB arbiter. No proprietary coprocessor signal or
+architectural effect shall result from the invalid acceptance.
 
 Instruction issue and operand delivery shall both occur in DE using the coupled
 [CV-X-IF register interface](https://docs.openhwgroup.org/projects/openhw-group-core-v-xif/en/v1.0.0/x_ext.html#register-interface)
@@ -1279,3 +1289,4 @@ later decisions determine the active contract.
 | D-248 | Prioritize minimal debug hardware size and implementation effort over performance; accept slow serialized debug access, reuse existing datapath/CSR/memory resources, and omit optional enhancements or choose the simplest compliant fixed behavior. | Provide a functionally useful debugger without making debug a project focus or adding performance-oriented hardware. | Agreed; remaining details resolved with the selected DM under existing contracts and Debug 1.0 |
 | D-249 | Finalize baseline native imem/dmem port names and widths in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories), with read-only imem, dmem write controls and byte enables, grant and response-valid handshakes, 32-bit addresses/data, and one response error input per port. | Make the existing memory-interface behavior concrete for core RTL and wrappers without introducing response backpressure or future optional bus fields. | Agreed; full OBI instruction-side write controls are supplied as constants by the wrapper |
 | D-250 | Name the three one-bit core interrupt inputs irq_software_i, irq_timer_i, and irq_external_i; retain the agreed active-high, level-sensitive, core-clock-synchronous behavior. | Finalize interrupt integration names consistently with the signal naming convention and existing mip mapping. | Agreed; baseline functional interface collected in [interfaces, Section 10](uqu_spec.interfaces.md#10-baseline-functional-interface-index) |
+| D-281 | Require an RV32E-aware coprocessor to reject encodings using unavailable GPRs according to actual read/write requirements; defensively kill and fault any invalid accepted response through standard cleanup. | Preserve RV32E legality and standard signal-dependency rules without response-to-request combinational gating or rejecting unused high fields. | Agreed; clarifies RV32E XIF integration in Section 5; DE checks/cleanup under D-280; complete core arbitration remains pending |

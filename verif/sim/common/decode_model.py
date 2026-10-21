@@ -1,4 +1,4 @@
-"""Mask/match ISA oracle and architectural operand descriptions.
+"""Shared decoder/DE mask-match ISA oracle and operand descriptions.
 
 Encoding masks follow riscv/riscv-opcodes rv_i, rv32_i, rv_m, rv_f,
 rv_zicsr, rv_zifencei and the canonical privileged/debug SYSTEM words.

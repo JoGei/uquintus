@@ -6,15 +6,21 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
-      - target: any(hazard, rtl)
+      - target: any(hazard, de_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_hazard.v
-      - target: any(decode, branch_test, rtl)
+      - target: any(decode, branch_test, de, de_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_decoder.v
-      - target: any(branch, branch_test, rtl)
+      - target: any(branch, branch_test, de, de_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_branch.v
+      - target: any(de, de_pipeline_test, rtl)
+        files:
+          - src/uquintus/uqu_stage_de.v
+      - target: de_pipeline_test
+        files:
+          - verif/sim/de_pipeline/uqu_de_pipeline_tb.v
       - target: branch_test
         files:
           - verif/sim/branch/uqu_branch_tb.v
@@ -66,6 +72,6 @@ sources:
       - target: muldiv_test
         files:
           - verif/sim/muldiv/uqu_muldiv_tb.v
-      - target: any(gpregfile, wb_pipeline_test, rtl)
+      - target: any(gpregfile, de_pipeline_test, wb_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_gpregfile.v

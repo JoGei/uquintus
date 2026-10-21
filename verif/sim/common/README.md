@@ -10,7 +10,9 @@ metadata. The generated configuration-header directory is also included. `hw_con
 validation, parameter selection/encoding, and Verilog selector generation.
 
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
-standalone and shared-parent scoreboards. `ex_model.py` provides instruction-level
+standalone and shared-parent scoreboards. `decode_model.py` supplies the shared
+mask/match ISA oracle to decoder and DE tests; `de_model.py` adds DE runtime,
+readiness, control-flow and local XIF issue behavior. `ex_model.py` provides instruction-level
 EX outcomes to the stage and parent-register fixture scoreboards.
 `lsu_model.py` provides byte-addressed memory and native load/store expectations
 shared by LSU and MEM tests. `mem_model.py` adds MEM token/result expectations

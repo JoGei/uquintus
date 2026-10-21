@@ -16,6 +16,7 @@ and layouts retain their proposal status. **TBD** means an unresolved follow-up;
 it does not grant permission to change an agreed architectural contract.
 
 The repository contains specifications and standalone
+[DE stage](../verif/sim/de/README.md),
 [core-owned hazard/forwarding](../verif/sim/hazard/README.md),
 [native decoder](../verif/sim/decode/README.md),
 [DE branch unit](../verif/sim/branch/README.md),
@@ -30,6 +31,8 @@ The repository contains specifications and standalone
 [two-port PMP checker](../verif/sim/pmp/README.md), and
 [native multiply/divide](../verif/sim/muldiv/README.md) components with a common
 simulation/lint flow and a [shared-parent arithmetic fixture](../verif/sim/exec_arith/README.md).
+A [DE parent fixture](../verif/sim/de_pipeline/README.md) verifies DE with real
+IF/DE and DE/EX storage, GPR reads/writes and shared forwarding/hazard logic.
 A [parent-register fixture](../verif/sim/ex_pipeline/README.md) verifies EX
 with DE/EX and EX/MEM registers outside the stage. A separate
 [MEM parent-register fixture](../verif/sim/mem_pipeline/README.md) verifies MEM

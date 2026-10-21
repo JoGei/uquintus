@@ -1,12 +1,15 @@
 """Native decode controls, immediate layouts and rejected encodings; no clock."""
 import json
 import os
+from pathlib import Path
 import random
+import sys
 
 import cocotb
 from cocotb.triggers import Timer
 from pyuvm import uvm_root, uvm_test
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from decode_model import RULES, MASK32, decode
 
 

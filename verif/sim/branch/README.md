@@ -68,7 +68,7 @@ the carried predicted next PC with this unit's nonfaulting next_pc_o and request
 correction. Predictor training, misprediction handling and validity/transfer
 qualification remain outside this unit. Serialized trap/debug returns use their
 WB redirect path rather than treating BR_NONE's sequential result as a return
-address. The enclosing uqu_stage_de remains to be implemented.
+address. The enclosing [uqu_stage_de](../de/README.md) implements these DE controls.
 
 ## Verification
 

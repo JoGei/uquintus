@@ -1,7 +1,7 @@
 # Native instruction decoder
 
 [uqu_decoder.v](../../../src/uquintus/uqu_decoder.v) is a combinational component
-for the future DE stage. It accepts an expanded 32-bit instruction and emits
+owned by [uqu_stage_de](../de/README.md). It accepts an expanded 32-bit instruction and emits
 native recognition, register use, immediate values and normalized execution
 controls. There is no clock, reset, handshake, instruction storage or branch
 execution. Stable input produces stable output.
@@ -13,12 +13,12 @@ execution. Stable input produces stable output.
 | DE-owned decoder | Instruction recognition, static encoding/configuration legality, register-use/destination intent, immediate extraction, EX/MEM/WB and system controls. |
 | DE operand selection | Read GPR values through core-owned storage; select forwarded values, register/immediate/PC operands, CSR source and effective rounding mode. |
 | DE branch/target unit | Compare conditional branches; calculate branch/JAL/JALR targets and PC+instruction-length link; check target alignment. Implemented separately by [uqu_branch](../branch/README.md). |
-| DE XIF issue logic | Parallel extension recognition, source delivery, acceptance and per-slot issue tracking; interpret native decode alongside extension responses. Not implemented here. |
+| DE XIF issue logic | Parallel extension recognition, stable source delivery, acceptance and per-slot issue tracking; implemented in the enclosing DE stage. |
 | Core parent | GPR file, current privilege/Debug Mode, pipeline boundary registers/identity, shared hazards/forwarding, controller/draining and redirects. |
 | WB/CSR unit | CSR address/access checks and precise updates, native/custom retirement and architectural debug state. |
 
 A test fixture is a verification-only enclosing module; it is not the production
-core. The future DE stage will own neither IF/DE nor DE/EX boundary registers.
+core. The DE stage owns neither IF/DE nor DE/EX boundary registers.
 
 ## Native legality
 
@@ -133,7 +133,7 @@ make lint COMPONENT=decode CONFIG=rv32i
 ```
 
 The [manifest](../../../config/sim/decode.yml) uses the existing Make/Bender
-runner and cocotb/pyuvm stack. The local [ISA model](decode_model.py) uses an
+runner and cocotb/pyuvm stack. The shared [ISA model](../common/decode_model.py) uses an
 independent mask/match table rather than the RTL opcode-case structure.
 
 - `directed`: every supported native operation, register/ignored-field

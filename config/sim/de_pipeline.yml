@@ -1,0 +1,21 @@
+top_module: uqu_de_pipeline_tb
+bender_target: de_pipeline_test
+test_module: test_uqu_de_pipeline
+parameters:
+  - ISA_E
+  - ISA_M
+  - ISA_C
+  - ISA_ZFINX
+  - ISA_ZIFENCEI
+  - ISA_UMODE
+  - DEBUG
+  - MUA_FORWARDING
+  - MUA_FORWARD_EX_TO_DE
+  - MUA_FORWARD_MEM_TO_DE
+  - MUA_FORWARD_MEM_TO_EX
+  - MUA_FORWARD_WB_TO_EX
+  - MUA_DE_OPERAND_RETENTION
+  - MUA_REGFILE_IMPL
+tests:
+  - dependencies
+  - branch_faults

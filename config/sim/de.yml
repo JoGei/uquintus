@@ -1,0 +1,22 @@
+top_module: uqu_stage_de
+bender_target: de
+test_module: test_uqu_stage_de
+parameters:
+  - ISA_E
+  - ISA_M
+  - ISA_C
+  - ISA_ZFINX
+  - ISA_ZIFENCEI
+  - ISA_F
+  - ISA_A
+  - ISA_UMODE
+  - XIF
+  - XIF_NUM_RS
+  - XIF_DUALWRITE
+  - DEBUG
+tests:
+  - native
+  - hazards
+  - control
+  - xif
+  - randomized

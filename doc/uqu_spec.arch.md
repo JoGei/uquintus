@@ -1015,7 +1015,7 @@ remain separate integration work.
 ### 3.11. Native decoder and DE ownership
 
 `src/uquintus/uqu_decoder.v` is the combinational native decoder owned by the
-future DE stage. It extracts immediate values and register-use/destination
+DE stage implemented in Section 3.12. It extracts immediate values and register-use/destination
 intent, validates encoding/configuration and E-register constraints, and emits
 normalized EX, LSU, WB, branch and system controls. Architectural encodings
 come from uqu_isa.vh; internal selectors come from uqu_ctrl.vh and are also used
@@ -1043,6 +1043,72 @@ optional M, Zfinx encoding recognition, Zifencei and debug DRET. FPU execution
 remains unimplemented. Tests cover legal and reserved fields, immediate layouts,
 actual versus ignored register fields, optional configurations and all control
 outputs; synthesis shall retain no decoder state.
+
+### 3.12. Decode stage and parent-pipeline integration
+
+`src/uquintus/uqu_stage_de.v` owns the native decoder, branch unit, runtime
+legality, operand/control selection and optional CV-X-IF issue state. Its
+[component guide](../verif/sim/de/README.md) defines concrete ports, normalized
+controls, exception priorities, standard offload fields and integration rules.
+GPR storage, the shared hazard unit, IF/DE and DE/EX registers, instruction
+identity/original bits/length, current privilege, serialization and global
+event/redirect arbitration remain core-owned.
+
+Native DE is combinational around the parent-held instruction. A transfer
+requires decoder/runtime legality or a contained exception, the agreed
+operand readiness/guarantee contract, downstream capacity and `permit_i` from
+central control. Early serialization and exception outputs remain visible
+while transfer is blocked; they request containment without architectural
+updates. Incoming IF exceptions take priority. Illegal instructions report
+original bits, ready taken-target misalignment reports its target, and ECALL
+reports the originating privilege's cause. EBREAK remains a WB debug/breakpoint
+decision. CSR accesses remain serialized with address/access checks at WB.
+
+DE exports used source addresses and current-use/EX-use masks independently
+of branch comparison results and live XIF responses. It accepts resolved values
+and readiness from the hazard unit. The core shall retain raw source identities,
+values, captured-valid bits and operand selectors with DE/EX; a future EX
+guarantee does not validate a stale selected DE operand. Store data remains
+separate from the ALU's immediate operand. Dynamic Zfinx rounding is checked
+against frm without requiring FS state; native FPU execution remains deferred.
+
+`branch_resolve_o` shall identify only the accepted nonfaulting branch/jump
+transfer and qualify taken/next-PC information for the central frontend
+controller. An untaken branch also resolves once. Prediction/BTB, fetch resume,
+redirect/misprediction arbitration and target PMP checking remain outside DE.
+
+Optional XIF implements coupled issue/register channels and local stable
+operand capture, including when hazard-unit DE retention is disabled. An
+issue response is sampled once; accepted offloads may wait in DE and then
+pass through EX/MEM without reissue or waiting for WB results. Parent-reserved
+three-bit IDs and the WB commit/kill arbiter retain their existing ownership.
+Rejected or defensively invalid accepted transactions shall receive standard
+kill notification through core-internal cleanup arbitration before their fault
+token transfers. No proprietary coprocessor channel or execution trap is added.
+Flush/drain handling must notify outstanding accepted work and retain ID
+lifetime association before discarding parent-owned metadata.
+
+IF may identify an extension-expanded compressed instruction through
+`xif_force_i`; DE then re-offloads its expanded instruction even when that
+encoding resembles a native instruction. The origin flag is only valid with
+C-enabled compressed metadata. Frontend expansion/offload logic itself remains
+pending. RV32E-aware coprocessor rejection and defensive core kill semantics
+are defined by D-281 in the interface specification.
+
+The [native parent fixture](../verif/sim/de_pipeline/README.md) combines real
+IF/DE and DE/EX storage, GPRs and hazard logic around DE, with external EX
+computation/MEM/WB producer stubs. It verifies guaranteed EX bypass admission,
+held EX operands, register-file fallback, store-data selection, one-time
+branch resolution, fault identity and flush. It does not replace the production
+core controller or implement XIF ID/kill arbitration.
+
+Standalone suites pass across twelve native/optional profiles; the two fixture
+suites pass across ten forwarding/retention/ISA/GPR profiles. Lint and synthesis
+checks infer no latches. Generic optimized native DE state is zero; paired XIF
+adds 72 bits with two sources or 105 with three, only local protocol/operand
+state. Netlist reachability checks confirm no combinational path from standard
+issue/register response inputs to standard issue/register outputs. Full-core
+integration, RVFI/Spike and frontend/global event sequencing remain follow-ups.
 
 ## 4. Configurable operand forwarding
 
@@ -1718,7 +1784,7 @@ prediction disabled is defined by `none` mode in [architecture, Section 5](uqu_s
 ### 6.1. Branch resolution component
 
 `src/uquintus/uqu_branch.v` is the stateless branch/target component owned by
-the future DE stage. Its [guide](../verif/sim/branch/README.md) defines the
+the DE stage. Its [guide](../verif/sim/branch/README.md) defines the
 normalized interface and tests. Decoder branch kind/funct3/immediate connect
 directly; PC/original length and available source values come from the parent.
 The unit implements all six branch comparisons, PC-relative branch/JAL targets,
@@ -2960,7 +3026,7 @@ be resolved when their implementation milestone is undertaken:
 
 | Area | Remaining work |
 | --- | --- |
-| Execution/control | EX, MEM and native WB stages and parent-register/GPR fixtures implemented; connect full-core pipeline/controller sequencing, forwarding/hazards, and evaluate timing of enabled forwarding paths. |
+| Execution/control | DE/EX/MEM/WB stages, shared hazards and parent-register/GPR fixtures implemented; connect full-core pipeline/controller sequencing, XIF issue/ID/kill tracking and evaluate timing of enabled forwarding paths. |
 | Memory access | MEM/LSU, registered load readiness, and parent-owned PMP routing verified in a fixture; connect the future IF stage, CSR-owned PMP state, precise-effect permission control, and fences in the full core. |
 | Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
@@ -3115,7 +3181,7 @@ later decisions determine the active contract.
 | D-269 | Keep EX/MEM and MEM/WB registers in the MEM stage's parent; MEM owns one LSU and local one-shot issue tracking, exposes the parent PMP query, and blocks replacement completion/issue while killed bus work drains without stalling older WB. | Preserve precise transaction/identity association and shared PMP ownership with minimal stage-local control. | Implemented; stage and parent-register fixture in Section 3.9 |
 | D-270 | Make WB own the CSR unit and native result/commit logic while MEM/WB, GPR storage, current privilege, arbitration and redirects remain in the core parent; qualify architectural token effects with one acceptance and defer XIF/debug explicitly. | Keep native WB precise and stateless around existing CSR storage, with independent fault reporting and no repeated held-token effects. | XIF/debug deferral superseded by D-271; stage/parent fixture and event contract in Section 3.10 |
 | D-271 | Complete WB standard CV-X-IF commit/result and conditional paired-write support, plus debug-only CSR state, EBREAK/DRET and debug exception routing; retain parent-owned pipeline registers, issue tracking, privilege/Debug Mode and global control. | Complete optional WB functionality with one XIF permission bit, no result queue or proprietary coprocessor channels, and compact debug state. | Implemented; extends D-268 and D-270; exact bindings and tests in the WB component guide |
-| D-272 | Implement a stateless native decoder under DE, alongside DE-owned operand and branch/target logic; retain core-owned GPR storage, boundary registers and shared control. Separate static native recognition/register legality from XIF recognition and runtime permission checks. | Begin DE with a reusable combinational component and preserve existing stage/parent responsibilities and precise-exception handling. | Implemented decoder and component regressions; branch component added by D-273; enclosing DE stage and XIF logic remain pending, Section 3.11 |
+| D-272 | Implement a stateless native decoder under DE, alongside DE-owned operand and branch/target logic; retain core-owned GPR storage, boundary registers and shared control. Separate static native recognition/register legality from XIF recognition and runtime permission checks. | Begin DE with a reusable combinational component and preserve existing stage/parent responsibilities and precise-exception handling. | Decoder implemented in Section 3.11; branch under D-273; DE stage and local XIF issue implemented under D-280; full-core integration pending |
 | D-273 | Implement uqu_branch as a stateless DE component for comparisons, targets, links and alignment diagnostics; retain prediction/BTB in IF and transfer-qualified redirects and precise trap sequencing in DE/core. | Reuse native decoder controls while separating execution truth from frontend prediction and keeping branch arithmetic independent of EX. | Implemented; C-disabled/enabled component and decoder-fed tests, Section 6.1 |
 | D-274 | Supply DE with three resolved source values, a per-source current-readiness mask and a separate per-source EX-bypass guarantee mask; require current readiness for DE consumption and current readiness or a proven EX guarantee for native EX consumption. | Preserve adjacent dependent execution without requiring EX-to-DE forwarding, while distinguishing usable values from stale inputs and keeping hazard matching in the core parent. | Agreed; contract and dependent ADD/SUB example in Section 4.1; optional DE retention owned by hazard unit under D-275 |
 | D-275 | Centralize dependency/forwarding resolution in core-owned uqu_hazard, with boolean MUA_DE_OPERAND_RETENTION selecting continuous DE resolution (0, default) or local per-instruction source retention (1) behind the same DE interface. | Enable area/performance exploration without duplicating stage hazard logic, while preserving youngest-writer checks, EX guarantees and protocol-required holding state. | Implemented standalone under D-279; Section 4.2; supersedes unconditional DE retention in D-224; core/stage integration pending |
@@ -3123,3 +3189,4 @@ later decisions determine the active contract.
 | D-277 | Feed the hazard unit normalized EX/MEM/WB producer descriptors containing slot occupancy, up to two pending destinations, primary-result availability/forwardability/data and actual stage advance; assemble these in the core from pipeline metadata and stage outputs. | Keep pending dependencies visible before completion, prevent forwarding intermediate values and separate instruction-specific completion semantics from dependency matching. | Standalone interface implemented under D-279; Section 4.2.3; parent descriptor assembly pending |
 | D-278 | Use three explicitly named DE/EX source slots with address/value/use information, a DE need-now mask, EX captured-valid bits and per-source resolved values/readiness; invalidate optional DE retention through de_valid_i/de_clear_i with clear priority at the edge and no combinational output suppression. | Keep operand availability separate from stage stall control and instruction lifetime explicit without introducing a second EX operand bank. | Standalone interface implemented under D-279; consumer/lifecycle bindings in Section 4.2.4 |
 | D-279 | Implement the standalone hazard unit with normalized producer inputs, DE/EX source resolution, movement-qualified guarantees and optional DE operand retention; add explicit boolean configuration support and a retained-RV32I preset. | Make the agreed dependency policies executable and testable before assembling DE or the full core. | Implemented; Section 4.2.5 and hazard component guide; forty-profile regression, lint, configuration guards and optimized storage checks; core/stage integration pending |
+| D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented; Section 3.12; component and native parent-fixture regressions, lint and optimized-state/signal-dependency checks; full-core controller/frontend/XIF ID integration pending |
