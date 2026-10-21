@@ -6,6 +6,9 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
+      - target: any(hazard, rtl)
+        files:
+          - src/uquintus/uqu_hazard.v
       - target: any(decode, branch_test, rtl)
         files:
           - src/uquintus/uqu_decoder.v

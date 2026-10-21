@@ -7,6 +7,7 @@ Implemented standalone components:
 
 | Component | RTL | Verification guide |
 | --- | --- | --- |
+| Core-owned DE/EX hazards and forwarding | [uqu_hazard.v](src/uquintus/uqu_hazard.v) | [Hazard interface and tests](verif/sim/hazard/README.md) |
 | DE branch resolution | [uqu_branch.v](src/uquintus/uqu_branch.v) | [Branch interface and tests](verif/sim/branch/README.md) |
 | Native instruction decoder | [uqu_decoder.v](src/uquintus/uqu_decoder.v) | [Decode interface and tests](verif/sim/decode/README.md) |
 | General-purpose register file | [uqu_gpregfile.v](src/uquintus/uqu_gpregfile.v) | [Register-file tests and interface](verif/sim/gpregfile/README.md) |
@@ -32,6 +33,8 @@ in `verif/requirements.txt` through your environment. Then run:
 ```sh
 make test COMPONENT=decode CONFIG=rv32i
 make test COMPONENT=branch CONFIG=rv32i
+make test COMPONENT=hazard CONFIG=rv32i
+make test COMPONENT=hazard CONFIG=rv32i_retained
 make test COMPONENT=gpregfile CONFIG=rv32i
 make lint COMPONENT=gpregfile CONFIG=rv32i
 make test COMPONENT=arith CONFIG=rv32i
@@ -59,7 +62,7 @@ Run `make clean` to remove the generated `build/` directory.
 Make invokes the shared component-testing helper in
 [verif/sim/common/](verif/sim/common/README.md). Component-specific DUT and test
 settings live in `config/sim/<component>.yml`; examples are
-[branch.yml](config/sim/branch.yml), [decode.yml](config/sim/decode.yml), [gpregfile.yml](config/sim/gpregfile.yml), [arith.yml](config/sim/arith.yml),
+[hazard.yml](config/sim/hazard.yml), [branch.yml](config/sim/branch.yml), [decode.yml](config/sim/decode.yml), [gpregfile.yml](config/sim/gpregfile.yml), [arith.yml](config/sim/arith.yml),
 [alu.yml](config/sim/alu.yml), [muldiv.yml](config/sim/muldiv.yml),
 [exec_arith.yml](config/sim/exec_arith.yml), [ex.yml](config/sim/ex.yml),
 [ex_pipeline.yml](config/sim/ex_pipeline.yml), [lsu.yml](config/sim/lsu.yml),

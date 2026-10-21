@@ -47,6 +47,22 @@ class ComponentRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown hardware parameters"):
             parameters_for_component({}, ["UNKNOWN"], catalog)
 
+    def test_retention_parameter_is_explicit_and_boolean(self):
+        catalog = json.loads((ROOT / "config/selectors.json").read_text())
+        config = load_configuration(ROOT / "config/rv32i.yml", catalog)
+        path = self.directory / "retention.yml"
+        for setting in (0, 1):
+            path.write_text(yaml.safe_dump(dict(config, MUA_DE_OPERAND_RETENTION=setting)))
+            self.assertEqual(load_configuration(path, catalog)["MUA_DE_OPERAND_RETENTION"], setting)
+        for setting in (2, -1, True, "continuous"):
+            path.write_text(yaml.safe_dump(dict(config, MUA_DE_OPERAND_RETENTION=setting)))
+            with self.assertRaisesRegex(ValueError, "MUA_DE_OPERAND_RETENTION"):
+                load_configuration(path, catalog)
+        del config["MUA_DE_OPERAND_RETENTION"]
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError, "missing=.*MUA_DE_OPERAND_RETENTION"):
+            load_configuration(path, catalog)
+
     def test_bender_nested_include_dirs_preserve_order_and_paths(self):
         first = self.directory / "first headers"
         second = self.directory / "nested"

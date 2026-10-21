@@ -196,6 +196,7 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_FORWARD_MEM_TO_DE` | `0`: disable MEM-result forwarding to DE; `1`: enable it when the producer result is available; inactive when `MUA_FORWARDING = 0`. | `1` |
 | `MUA_FORWARD_MEM_TO_EX` | `0`: disable MEM-result forwarding to EX; `1`: enable it when the producer result is available; inactive when `MUA_FORWARDING = 0`. | `1` |
 | `MUA_FORWARD_WB_TO_EX` | `0`: disable WB-result forwarding to EX; `1`: enable it when the producer result is available; inactive when `MUA_FORWARDING = 0`. | `1` |
+| `MUA_DE_OPERAND_RETENTION` | `uqu_hazard` option: `0`: continuously resolve DE sources; `1`: retain correctly resolved DE operands while their instruction waits. | `0` |
 | `MUA_BRANCH_PREDICTOR` | `none`, `static_not_taken`; additional implementations TBD. | `none` |
 | `MUA_REGFILE_IMPL` | `ff`: flip-flop storage; `latch`: latch storage. | `ff` |
 | `MUA_IF_BUFFER_WORDS` | Integer capacity of at least `2` in 32-bit fetch words; non-power-of-two capacities supported. | `2` |
@@ -211,6 +212,12 @@ register file in Section 17; predictor encoding remains TBD.
 `MUA_MULDIV_ITERUNROLL` is an integer factor passed to RTL
 unchanged. Every hardware configuration shall explicitly set all parameters,
 including inactive ones, under [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
+
+`MUA_DE_OPERAND_RETENTION` is implemented by the standalone hazard unit in
+Section 4.2 and accepted as an explicit integer boolean by the component runner.
+All hardware presets shall set it; existing presets use zero, and
+`config/rv32i_retained.yml` selects one for comparison. Core/stage integration
+remains pending.
 
 `MUA_HARDENED` is a planned future feature. Every hardware configuration shall
 explicitly set it to zero until its implementation is supported. An enabled
@@ -1215,13 +1222,16 @@ its actual operand-use point can receive that value. Grant or response delays,
 disabled paths, and other backpressure may extend this wait; no fixed
 load-use stall count shall be assumed.
 
-A held consumer shall retain each correctly resolved operand that is needed
-for later computation, or retain the completed result if computation has
-already consumed that operand. A producer retiring or moving out of an
-enabled forwarding stage shall not make the consumer lose its value or fall
-back to a stale register-file operand. Each operand shall be resolved using
-the existing youngest-writer and availability checks; a captured stale value
-shall not be treated as ready merely because it is retained.
+Once a consumer has captured operands for execution or consumed them in a
+completed computation, backpressure shall preserve the required operands or
+completed result. A producer retiring or moving out of an enabled forwarding
+stage shall not make that executing consumer lose its value or fall back to
+a stale operand. Each operand shall be resolved using the existing
+youngest-writer and availability checks; a captured stale value shall not be
+treated as ready merely because it is retained. Waiting DE instructions shall
+instead use the selectable continuous-resolution or retention policy in
+Section 4.2; continuous resolution may temporarily withdraw source readiness
+and stall until a correct value becomes available again.
 
 Stalling instruction movement shall not suppress operand capture needed to
 preserve an available value while older instructions drain. Such capture
@@ -1263,6 +1273,358 @@ rules rather than wait for ordinary computation operands.
 Detailed placement/routing of retained load results and physical operand/result
 storage remain implementation details. Floating-point and custom memory operand
 profiles shall retain their separately specified or open integration requirements.
+
+### 4.1. Core-to-DE operand availability contract
+
+**Status:** Agreed; DE implementation pending
+
+DE shall expose its source-register addresses and use information to the
+core-owned hazard/forwarding logic. The core shall resolve the youngest older
+writer and supply operand values and availability through the following DE
+inputs; DE shall not independently match individual EX/MEM/WB producers.
+
+| Port | Meaning |
+| --- | --- |
+| `rs0_i[31:0]`, `rs1_i[31:0]`, `rs2_i[31:0]` | Resolved values for the first, second and third source slots. A value is usable in DE only when its corresponding `rs_ready_i` bit is set. |
+| `rs_ready_i[2:0]` | Bit n indicates that source slot n contains the correct value now, from storage, an enabled forwarding path, or a correctly retained operand. |
+| `rs_ex_guaranteed_i[2:0]` | Bit n indicates that the correct value for source slot n is guaranteed through an enabled EX bypass when this instruction enters EX. This does not validate the current `rsN_i` value. |
+
+Slot numbers are zero-based interface positions: native architectural rs1,
+rs2 and rs3 use slots 0, 1 and 2 respectively. The third slot shall retain the
+instruction-specific selection already defined for Zfinx and XIF sources.
+
+For each actually used source, DE shall apply its operand-use point:
+
+- A source consumed in DE, including branch comparison, JALR target calculation
+  or XIF source delivery, shall require its `rs_ready_i` bit. An EX guarantee
+  alone shall not permit that DE action.
+- A native source consumed in EX, including integer store data, shall require
+  either its `rs_ready_i` bit or its `rs_ex_guaranteed_i` bit before DE-to-EX
+  transfer. Unused sources shall not block transfer.
+
+The masks express operand availability only. EX capacity, serialization and
+central event arbitration shall still qualify transfer and any redirect or
+offload action. Faulting instructions shall retain their existing exception
+progress rules without waiting for ordinary computation operands.
+
+For example, consider these adjacent instructions:
+
+```asm
+add x3, x1, x2
+sub x4, x3, x5
+```
+
+With `MUA_FORWARDING = 1`, `MUA_FORWARD_EX_TO_DE = 0` and
+`MUA_FORWARD_MEM_TO_EX = 1`, the following transfer shall be possible without
+an additional dependency stall, provided the other operands and stages are
+ready:
+
+| Cycle | Producer `add` | Consumer `sub` |
+| --- | --- | --- |
+| T | In EX with a successful result available; able to advance to MEM. | In DE; source slot 0 may have `rs_ready_i[0] = 0` and `rs_ex_guaranteed_i[0] = 1`. |
+| T+1 | In MEM with its result retained. | In EX; obtain x3 through MEM-to-EX forwarding. |
+
+The core shall assert a guarantee only when actual producer movement, valid
+results and enabled paths establish it for the accepted DE-to-EX transfer.
+An unfinished load or offload with an unavailable result shall not establish
+such a guarantee. The masks shall be re-evaluated while DE is held.
+
+When transfer relies on a guarantee without current readiness, the parent
+shall preserve the source identity and operand-validity/bypass information
+with the DE/EX instruction so EX cannot consume the stale DE value. Subsequent
+backpressure shall preserve the correct operand or completed result under the
+existing retention rules. A guarantee shall not mark stale operand storage as
+valid. DE operand retention, when selected, shall be owned by the core's
+hazard unit as defined in Section 4.2. Execution/result retention shall remain
+with its existing owning pipeline registers or functional unit.
+
+### 4.2. Core-owned hazard unit and selectable DE operand retention
+
+**Status:** Standalone component implemented; core/stage integration pending
+
+The core shall instantiate `uqu_hazard` to centralize source dependency checks,
+youngest-writer selection and configured forwarding for both DE and EX. It
+shall implement the DE availability contract in Section 4.1 and resolve EX
+source values/readiness through the enabled MEM-to-EX and WB-to-EX paths.
+It shall consume source addresses/use information, GPR read values, captured
+operand values/validity and producer destination, availability and movement
+information from the core-owned pipeline slots. Both destinations of paired
+XIF results shall participate in hazards, with only the primary destination
+forwardable under the existing XIF policy. No separate scoreboard table is
+required by this organization.
+
+#### 4.2.1. Consumer stages and control boundaries
+
+One hazard-unit instance shall serve the following stage responsibilities:
+
+| Stage | Hazard/forwarding responsibility |
+| --- | --- |
+| DE | Resolve used GPR sources from storage and enabled EX/MEM/WB forwarding, optionally retain resolved values, and provide the current-readiness and EX-guarantee masks. DE-consumed branch/JALR/XIF sources shall require current readiness. |
+| EX | Resolve used execution sources from correctly captured operands or enabled MEM/WB forwarding; supply operand values and readiness for first execution acceptance. Cover ALU, MUL/DIV and FPU sources, including a configured third source, and integer store data independently of the address ALU's immediate operand. |
+| MEM | Supply producer metadata/results to the hazard unit. No late register-operand forwarding into MEM shall be introduced; the effective address and store data shall already be resolved and retained before EX-to-MEM transfer. |
+| WB | Supply pending destination, forwardable result and writeback information. Retirement, GPR/CSR updates and commit/result protocol handling shall remain WB/core responsibilities. |
+
+Producer selection shall be relative to the consumer's age. A DE source shall
+consider older writers in EX, MEM and WB, in that order of youngest precedence.
+An EX source shall consider older writers in MEM and WB, with MEM taking
+precedence. The EX instruction shall not forward from itself or depend on a
+younger DE instruction. For any unresolved source, an unavailable youngest
+matching writer shall block use of an older matching result or stale storage
+value. Unused sources shall not block execution, and x0 shall always supply
+zero without a producer dependency.
+
+Pipeline-slot validity and destination intent shall be distinct from result
+availability and forwarding eligibility. An outstanding load shall remain a
+pending writer without making its effective address forwardable as load data.
+Faulting or discarded instructions shall not supply usable values; an older
+fault shall follow containment/flush sequencing rather than let a dependent
+consumer fall back to stale data. CSR and XIF results shall retain their
+existing commitment and result-validity qualifications, including the paired
+XIF secondary-destination forwarding restriction.
+
+The parent shall carry the EX consumer's source identities/use information
+and captured operand validity with DE/EX. If admission relied on an EX
+guarantee, the hazard unit shall resolve that source through the promised
+enabled path before execution consumes it. Correctly captured operands may
+be used directly. If an operand is unavailable, execution shall not accept
+stale data; normal DE admission must already have established the guarantee
+instead of intentionally moving an unknown operand wait into EX.
+
+The hazard unit shall supply source values, bypass selections as needed,
+per-source readiness and dependency-blocking information. The core shall
+connect these to stage operand inputs and the existing EX
+`operands_ready_i` qualification. ALU operand selection between register,
+immediate, PC and zero shall retain its decoded meaning; forwarding a source
+shall not overwrite an immediate or PC operand. Local execution tracking shall
+ensure that a held instruction does not issue its functional-unit request again
+after its operands have been accepted.
+
+Each stage shall retain ownership of its valid/ready handshake, functional-unit
+busy state and local progress. A dependency wait shall hold the consumer and
+apply backpressure to its predecessors while permitting older instructions
+and accepted-response handling to progress. LSU bus waits and downstream
+capacity shall not become additional hazard-unit state machines. The central
+controller shall retain serialization sequencing, trap/interrupt/debug drains,
+redirect arbitration and flush generation; the hazard unit shall consume the
+resulting affected-slot invalidation and movement information. Exact wiring
+shall avoid combinational cycles between dependency decisions and transfer
+qualification.
+
+#### 4.2.2. Selectable DE operand retention
+
+The elaboration-time boolean `MUA_DE_OPERAND_RETENTION` shall select two
+implementations behind the same resolved-value and readiness-mask interface:
+
+| Setting | DE source handling |
+| --- | --- |
+| `0` (default) | Continuously reevaluate storage and enabled forwarding sources each cycle. Allocate no additional DE operand-retention data or validity registers. If a correct value is temporarily unavailable, withdraw readiness and stall the consumer as required by its operand-use point. |
+| `1` | Retain each correctly resolved, used DE source in `uqu_hazard`, with per-source validity associated with the current IF/DE instruction. Once retained, keep that value available while the instruction waits. |
+
+For example, a branch `beq x3, x4, target` may wait for a load producing x4
+while x3 is available through WB-to-DE forwarding. In continuous mode, once
+the x3 producer retires, its value can be read from the GPR file; no extra
+capture is needed for correctness. In retention mode, the hazard unit may
+capture x3 before WB drains and continue supplying that retained value.
+
+Retention may also bridge an availability gap: with EX-to-DE enabled and
+MEM-to-DE disabled, a source can be forwardable in EX, unavailable while its
+producer occupies MEM, and available again in WB. Continuous mode shall wait
+if the consumer needs that source during the gap; retention mode may avoid
+that wait by keeping the previously obtained value. Neither mode may use a
+stale value or bypass a younger matching writer.
+
+In retention mode, source capture shall remain possible while DE is stalled.
+Current values shall also be usable without an extra capture cycle. A mere
+EX-bypass guarantee shall not validate or capture an unavailable current
+value. Retained validity shall be cleared on reset and invalidated when the
+owning instruction is flushed, transferred out or replaced; a replacement
+instruction shall not inherit the previous instruction's retained operands.
+Operand data shall not require reset. A third retention slot shall be omitted
+when neither enabled Zfinx nor three-source XIF requires it.
+
+The policy shall be independent of the forwarding master/path parameters;
+retention shall never enable a disabled forwarding route. Both policies shall
+preserve the same architectural behavior and Section 4.1 contract, while
+allowing different stall counts and implementation cost. The core shall retain
+ownership of the IF/DE and DE/EX boundary registers and global event control;
+the hazard unit's optional retention registers are local state associated with
+the IF/DE instruction, not a second instruction queue.
+
+This option shall not remove ordinary DE/EX operand storage, retention required
+by executing units, or stable-payload requirements of CV-X-IF handshakes. Any
+protocol-required XIF holding state shall be implemented even in continuous
+mode. Consumer/lifecycle ports are defined in Section 4.2.4; producer bindings
+are documented in the [hazard guide](../verif/sim/hazard/README.md).
+XIF holding-state placement remains an integration follow-up.
+Verification shall exercise both policies, producer movement through disabled
+paths, stalled consumers, flush/replacement, youngest-writer conflicts and
+the unchanged EX-bypass guarantees. It shall also cover simultaneous DE/EX
+consumers, EX MEM-versus-WB priority, unavailable younger matching writers,
+store-data forwarding, configured third sources, and preservation of operands
+or results while EX is held. The retention parameter shall affect only DE's
+optional source storage; EX forwarding and execution-retention obligations
+shall apply in both modes.
+
+#### 4.2.3. Normalized producer descriptors
+
+The core shall supply one normalized producer descriptor for each occupied
+EX, MEM and WB slot. Descriptors shall use flattened plain-Verilog inputs;
+the hazard unit shall not decode native instruction classes or interpret
+LSU, CSR or XIF completion protocols to determine whether a result is usable.
+The core shall assemble descriptors from parent-owned pipeline metadata and
+the owning stage's qualified completion/result outputs.
+
+Each descriptor shall contain the following independent information:
+
+| Field | Width | Meaning |
+| --- | --- | --- |
+| Slot valid | 1 | The corresponding pipeline slot holds a live instruction. This is occupancy, not a stage's completed-output-valid indication. |
+| Pending destinations | 2 | Per-destination potential write intent while the instruction is pending, independent of its eventual writeback pulse or result availability. Native single-destination operations use only destination 0. |
+| Destination 0/1 addresses | 5 each | Architectural GPR addresses whose pending writes participate in matching. The parent normalizes optional paired XIF writes into these two destinations. |
+| Result available | 1 | The primary destination's actual architectural result is available now, rather than an intermediate execution value. |
+| Result forwardable | 1 | Instruction-specific success, permission and commitment conditions permit forwarding the primary result. Forwarding still requires availability and an enabled route. |
+| Result data | 32 | The primary destination's architectural value; only usable when both result qualifications hold. |
+| Stage advance | 1 | The instruction actually transfers out of its current slot on this edge. EX/MEM advances move the producer to the next stage; WB advances remove the instruction. |
+
+An invalid slot shall not participate in matching. Pending destination enables
+shall exclude ignored writes, including x0 and the ignored XIF x0/x1 pair
+under the existing paired-result policy. Destination 1 shall remain
+non-forwardable; when unused its pending enable shall be zero. Supplying both
+addresses explicitly keeps paired-destination normalization in the core and
+avoids instruction-specific destination derivation in the hazard unit.
+
+For a pending matching writer, lack of availability, instruction-specific
+forwardability or an enabled route shall block an unresolved consumer; it
+shall not make the writer disappear from youngest-writer selection. In
+particular, pending destination intent shall not be derived solely from the
+WB register-file write pulse or any stage's completed-output-valid signal.
+Fault containment and affected-slot invalidation shall retain their existing
+priority and shall prevent stale fallback while a dependent instruction
+remains live.
+
+For example, an outstanding `lw x3, 0(x1)` in MEM shall report a valid slot
+and pending primary destination x3, but no available/forwardable load result.
+Its effective address shall not qualify as result data. After a successful
+response is registered, the normalized descriptor may advertise the selected
+and extended load value under the existing load-forwarding rule. A failed
+response shall produce no forwardable result. Similarly, the core shall
+withhold CSR and XIF result qualifications until their documented WB
+conditions hold.
+
+Stage-advance information shall describe actual movement rather than raw
+downstream readiness. Together with available/forwardable results and the
+configured routes, it shall support the EX-entry guarantees in Section 4.1.
+No additional producer table or result storage is implied by the descriptors;
+the pipeline slots remain their source of identity and age. Producer inputs
+use stage-prefixed `pending_i`, `rd0_i`, `rd1_i`, `result_available_i`,
+`result_forwardable_i`, `result_i` and `advance_i`, with `ex_valid_i`,
+`mem_valid_i` and `wb_valid_i` identifying occupancy. The EX validity input is
+shared between the producer and consumer roles. The
+[hazard guide](../verif/sim/hazard/README.md) defines exact names and behavior;
+consumer and lifecycle bindings are defined in Section 4.2.4.
+
+#### 4.2.4. Consumer ports, readiness and retained-operand lifecycle
+
+The hazard unit shall use three explicitly named source slots for each DE
+and EX consumer, with zero-based slot numbering as in Section 4.1. Consumer
+inputs shall use the following flattened plain-Verilog bindings:
+
+| Input port(s) | Width each | Meaning |
+| --- | --- | --- |
+| `clk_i`, `rst_ni` | 1 | Core clock and synchronous active-low reset for optional retention validity. Retained data shall not require reset. |
+| `de_valid_i` | 1 | The current IF/DE instruction is valid. |
+| `de_clear_i` | 1 | Invalidate retention associated with the current DE instruction at the active edge. The core asserts this for transfer out, flush or replacement of that instruction. |
+| `de_rs0_addr_i`, `de_rs1_addr_i`, `de_rs2_addr_i` | 5 | Architectural addresses of the DE source slots. |
+| `de_rs0_i`, `de_rs1_i`, `de_rs2_i` | 32 | GPR read values for those slots, before hazard-unit forwarding/optional retention selection. |
+| `de_rs_used_i` | 3 | Bit n identifies a source actually used by the DE instruction. |
+| `de_rs_need_now_i` | 3 | Subset of the used-source mask identifying sources consumed in DE; other used native sources may rely on an EX guarantee. |
+| `ex_valid_i` | 1 | The DE/EX instruction is valid; it is also the instruction described by the EX producer descriptor. |
+| `ex_rs0_addr_i`, `ex_rs1_addr_i`, `ex_rs2_addr_i` | 5 | Architectural addresses retained with the EX consumer. |
+| `ex_rs0_i`, `ex_rs1_i`, `ex_rs2_i` | 32 | Source values carried with DE/EX. A value is already resolved only when its captured-valid bit is set. |
+| `ex_rs_used_i` | 3 | Bit n identifies a source actually used by the EX instruction. |
+| `ex_rs_captured_i` | 3 | Bit n identifies a correctly captured EX source value; an earlier EX guarantee alone shall not set it. |
+
+The source values and per-source availability outputs shall be:
+
+| Output port(s) | Width each | Meaning |
+| --- | --- | --- |
+| `de_rs0_o`, `de_rs1_o`, `de_rs2_o` | 32 | Resolved DE source values, connected to the corresponding DE operand inputs in Section 4.1. |
+| `de_rs_ready_o` | 3 | Current readiness, connected to DE's `rs_ready_i`. |
+| `de_rs_ex_guaranteed_o` | 3 | EX-entry guarantees, connected to DE's `rs_ex_guaranteed_i`. |
+| `ex_rs0_o`, `ex_rs1_o`, `ex_rs2_o` | 32 | Resolved EX source values for execution and store-data operand selection. |
+| `ex_rs_ready_o` | 3 | Current readiness for EX consumption. |
+
+Readiness shall be per source so branches, XIF source delivery and execution
+can apply their own actual use requirements. For DE, every used source marked
+need-now shall require current readiness; every other used native source shall
+require current readiness or an EX guarantee. EX shall require current
+readiness for each source it is about to consume. Unused slots shall not
+block progress. Source data without corresponding readiness shall not be
+consumed as valid data.
+
+There shall be no general `stall_o` output that controls pipeline movement.
+DE and EX shall combine operand availability with local execution conditions;
+the core shall qualify transfers with downstream capacity and global control.
+Dependency blocking shall therefore remain distinguishable from a stage's
+other reasons for waiting. Per-source masks shall not be collapsed into a
+single readiness bit before consumers have applied their source-use rules.
+
+When DE retention is enabled, reset shall clear retained validity. Otherwise,
+`de_clear_i` or an invalid DE slot shall invalidate the retained operands at
+the active edge, taking priority over source capture. Only a valid, uncleared
+held instruction may capture newly available used sources; an already retained
+correct value shall remain unchanged. When the old instruction transfers and
+a replacement arrives on the same edge, clear shall prevent the replacement
+from inheriting any old operand validity. The new instruction shall still be
+able to use live resolved values without waiting for a capture cycle.
+
+`de_clear_i` shall be a retention-state update condition, not a combinational
+operand-output disable. In particular, asserting it for a successful transfer
+shall not suppress the current instruction's values or readiness before the
+edge. The controller shall separately prevent actions by flushed instructions
+and qualify live-slot validity. This separation shall avoid a feedback loop
+between readiness, transfer and clearing retained state.
+
+The hazard unit shall contain no additional EX source-retention bank. Existing
+parent-owned pipeline storage and functional-unit acceptance/result state shall
+preserve EX operands or completed results as required by Section 4.2.1. With
+DE retention disabled, retention-specific capture/clear logic and state shall
+be omitted; forwarding/readiness behavior and all protocol-required XIF
+holding obligations shall remain in force.
+
+#### 4.2.5. Standalone implementation and verification
+
+`src/uquintus/uqu_hazard.v` implements these contracts in plain Verilog with
+the shared component runner and `config/sim/hazard.yml`. Its
+[component guide](../verif/sim/hazard/README.md) defines source-slot behavior,
+normalized producer ports, retention lifecycle and regression commands.
+Unavailable/unused source outputs are deterministic zero; used x0 is ready
+with value zero, and RV32E-invalid source addresses remain unavailable without
+aliasing. The core remains responsible for converting illegal-register cases
+and native faults into their appropriate exception/control paths.
+
+EX guarantees are emitted only when a used source is not currently ready and
+is not needed in DE. An EX producer must advance to MEM with a qualified result
+and MEM-to-EX enabled. A MEM producer may stay in MEM with MEM-to-EX enabled,
+or advance to WB with WB-to-EX enabled. WB already supplies current operands
+through the master-controlled WB-to-DE path; `wb_advance_i` is retained for
+descriptor uniformity without additional guarantee logic. No guarantee
+establishes current operand validity or replaces downstream capacity checks.
+
+The component regression checks all sixteen combinations of the four
+independent forwarding-path controls in both retention modes, plus the master
+disabled and RV32E/Zfinx/two-/three-source paired-XIF profiles. The initial
+forty-profile sweep passes all 160 directed, guarantee, lifecycle and
+randomized suites. The independent model evaluates ordered producer
+transactions and predicted movement; tests include both sides of retention
+clock edges and the promised producer-to-EX-consumer transitions.
+
+Yosys optimization retains no storage in continuous mode, 66 bits with two
+retained sources or 99 bits with three. No latches are inferred. These counts
+measure generic optimized state rather than mapped ASIC PPA. Unsupported
+parameter settings fail elaboration through an unresolved configuration-guard
+cell. Parent pipeline wiring, the DE stage, central controller sequencing and
+XIF issue/holding-state integration remain pending.
 
 ## 5. Configurable branch prediction
 
@@ -2730,7 +3092,7 @@ later decisions determine the active contract.
 | D-221 | Add independent boolean `MUA_FORWARD_WB_TO_EX`, defaulting to one and subordinate to `MUA_FORWARDING`; forward available WB results to EX consumers with the existing youngest-writer and validity checks, or use another valid route or dependency stalls when disabled. | Supply operands whose producers have advanced beyond MEM without requiring earlier DE forwarding, while retaining independent path configuration. | Agreed; stall retention defined by D-224 |
 | D-222 | Resolve native integer store data through the configured operand forwarding/hazard logic in EX and retain it with the effective address before transfer to MEM; require no late store-data forwarding or register-dependency wait in MEM. | Keep register dependency resolution out of the MEM-stage LSU while preserving ordinary byte-lane and bus handling. | Agreed |
 | D-223 | Require successful native load responses to be captured in core registers before their data becomes forwardable; forward the correct selected/extended value through enabled paths, with no direct external-response bypass and no fixed load-use stall count. | Separate external response timing from dependent computation while preserving variable-latency memory and precise faults. | Agreed; detailed retained-result placement/routing TBD |
-| D-224 | Retain correctly resolved operands needed by a stalled consumer, or its completed result, while older producers drain; allow necessary local capture without advancing or reissuing the held instruction, and invalidate retained validity on owning flush/reset. | Prevent a stalled consumer from losing a forwarded value when its producer leaves the forwarding stage. | Agreed; physical storage details remain implementation choices |
+| D-224 | Retain correctly resolved operands needed by a stalled consumer, or its completed result, while older producers drain; allow necessary local capture without advancing or reissuing the held instruction, and invalidate retained validity on owning flush/reset. | Prevent a stalled consumer from losing a forwarded value when its producer leaves the forwarding stage. | DE source-retention requirement superseded by selectable policy D-275; executing-consumer/result retention and protocol stability remain required |
 | D-225 | Finalize nonfaulting branch/JAL/JALR resolution and any DE redirect only with the instruction's accepted DE-to-EX transfer, required operands ready, and central arbitration permitting it; wait while held and perform the action once. | Keep DE control flow simple without bookkeeping for an early redirect from a stalled branch. | Agreed; existing prediction, precise-fault, and XIF issue contracts preserved |
 | D-226 | Default both `MUA_FORWARD_EX_TO_DE` and `MUA_FORWARD_MEM_TO_DE` to one, retaining their independent disable controls and the `MUA_FORWARDING` master switch. | Enable all currently selectable operand-forwarding paths in the default configuration while preserving timing and stall experiments. | Agreed |
 | D-227 | Hold a native consumer in DE until every required EX operand is captured or guaranteed available through an enabled bypass on entry to EX; preserve back-to-back ALU forwarding and reject unknown pending-load/offload availability as a guarantee. | Keep unresolved operand waits out of EX without waiting unnecessarily for register writeback. | Agreed; DE-consumed operands and precise-fault handling retain their own readiness/progress rules |
@@ -2755,3 +3117,9 @@ later decisions determine the active contract.
 | D-271 | Complete WB standard CV-X-IF commit/result and conditional paired-write support, plus debug-only CSR state, EBREAK/DRET and debug exception routing; retain parent-owned pipeline registers, issue tracking, privilege/Debug Mode and global control. | Complete optional WB functionality with one XIF permission bit, no result queue or proprietary coprocessor channels, and compact debug state. | Implemented; extends D-268 and D-270; exact bindings and tests in the WB component guide |
 | D-272 | Implement a stateless native decoder under DE, alongside DE-owned operand and branch/target logic; retain core-owned GPR storage, boundary registers and shared control. Separate static native recognition/register legality from XIF recognition and runtime permission checks. | Begin DE with a reusable combinational component and preserve existing stage/parent responsibilities and precise-exception handling. | Implemented decoder and component regressions; branch component added by D-273; enclosing DE stage and XIF logic remain pending, Section 3.11 |
 | D-273 | Implement uqu_branch as a stateless DE component for comparisons, targets, links and alignment diagnostics; retain prediction/BTB in IF and transfer-qualified redirects and precise trap sequencing in DE/core. | Reuse native decoder controls while separating execution truth from frontend prediction and keeping branch arithmetic independent of EX. | Implemented; C-disabled/enabled component and decoder-fed tests, Section 6.1 |
+| D-274 | Supply DE with three resolved source values, a per-source current-readiness mask and a separate per-source EX-bypass guarantee mask; require current readiness for DE consumption and current readiness or a proven EX guarantee for native EX consumption. | Preserve adjacent dependent execution without requiring EX-to-DE forwarding, while distinguishing usable values from stale inputs and keeping hazard matching in the core parent. | Agreed; contract and dependent ADD/SUB example in Section 4.1; optional DE retention owned by hazard unit under D-275 |
+| D-275 | Centralize dependency/forwarding resolution in core-owned uqu_hazard, with boolean MUA_DE_OPERAND_RETENTION selecting continuous DE resolution (0, default) or local per-instruction source retention (1) behind the same DE interface. | Enable area/performance exploration without duplicating stage hazard logic, while preserving youngest-writer checks, EX guarantees and protocol-required holding state. | Implemented standalone under D-279; Section 4.2; supersedes unconditional DE retention in D-224; core/stage integration pending |
+| D-276 | Make the core-owned hazard unit serve DE and EX with consumer-relative producer priority, common result qualification and register-source forwarding; preserve local stage handshakes and central global control. | Centralize dependency policy across both consumer stages without introducing late MEM operand waits or mixing bus/execution control into hazard tracking. | Implemented standalone under D-279; Section 4.2.1; MUA_DE_OPERAND_RETENTION affects only optional DE source storage |
+| D-277 | Feed the hazard unit normalized EX/MEM/WB producer descriptors containing slot occupancy, up to two pending destinations, primary-result availability/forwardability/data and actual stage advance; assemble these in the core from pipeline metadata and stage outputs. | Keep pending dependencies visible before completion, prevent forwarding intermediate values and separate instruction-specific completion semantics from dependency matching. | Standalone interface implemented under D-279; Section 4.2.3; parent descriptor assembly pending |
+| D-278 | Use three explicitly named DE/EX source slots with address/value/use information, a DE need-now mask, EX captured-valid bits and per-source resolved values/readiness; invalidate optional DE retention through de_valid_i/de_clear_i with clear priority at the edge and no combinational output suppression. | Keep operand availability separate from stage stall control and instruction lifetime explicit without introducing a second EX operand bank. | Standalone interface implemented under D-279; consumer/lifecycle bindings in Section 4.2.4 |
+| D-279 | Implement the standalone hazard unit with normalized producer inputs, DE/EX source resolution, movement-qualified guarantees and optional DE operand retention; add explicit boolean configuration support and a retained-RV32I preset. | Make the agreed dependency policies executable and testable before assembling DE or the full core. | Implemented; Section 4.2.5 and hazard component guide; forty-profile regression, lint, configuration guards and optimized storage checks; core/stage integration pending |

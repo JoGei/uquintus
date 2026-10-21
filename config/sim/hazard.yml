@@ -1,0 +1,20 @@
+top_module: uqu_hazard
+bender_target: hazard
+test_module: test_uqu_hazard
+parameters:
+  - ISA_E
+  - ISA_ZFINX
+  - XIF
+  - XIF_NUM_RS
+  - XIF_DUALWRITE
+  - MUA_FORWARDING
+  - MUA_FORWARD_EX_TO_DE
+  - MUA_FORWARD_MEM_TO_DE
+  - MUA_FORWARD_MEM_TO_EX
+  - MUA_FORWARD_WB_TO_EX
+  - MUA_DE_OPERAND_RETENTION
+tests:
+  - directed
+  - guarantees
+  - lifecycle
+  - randomized
