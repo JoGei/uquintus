@@ -192,7 +192,7 @@ module uqu_stage_wb #(
         (kind_i == KIND_EBREAK) ? 5'd3 : csr_cause;
     assign exception_tval_o = !exception_valid_o ? 32'd0 :
         exception_valid_i ? exception_tval_i : illegal_control ? instr_i :
-        (kind_i == KIND_EBREAK) ? pc_i : csr_tval;
+        (kind_i == KIND_EBREAK) ? 32'd0 : csr_tval;
     assign exception_pc_o = exception_valid_o ? pc_i : 32'd0;
     assign result_valid_o = valid_o && !fault && destination_nonzero &&
                             ((kind_i != KIND_CSR) || retire_o);

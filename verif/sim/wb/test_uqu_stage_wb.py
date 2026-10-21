@@ -396,6 +396,7 @@ class DebugTest(WBTest):
             await self.cycle(token(kind=4), **debug)
             r = await self.cycle(token(kind=5, pc=0x5000))
             assert r['exception_fire'] and r['exception_cause'] == 3 and not r['debug_enter']
+            assert r['exception_tval'] == 0
         self.report('Debug')
         self.drop_objection()
 

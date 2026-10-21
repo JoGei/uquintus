@@ -60,7 +60,7 @@ class WBModel:
         elif cr['exception_valid']:
             fault = cr['exception_cause'], cr['exception_tval']
         elif item['kind'] == 5 and not debug_break:
-            fault = 3, item['pc']
+            fault = 3, 0
         else:
             fault = None
         notify = bool(self.p['XIF'] and g['rst_n'] and g['valid'] and xif and not self.committed and
