@@ -1,6 +1,7 @@
 """Read the simulation JSONL stream, validating the native RVFI profile."""
 import json
 from pathlib import Path
+from rvfi_csrs import CSR_CATALOG
 
 
 RVFI_WIDTHS = dict(order=64, insn=32, trap=1, halt=1, intr=1, mode=2, ixl=2,
@@ -23,12 +24,23 @@ def read_trace(path):
             if not isinstance(record, dict):
                 raise ValueError('record must be an object')
             kind = record.get('type')
-            fields = {'reset': set(), 'interrupt': {'pc','cause','target'},
-                      'instruction': {'rvfi_'+key for key in RVFI_WIDTHS} | {'cause','tval'}}
+            fields = {'reset': set(), 'interrupt': {'pc','cause','target','csrs'},
+                      'instruction': {'rvfi_'+key for key in RVFI_WIDTHS} | {'cause','tval','csrs'}}
             if kind not in fields or set(record) != fields[kind] | {'type','epoch'}:
                 raise ValueError('unknown record type or incorrect field set')
             if type(record['epoch']) is not int:
                 raise ValueError('epoch must be an integer')
+            if kind!='reset':
+                csrs=record['csrs']
+                if not isinstance(csrs,dict): raise ValueError('csrs must be an object')
+                for name,values in csrs.items():
+                    if name not in CSR_CATALOG or not isinstance(values,dict) or set(values)!={'rmask','wmask','rdata','wdata'}:
+                        raise ValueError('unknown or malformed CSR channel')
+                    width=CSR_CATALOG[name]['width']
+                    if any(type(v) is not int or not 0<=v<2**width for v in values.values()):
+                        raise ValueError('CSR field out of range')
+                    if not (values['rmask'] or values['wmask']):
+                        raise ValueError('inactive channel in sparse CSR object')
             if kind == 'reset':
                 if record['epoch'] != epoch+1:
                     raise ValueError('reset epochs must be consecutive from zero')
@@ -36,7 +48,7 @@ def read_trace(path):
             elif epoch < 0 or record['epoch'] != epoch:
                 raise ValueError('event outside its reset epoch')
             elif kind == 'interrupt':
-                for name in fields[kind]:
+                for name in ('pc','cause','target'):
                     if type(record[name]) is not int or not 0 <= record[name] < 2**32:
                         raise ValueError('interrupt field out of range')
                 if record['cause'] not in (3,7,11):

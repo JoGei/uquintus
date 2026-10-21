@@ -12,6 +12,8 @@ The runner keeps `.v` files in Verilog-2005 mode and permits SystemVerilog-2017
 for `.sv` verification files, recording these language options in run metadata.
 `rvfi_trace.py` reads the full-core JSONL stream and checks its schema, reset
 epochs, order, PC continuity, handler markers and basic RVFI invariants.
+`rvfi_csrs.py` reads the native CSR channel catalog and uses the shared CSR model
+to check pre-/post-state, access masks, counter aliases and implicit updates.
 
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
 standalone and shared-parent scoreboards. `decode_model.py` supplies the shared

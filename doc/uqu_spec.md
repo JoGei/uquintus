@@ -63,8 +63,8 @@ check native execution under variable-latency memory. Core XIF/debug adapters,
 the FPU, Spike/formal acceptance and the ASIC build flow remain unfinished;
 this integration does not complete the first milestone's verification criteria.
 The [RVFI testbed](../verif/common/README.md) adds passive instruction/register/
-memory observations and SV JSONL tracing; per-CSR channels and formal core
-binding/proofs remain unfinished.
+memory/CSR observations and SV JSONL tracing; formal core binding/proofs remain
+deferred pending selection of an open-source formal toolchain.
 
 ## Document index
 

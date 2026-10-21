@@ -31,6 +31,7 @@ parameters:
   - XIF_DUALWRITE
   - DEBUG
 tests:
+  - csrs
   - integer
   - memory
   - traps

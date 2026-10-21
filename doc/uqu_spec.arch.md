@@ -1259,8 +1259,9 @@ or synthesizable trace outputs are introduced by this integration.
 Initial retirement-program tests use a Python instruction interpreter and
 independent variable-latency instruction/data agents. The
 [native RVFI testbed](../verif/common/README.md) now supplies architectural
-observations and SV JSONL tracing. Spike comparison, per-CSR channels and
-formal core binding/proofs remain required follow-ups.
+observations, per-CSR state channels and SV JSONL tracing. Spike comparison
+remains a follow-up; formal core binding/proofs are deferred pending toolchain
+selection.
 
 ## 4. Configurable operand forwarding
 

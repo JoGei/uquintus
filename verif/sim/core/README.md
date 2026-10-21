@@ -100,6 +100,7 @@ Registers must be initialized by software before the interpreter reads them.
 
 | Suite | Checks |
 | --- | --- |
+| `csrs` | Six CSR instruction forms, suppressed reads/writes, WARL/read-only behavior, 64-bit counter halves and aliases, inhibition/increments, PMP locking, constant HPM/identity state and illegal-write traps. |
 | `integer` | Seeded RV32I register/immediate arithmetic, shifts and comparisons; x0; dependent/overwritten destinations; branches, loops, JAL/JALR and skipped poison stores. |
 | `memory` | Signed/unsigned byte/halfword/word loads, byte-lane stores, load consumers, store-data dependencies, branch operands, FENCE and configured FENCE.I. |
 | `traps` | Misaligned data/branch targets, illegal instruction/CSR, disabled M and RV32E register restrictions, ECALL, EBREAK with zero `mtval`, and explicit load/store error responses. |
@@ -121,18 +122,30 @@ unsigned JSON integers and one of three types:
 
 - `reset`: consecutive `epoch`, starting at zero.
 - `instruction`: epoch, `rvfi_*` fields (valid is implied), and diagnostic
-  `cause`/`tval` fields, zero for successful retirement.
+  `cause`/`tval` fields, zero for successful retirement, plus `csrs`.
 - `interrupt`: epoch, saved `pc`, `cause`, and handler `target`; no instruction
   order is consumed. The next instruction carries `rvfi_intr=1`.
 
+Instruction and interrupt records include a sparse `csrs` object. Each active
+channel is keyed by its canonical name (for example `mstatus` or `mcycle`) and
+contains unsigned `rmask`, `wmask`, `rdata` and `wdata`. Inactive channels are
+omitted. The same masks/data are exposed as flat standard RVFI CSR signals on
+the verification top. `rvfi_csrs.py` checks every channel against the shared
+independent CSR model, including implicit trap/MRET effects and IRQ entry.
+
 Order counts accepted instruction events, including synchronous traps, and
-restarts at zero in each reset epoch. The writer runs in SystemVerilog at the
-accepting clock edge. `verif/sim/common/rvfi_trace.py` reads and validates the
+restarts at zero in each reset epoch. The wrapper registers each accepted event
+so CSR pre-state can be paired with real committed post-state. The SV writer
+records it at the falling edge of that observation cycle.
+`verif/sim/common/rvfi_trace.py` reads and validates the
 file without a simulator. A direct simulator invocation can override the path
 with `+rvfi_trace_file=<path>`; the Make flow uses its isolated run directory.
 
 This interpreter is an initial integration oracle, **not the required Spike
-adapter or completed riscv-formal verification**. Per-CSR RVFI channels,
-formal core binding/proofs, Spike comparison, full architectural coverage,
+adapter or completed riscv-formal verification**. Formal core binding/proofs,
+Spike comparison, full architectural coverage,
 CI and ASIC implementation remain follow-ups; passing these programs does
 not complete the first milestone's acceptance criteria.
+Formal core binding and proof execution are deferred until selection and
+configuration of an open-source formal toolchain. The implemented CSR channels
+extend the simulation coverage without selecting a formal toolchain.

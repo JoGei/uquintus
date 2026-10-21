@@ -13,7 +13,7 @@ def instruction(order=0, pc=0x1000, **updates):
     values = dict.fromkeys(RVFI_WIDTHS,0)
     values.update(order=order, insn=0x13, mode=3, ixl=1, pc_rdata=pc, pc_wdata=pc+4)
     values.update(updates)
-    return dict(type='instruction',epoch=0,cause=0,tval=0,**{'rvfi_'+n:v for n,v in values.items()})
+    return dict(type='instruction',epoch=0,cause=0,tval=0,csrs={},**{'rvfi_'+n:v for n,v in values.items()})
 
 
 class TraceTests(unittest.TestCase):
@@ -28,7 +28,7 @@ class TraceTests(unittest.TestCase):
 
     def test_irq_and_exception_handlers_and_reset(self):
         records = [dict(type='reset',epoch=0), instruction(),
-            dict(type='interrupt',epoch=0,pc=0x1004,cause=11,target=0x202c),
+            dict(type='interrupt',epoch=0,pc=0x1004,cause=11,target=0x202c,csrs={}),
             instruction(1,0x202c,intr=1), instruction(2,0x2030,trap=1,pc_wdata=0x3000),
             instruction(3,0x3000,intr=1), dict(type='reset',epoch=1),
             instruction() | dict(epoch=1)]
@@ -61,6 +61,16 @@ class TraceTests(unittest.TestCase):
         for r in (dict(type='reset',epoch=1),dict(type='bogus',epoch=0),
                   dict(type='reset',epoch=0,extra=1)):
             with self.subTest(record=r),self.assertRaises(ValueError):self.parse([r])
+
+    def test_csr_masks_widths_and_catalog(self):
+        value=dict(rmask=0xffffffff00000000,wmask=0,rdata=2**40,wdata=2**40)
+        record=instruction() | dict(csrs={'mcycle':value})
+        self.assertEqual(self.parse([dict(type='reset',epoch=0),record])[-1],record)
+        for csrs in ({'unknown':value}, {'mstatus':value},
+                     {'mstatus':dict(rmask=0,wmask=0,rdata=0,wdata=0)},
+                     {'mcycle':dict(value,wmask=-1)}, {'mcycle':{'rmask':1}}):
+            with self.subTest(csrs=csrs),self.assertRaises(ValueError):
+                self.parse([dict(type='reset',epoch=0),instruction() | dict(csrs=csrs)])
 
 
 if __name__=='__main__':

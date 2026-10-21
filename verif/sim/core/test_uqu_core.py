@@ -4,6 +4,7 @@ from pyuvm import uvm_root
 
 from core_env import (CoreTest, BOOT, HANDLER, MASK, ins_i, ins_r, ins_s, ins_b,
                       ins_j, csr)
+from rvfi_csrs import CSR_CATALOG
 
 
 class IntegerTest(CoreTest):
@@ -236,6 +237,66 @@ class ResetTest(CoreTest):
         await self.finish(0x2004)
         assert self.regs[2]==42 and self.word(self.memory,0x4004)==0
         self.drop_objection()
+
+
+class CsrsTest(CoreTest):
+    async def run_phase(self):
+        self.raise_objection()
+        self.skip_handler()
+        program=self.setup_traps()+[ins_i(1,0,-1),csr(0x340,rd=2,rs=1),
+            csr(0x340,rd=3,f=2),csr(0x340,rd=4,rs=31,f=7),
+            csr(0x340,rd=5,rs=17,f=6),csr(0x340,rd=0,rs=7,f=5),
+            ins_i(6,0,3),csr(0x340,rd=7,rs=6,f=2),csr(0x340,rd=8,rs=6,f=3),
+            csr(0x301,rd=2,rs=1),csr(0x301,rd=3,f=2)]
+        # WARL, ignored fixed fields, and explicit read/write suppression.
+        for addr in (0x300,0x304,0x305,0x310,0x341,0x342,0x343,0x344):
+            program += [csr(addr,rd=0,rs=1),csr(addr,rd=3,f=2)]
+        program += self.setup_traps()  # Restore a usable vector before faults.
+        if self.params['ISA_UMODE']:
+            for addr in (0x306,0x30a,0x31a):
+                program += [csr(addr,rs=1),csr(addr,rd=3,f=2)]
+        # Freeze both counters; full 64-bit snapshots must preserve the other
+        # half and aggregate machine high/user aliases into one channel.
+        program += [csr(0x320,rs=5,f=5),ins_i(1,0,-1)]
+        for addr in (0xb00,0xb80,0xb02,0xb82):
+            program += [csr(addr,rs=1),csr(addr,rd=3,f=2)]
+        program += [csr(a,rd=3,f=2) for a in (0xc00,0xc80,0xc02,0xc82)]
+        # Counter increments are between RVFI instructions, not implicit CSR
+        # writes on every event. Unfreeze and observe both live counters.
+        program += [csr(0x320,rs=0),ins_i(1,0,19),csr(0xb00,rd=3,f=2),csr(0xb02,rd=4,f=2)]
+        for n in range(16):
+            program += [csr(0x3b0+n,rs=0),csr(0x3b0+n,rd=3,f=2)]
+        for n in range(4):
+            program += [csr(0x3a0+n,rs=0),csr(0x3a0+n,rd=3,f=2)]
+        if self.params['ISA_PMP']:
+            program += [0x000020b7,csr(0x3b0,rs=1),ins_i(1,0,0x8f),csr(0x3a0,rs=1),
+                        ins_i(1,0,-1),csr(0x3b0,rs=1),csr(0x3b0,rd=3,f=2),
+                        csr(0x3a0,rs=0),csr(0x3a0,rd=3,f=2)]
+        for addr in (0xf11,0xf12,0xf13,0xf14,0xf15):
+            program += [csr(addr,rd=3,f=2)]
+        for n in range(3,32):
+            # All hardwired HPM counters/events remain legal zero-valued CSRs.
+            program += [csr(0xb00+n,rs=1),csr(0xb80+n,rd=3,f=2),
+                        csr(0xc00+n,rd=3,f=2),csr(0xc80+n,rd=3,f=2),
+                        csr(0x320+n,rs=1),csr(0x320+n,rd=3,f=2)]
+        bad=csr(0xf14,rd=3,rs=1)
+        self.expected_faults[BOOT+4*len(program)]=2,bad
+        program += [bad,ins_i(7,0,91)]
+        end=self.put(BOOT,program)-4
+        self.put(end+4,[ins_j(0,0)])
+        await self.reset()
+        await self.finish(end)
+        assert len(self.faults)==1 and self.regs[7]==91
+        expected=set(CSR_CATALOG)
+        if not self.params['ISA_UMODE']:
+            expected -= {'mcounteren','menvcfg','menvcfgh'}
+        assert set().union(*(set(r) for r in self.csr_records))==expected, 'CSR suite did not exercise every available channel'
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=2000,timeout_unit='us')
+async def csrs(dut):
+    await uvm_root().run_test('CsrsTest')
 
 
 @cocotb.test(timeout_time=2000,timeout_unit='us')

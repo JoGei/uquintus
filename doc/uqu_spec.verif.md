@@ -90,18 +90,58 @@ the saved trace against sampled records. Reset epochs shall distinguish repeated
 order values after reset. The collector shall contain no simulation I/O or
 environment constraints; simulation formatting/file writing stays in its own
 SV module. Collector tool-compatibility checks shall not be described as core
-formal proofs. Per-CSR channels, formal core signal binding, RVFI_BUS, complete
+formal proofs. Formal core signal binding, RVFI_BUS, complete
 instruction proofs and the pinned Spike adapter remain follow-ups.
+
+### 1.2. Native CSR observation channels
+
+The verification harness shall expose `rvfi_csr_<name>_rmask`, `_wmask`,
+`_rdata` and `_wdata` for native implemented CSR state. The
+[CSR channel profile](../verif/common/README.md) and canonical
+`verif/common/uqu_rvfi_csr_list.vh` shall define channel names, widths and aliases.
+The current catalog has 99 channels, covering machine identity/control/trap
+state, optional U-mode configuration, PMP, counters and hardwired-zero HPM state.
+FPU/debug state remains outside the native core profile.
+
+CSR observations shall use successful explicit access qualification and actual
+architectural pre-/post-state. The adapter shall not predict WARL legalization,
+PMP lock effects or implicit trap/MRET updates. A registered observation stage
+shall align the RVFI instruction event with captured pre-state and actual
+committed post-state. This changes verification timing only. Counter channels
+shall be 64 bits with machine/user low/high address aliases and half masks;
+autonomous increments shall not be reported as instruction CSR writes.
+
+Synchronous traps and MRET shall report their implicit reads/writes. IRQ-entry
+CSR effects shall be included in the separate diagnostic interrupt record,
+without inventing an RVFI instruction. Illegal accesses shall not report explicit
+CSR effects; legal writes to ignored or locked fields shall report their actual
+unchanged state. Disabled features shall preserve their architectural CSR
+availability, including legal zero-valued disabled PMP CSRs. Unreset PMP address
+payload shall not acquire an assumed reset value from verification code.
+
+The JSONL stream shall include sparse CSR channel objects on instruction and
+interrupt events. Simulation shall check every active channel against the
+independent CSR model and compare sampled channels with the saved stream.
+Formal toolchain selection, core binding and proof execution remain deferred
+under Section 2; adding channels does not select a formal backend.
 
 ## 2. Simulation and formal verification
 
-**Status:** Agreed; detailed coverage and tool configuration TBD
+**Status:** Formal verification planned; core binding/proof execution deferred
+until an open-source formal toolchain is selected and its configuration pinned
 
 Verification shall include both simulation and formal checks with
 [`riscv-formal`](https://github.com/YosysHQ/riscv-formal), using the RVFI
 observation contract defined in [verification, Section 1](uqu_spec.verif.md#1-instruction-identity-and-architectural-trace). The initial formal verification
 scope shall be RV32I. Applicable instruction checks shall pass under documented
 environment assumptions as part of verification acceptance for that scope.
+
+`riscv-formal` remains the previously named framework. A complete working
+open-source toolchain, including synthesis/formal frontends, orchestration,
+solver and versions, has not yet been selected and validated for this core.
+Defer implementation of the formal core binding and execution of instruction
+proofs until that selection. Existing RVFI simulation and collector structural
+checks may continue; they do not imply completion of formal verification.
 
 Simulation verification shall compare standard-instruction retirement and trap
 outcomes against an independent software RISC-V reference model, using the
@@ -332,7 +372,7 @@ until implemented.
 
 The interpreter consumes the RVFI testbed's retirement records and independently
 checks operands, memory lanes, fault reporting and instruction sequence. It is
-not the selected Spike reference. Spike comparison, CSR RVFI channels,
+not the selected Spike reference. Spike comparison,
 riscv-formal core binding/proofs, broader software coverage and configuration CI
 remain required follow-ups. Passing the initial native programs shall not be reported as
 completion of the first milestone's acceptance criteria.
@@ -398,3 +438,5 @@ later decisions determine the active contract.
 | D-257 | Place component simulation tests in `verif/sim/<component>/` and full-core tests in `verif/sim/core/`, initially using `test_<module>.py`; keep local environments and HDL wrappers beside their tests and shared utilities in `verif/common/`. | Make tests easy to locate and run independently while growing their structure only as needed. | Agreed; simulation-specific shared helper/wrapper placement refined by D-259 |
 | D-259 | Put shared component-testing Make helpers, simulation utilities, and reusable HDL wrappers in `verif/sim/common/`; use `config/sim/<component>.yml` for DUT/test metadata and shared configuration helpers rather than separate component runner scripts. | Make invocation responsibilities explicit and reuse the flow as components are added. | Agreed; utilities shared with formal verification may remain in `verif/common/` |
 | D-290 | Add a verification-only single-channel RV32 RVFI collector, simulation core wrapper and separate SV JSONL writer; preserve actual consumed operands and raw memory responses, with explicit fault/handler/reset semantics. | Establish architectural observations without changing core RTL/ports or hiding forwarding errors; reuse the collector for later formal binding. | Implemented; Section 1.1; native simulation checks and trace reader available; CSR channels, formal core binding/proofs and Spike adapter remain unfinished |
+| D-291 | Defer formal core binding and proof execution until a working open-source formal toolchain and configuration are selected; retain the planned riscv-formal direction and current RVFI simulation checks. | Avoid implementing a tool-specific formal harness before selecting its actual frontend, orchestration and solver; distinguish simulation/structural checks from proofs. | Deferred pending toolchain selection; qualifies implementation timing under D-071 |
+| D-292 | Add native per-CSR RVFI channels with actual pre-/post-state, registered event alignment, 64-bit counter aliases, implicit trap/MRET updates and sparse JSONL diagnostics checked against the CSR model. | Observe CSR behavior without duplicating WARL/locking logic or changing processor RTL; preserve the formal deferral under D-291. | Implemented; Section 1.2; native simulation coverage and structural checks; formal binding/proofs remain deferred |

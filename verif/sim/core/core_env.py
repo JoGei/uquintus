@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from compressed_model import compressed
 from rv32_arithmetic import alu_result, muldiv_result, signed
 from rvfi_trace import read_trace
+from rvfi_csrs import CSR_CATALOG, CSRObservation
+from csregfile_model import INPUTS
 
 MASK = 0xffffffff
 BOOT = 0x1000
@@ -81,6 +83,8 @@ class CoreTest(uvm_test):
         self.rvfi_order = 0
         self.rvfi_entry = False
         self.rvfi_records = []
+        self.csr_observer = CSRObservation(self.params)
+        self.csr_records = []
 
     def put(self, addr, values):
         for entry in values:
@@ -296,6 +300,8 @@ class CoreTest(uvm_test):
         faults = [(r['rvfi_pc_rdata'],r['cause'],r['tval'])
                   for r in instructions[-len(self.rvfi_records):] if r['rvfi_trap']]
         assert faults==self.faults, 'trace trap diagnostics differ from expected faults'
+        saved=[r['csrs'] for r in records if r['type'] in ('instruction','interrupt')]
+        assert saved[-len(self.csr_records):]==self.csr_records, 'saved CSR observations differ from sampled channels'
 
     async def cycle(self, rst=1, grant=None, respond=None, irq=0, fence_ack=None):
         d = self.dut
@@ -335,26 +341,25 @@ class CoreTest(uvm_test):
                 'wb_we0','wb_waddr0','wb_wdata0','wb_cause','wb_tval','trap_valid','trap_pc','trap_cause',
                 'redirect_valid','redirect_addr','de_valid_q','ex_valid_q','mem_valid_q','wb_valid_q',
                 'priv_m_q','mstatus','mie','mip','mtvec','mepc','de_pc_q','mem_pc_q')}
-        rvfi = self.check_rvfi(o, rst)
+        ci = dict(INPUTS, rst_n=rst, priv_m=self.priv, hart_id=5,
+            irq_software=int(bool(irq & 8)), irq_timer=int(bool(irq & 128)),
+            irq_external=int(bool(irq & 2048)), retire=o['wb_retire'],
+            trap=int(bool(o['trap_valid'] or o['wb_exception_fire'])),
+            trap_pc=o['trap_pc'] if o['trap_valid'] else o['wb_pc_q'],
+            trap_interrupt=o['trap_valid'],
+            trap_cause=o['trap_cause'] if o['trap_valid'] else o['wb_cause'],
+            trap_tval=0 if o['trap_valid'] else o['wb_tval'], mret=self.signal('wb_mret'))
+        instr=o['wb_original_q']
+        if rst and (o['wb_retire'] or o['wb_exception_fire']) and instr & 127==0x73 and (instr >> 12)&7:
+            op=(instr >> 12)&7
+            rs=(instr >> 15)&31
+            ci.update(csr_valid=1, csr_commit=o['wb_retire'],csr_addr=instr >> 20,
+                csr_op=op,csr_src=rs if op & 4 else self.value(rs),
+                csr_src_zero=int(rs==0),csr_rd_zero=int((instr >> 7)&31==0),csr_instr=instr)
+        expected_csrs=self.csr_observer.step(ci,bool(o['wb_retire'] or o['wb_exception_fire'] or o['trap_valid']))
+        if o['wb_retire'] and ci['csr_valid']:
+            self.csr_overrides[o['wb_pc_q']]=self.csr_observer.read_result
         if rst:
-            if o['wb_retire']:
-                self.retire(rvfi['pc_rdata'], rvfi['insn'], int(rvfi['rd_addr']!=0), rvfi['rd_addr'], rvfi['rd_wdata'])
-            if o['wb_exception_fire']:
-                assert not o['wb_retire'] and not o['wb_we0']
-                assert o['wb_pc_q'] == self.pc
-                expected = self.expected_faults.get(self.pc)
-                assert expected is not None, f'unexpected fault PC={self.pc:08x}, cause={o["wb_cause"]}, tval={o["wb_tval"]:08x}'
-                assert (o['wb_cause'], o['wb_tval']) == expected, (hex(self.pc),o['wb_cause'],hex(o['wb_tval']),expected)
-                self.faults.append((self.pc, *expected))
-                self.trap(self.pc, *expected)
-            if o['trap_valid']:
-                assert not o['wb_retire'] and not o['wb_exception_fire']
-                assert o['trap_pc'] == self.pc, (o, self.pc)
-                assert not any(o[n] for n in ('ex_valid_q','mem_valid_q','wb_valid_q'))
-                self.traps.append((self.pc, o['trap_cause']))
-                self.trap(self.pc, o['trap_cause'], 0, True)
-            if o['wb_retire'] or o['wb_exception_fire']:
-                assert self.signal('rvfi_pc_wdata')==self.pc, ('RVFI next PC',self.rvfi_records[-1],self.pc)
             for bus in self.pending:
                 if returns[bus]:
                     self.pending[bus] = None
@@ -385,6 +390,36 @@ class CoreTest(uvm_test):
         else:
             self.pending = dict(imem=None,dmem=None)
         d.clk_i.value = 1
+        await Timer(1, units='ns')
+        rvfi = self.check_rvfi(o, rst)
+        observed_csrs={}
+        for name in CSR_CATALOG:
+            values={field:self.signal('rvfi_csr_'+name+'_'+field) for field in ('rmask','wmask','rdata','wdata')}
+            if values['rmask'] or values['wmask']: observed_csrs[name]=values
+        assert observed_csrs==expected_csrs, ('CSR observation',o,observed_csrs,expected_csrs)
+        if rst:
+            if o['wb_retire']:
+                self.retire(rvfi['pc_rdata'], rvfi['insn'], int(rvfi['rd_addr']!=0), rvfi['rd_addr'], rvfi['rd_wdata'])
+            if o['wb_exception_fire']:
+                assert not o['wb_retire'] and not o['wb_we0']
+                assert o['wb_pc_q'] == self.pc
+                expected = self.expected_faults.get(self.pc)
+                assert expected is not None, f'unexpected fault PC={self.pc:08x}, cause={o["wb_cause"]}, tval={o["wb_tval"]:08x}'
+                assert (o['wb_cause'], o['wb_tval']) == expected, (hex(self.pc),o['wb_cause'],hex(o['wb_tval']),expected)
+                self.faults.append((self.pc, *expected))
+                self.trap(self.pc, *expected)
+            if o['trap_valid']:
+                assert not o['wb_retire'] and not o['wb_exception_fire']
+                assert o['trap_pc'] == self.pc, (o, self.pc)
+                assert not any(o[n] for n in ('ex_valid_q','mem_valid_q','wb_valid_q'))
+                self.traps.append((self.pc, o['trap_cause']))
+                self.trap(self.pc, o['trap_cause'], 0, True)
+            if o['wb_retire'] or o['wb_exception_fire']:
+                assert self.signal('rvfi_pc_wdata')==self.pc, ('RVFI next PC',self.rvfi_records[-1],self.pc)
+            if o['wb_retire'] or o['wb_exception_fire'] or o['trap_valid']:
+                self.csr_records.append(observed_csrs)
+            self.csrs.update(self.csr_observer.model.words)
+        d.clk_i.value = 0
         await Timer(1, units='ns')
         self.cycles += 1
         return o

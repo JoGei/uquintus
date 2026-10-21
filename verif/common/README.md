@@ -10,6 +10,9 @@ wrapper. The simulation-only `uqu_rvfi_trace.sv` writes the resulting JSONL.
 The profile follows the [RISC-V Formal RVFI contract](https://yosyshq.readthedocs.io/projects/riscv-formal/en/latest/rvfi.html),
 checked 2026-10-21. The formal-tool revision, environment and proof configuration
 are not yet pinned; this collector is not a completed riscv-formal harness.
+Formal core binding and proof execution are deferred until a working open-source
+formal toolchain is selected and configured. `riscv-formal` remains the planned
+framework; no complete toolchain has yet been validated for this core.
 
 | Item | Native observation profile |
 | --- | --- |
@@ -30,9 +33,48 @@ configuration. Access-fault reporting includes internal PMP denials. Trap cause
 and value, and asynchronous entry PC/cause/target, are diagnostic fields in the
 simulation file; they are not new standard RVFI signals or core output ports.
 
-CSR instructions are visible through instruction/source/destination records,
-but per-CSR `rvfi_csr_*` state channels are not implemented. CSR state and trap
-diagnostics still have separate simulation checks. RVFI_BUS, FPU/custom/paired
+Per-CSR state is observed by `uqu_rvfi_csrs.sv`. The canonical unguarded
+`uqu_rvfi_csr_list.vh` supplies 99 channel names, widths, slots and address
+aliases; `uqu_rvfi_csrs.vh` supplies the declaration/connection helpers. Python
+verification reads this same catalog through `verif/sim/common/rvfi_csrs.py`.
+The native channels cover machine identity/setup/trap CSRs, optional U-mode
+configuration, all sixteen PMP entries, counters and constant-zero HPM CSRs.
+FPU/debug-only state is excluded while those core configurations are unsupported.
+
+Each channel exposes `rvfi_csr_<name>_{rmask,wmask,rdata,wdata}`. Masks qualify
+meaningful bits; inactive channels are zero-masked. Explicit CSR access uses
+the CSR unit's actual successful read/write qualification. CSRRW with `rd=x0`
+has no read mask; zero-source CSRRS/CSRRC have no explicit write mask. Legal
+writes to hardwired or locked state report its unchanged committed value.
+An illegal CSR access has no explicit CSR masks, but its trap still reports
+implicit machine-state updates.
+
+The wrapper registers the base RVFI record and CSR pre-state at acceptance.
+Post-state is read from the actual CSR state during the following observation
+cycle, avoiding a second implementation of WARL, locks or trap updates. All
+instruction and CSR fields describe the same accepted event. The SV writer
+samples the resulting record on the falling edge; this changes observation
+timing only. Processor RTL and execution timing are unchanged.
+
+`mcycle`, `minstret` and `mhpmcounter3` through `mhpmcounter31` are 64-bit
+channels. Their machine/user low/high addresses share a canonical machine
+channel, with half-width masks. Autonomous increments are between instruction
+observations: a read-only counter event has equal read/write data and no write
+mask. Explicit counter writes report the actual updated half, preserving the
+other half. This follows the [RVFI CSR semantics](https://yosyshq.readthedocs.io/projects/riscv-formal/en/latest/csrs.html).
+Future formal configurations must select the corresponding
+`RISCV_FORMAL_CSR_<NAME>` defines for channels their checkers consume. Exposing
+HPM/PMP channels here does not imply formal-tool models or proofs cover them.
+
+Synchronous traps implicitly read `mstatus`/`mtvec` and write
+`mstatus`/`mepc`/`mcause`/`mtval`; MRET reads `mstatus`/`mepc` and writes
+`mstatus`. IRQ entry has these same trap channels in its separate JSON event,
+without asserting RVFI instruction validity or consuming an instruction order.
+Feature-disabled illegal accesses remain zero-masked. Disabled PMP CSRs stay
+legal and report their hardwired zero state. Unreset PMP address payload is not
+assumed to have a defined reset value.
+
+RVFI_BUS, FPU/custom/paired
 results, debug, rollback, alternative arithmetic, Spike comparison, formal core
 signal binding, environment assumptions and actual instruction proofs remain
 follow-ups. Yosys parsing/structural checks of the collector establish tool
