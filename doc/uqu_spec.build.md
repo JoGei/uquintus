@@ -350,9 +350,9 @@ verif/
     wb/             # WB commitment, fault, CSR, and retirement tests
     wb_pipeline/    # WB with parent-owned MEM/WB and sibling GPR storage
     pmp/            # Concurrent IF/MEM PMP checks and bytewise reference
-    core/           # Actual five-stage core, native memory agents and program oracle
+    core/           # Core + SV RVFI wrapper/writer, native memory agents and oracle
   formal/           # Formal harnesses, properties, and riscv-formal integration
-  common/           # Utilities shared across simulation and formal verification
+  common/           # Shared RVFI collector; utilities for simulation/formal reuse
   sw/               # Bare-metal programs and software execution tests
 config/
   cores/            # Shared YAML core configurations

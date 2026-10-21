@@ -20,6 +20,9 @@ from hw_config import load_configuration, parameters_for_component, write_header
 
 ROOT = Path(__file__).resolve().parents[3]
 
+# Keep owned .v sources in Verilog-2005 while allowing .sv verification files.
+HDL_LANGUAGE_ARGS = ["--language", "1364-2005", "+1800-2017ext+sv"]
+
 
 def load_component(name, directory=None):
     """Read declarative component settings without component-specific Python."""
@@ -133,6 +136,7 @@ def main():
         "component": args.component, "action": args.action, "test": args.test,
         "seed": args.seed, "configuration": str(config_path), "parameters": parameters,
         "component_manifest": component,
+        "hdl_language_args": HDL_LANGUAGE_ARGS,
         "python": sys.version, "simulator": command_output([args.sim, "--version"]),
         "bender": command_output([args.bender, "--version"]),
         "source_sha256": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -147,7 +151,7 @@ def main():
     print(f"Artifacts: {run_dir}", flush=True)
     try:
         if args.action == "lint":
-            command = [args.sim, "--lint-only", "--language", "1364-2005",
+            command = [args.sim, "--lint-only", *HDL_LANGUAGE_ARGS,
                        "--top-module", component["top_module"]]
             command += [f"-I{directory}" for directory in include_dirs]
             command += [f"-G{key}={value}" for key, value in parameters.items()]
@@ -167,7 +171,7 @@ def main():
             runner.build(
                 verilog_sources=sources, includes=include_dirs,
                 parameters=parameters, hdl_toplevel=component["top_module"],
-                build_args=["--language", "1364-2005"],
+                build_args=HDL_LANGUAGE_ARGS,
                 build_dir=run_dir / "obj", timescale=("1ns", "1ps"),
                 waves=bool(args.waves), log_file=run_dir / "build.log",
             )

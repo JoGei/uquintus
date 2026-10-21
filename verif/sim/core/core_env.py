@@ -12,6 +12,7 @@ from pyuvm import uvm_test
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from compressed_model import compressed
 from rv32_arithmetic import alu_result, muldiv_result, signed
+from rvfi_trace import read_trace
 
 MASK = 0xffffffff
 BOOT = 0x1000
@@ -54,6 +55,7 @@ def sext(value, bits):
 class CoreTest(uvm_test):
     def build_phase(self):
         self.dut = cocotb.top
+        self.core = self.dut.u_core
         self.params = json.loads(os.environ['UQU_COMPONENT_PARAMS'])
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
         self.code = {}
@@ -76,6 +78,9 @@ class CoreTest(uvm_test):
                      0x341: 0, 0x342: 0, 0x343: 0, 0xf14: 5}
         self.cycles = 0
         self.random_wait = True
+        self.rvfi_order = 0
+        self.rvfi_entry = False
+        self.rvfi_records = []
 
     def put(self, addr, values):
         for entry in values:
@@ -211,7 +216,86 @@ class CoreTest(uvm_test):
         self.retired.append(pc)
 
     def signal(self, name):
-        return int(getattr(self.dut, name).value)
+        owner = self.dut if hasattr(self.dut, name) else self.core
+        return int(getattr(owner, name).value)
+
+    def check_rvfi(self, o, rst):
+        names = ('valid','order','insn','trap','halt','intr','mode','ixl',
+            'rs1_addr','rs2_addr','rs1_rdata','rs2_rdata','rd_addr','rd_wdata',
+            'pc_rdata','pc_wdata','mem_addr','mem_rmask','mem_wmask',
+            'mem_rdata','mem_wdata','mem_fault','mem_fault_rmask','mem_fault_wmask')
+        r = {n:self.signal('rvfi_'+n) for n in names}
+        event = bool(rst and (o['wb_retire'] or o['wb_exception_fire']))
+        assert r['valid'] == event, ('RVFI validity',r,o)
+        if not rst:
+            self.rvfi_order = 0
+            self.rvfi_entry = False
+            return r
+        if event:
+            assert r['order']==self.rvfi_order and r['ixl']==1 and not r['halt'], r
+            assert r['intr']==self.rvfi_entry and r['mode']==(3 if self.priv else 0), r
+            assert r['pc_rdata']==self.pc and r['trap']==o['wb_exception_fire'], r
+            fetch_fault = bool(r['trap'] and o['wb_cause']==1)
+            assert r['insn']==(0 if fetch_fault else o['wb_original_q']), r
+            assert r['rd_addr']==(o['wb_waddr0'] if o['wb_we0'] else 0)
+            assert r['rd_wdata']==(o['wb_wdata0'] if o['wb_we0'] else 0)
+            raw = self.word(self.code,self.pc)
+            instr = raw
+            if self.params['ISA_C'] and raw & 3 != 3:
+                decoded = compressed(raw & 65535)
+                instr = decoded[1] if decoded else 0
+            opcode, f = instr & 127, instr >> 12 & 7
+            a,b,rd = instr >> 15 & 31, instr >> 20 & 31, instr >> 7 & 31
+            uses_a = opcode in (0x13,0x33,3,0x23,0x63,0x67) or (opcode==0x73 and f in (1,2,3))
+            uses_b = opcode in (0x33,0x23,0x63)
+            illegal_e = self.params['ISA_E'] and ((uses_a and a>=16) or (uses_b and b>=16) or (opcode in (0x13,0x33,3,0x67) and rd>=16))
+            unknown = fetch_fault or illegal_e or (opcode==0x33 and instr >> 25==1 and not self.params['ISA_M'])
+            for n,addr,used in ((1,a,uses_a),(2,b,uses_b)):
+                expected = addr if used and not unknown else 0
+                assert r[f'rs{n}_addr']==expected, ('source address',r,hex(instr),expected)
+                assert r[f'rs{n}_rdata']==(self.value(expected) if expected else 0), ('consumed operand',r,self.regs)
+            memory = opcode in (3,0x23) and not unknown
+            if memory:
+                offset = sext(instr >> 20,12) if opcode==3 else sext(((instr >> 25) << 5) | ((instr >> 7)&31),12)
+                addr = (self.value(a)+offset)&MASK
+                mask = (((1 << (1 << (f & 3)))-1) << (addr & 3)) & 15
+                assert r['mem_addr']==addr & ~3, r
+                access_fault = bool(r['trap'] and o['wb_cause'] in (5,7))
+                assert r['mem_fault']==access_fault, r
+                for direction in ('r','w'):
+                    match = (opcode==3) == (direction=='r')
+                    assert r[f'mem_{direction}mask']==(mask if match and not r['trap'] else 0), r
+                    assert r[f'mem_fault_{direction}mask']==(mask if match and access_fault else 0), r
+                if not r['trap']:
+                    lane_mask = sum(255 << (8*n) for n in range(4) if mask & (1 << n))
+                    if opcode==3:
+                        expected = self.word(self.model_memory,addr & ~3)
+                        assert r['mem_rdata'] & lane_mask == expected & lane_mask, r
+                    else:
+                        expected = self.value(b) << ((addr & 3)*8)
+                        assert r['mem_wdata'] & lane_mask == expected & lane_mask, r
+            else:
+                assert not any(r[n] for n in ('mem_rmask','mem_wmask','mem_fault_rmask','mem_fault_wmask')),r
+                assert r['mem_fault']==fetch_fault,r
+            self.rvfi_order += 1
+            self.rvfi_entry = False
+            self.rvfi_records.append(r)
+        if o['trap_valid'] or o['wb_exception_fire']:
+            self.rvfi_entry = True
+        return r
+
+    def check_phase(self):
+        # The SV writer flushes on each clock edge. Check exactly the records
+        # sampled by this test, including tests with multiple reset epochs.
+        records = read_trace('rvfi.jsonl')
+        instructions = [r for r in records if r['type']=='instruction']
+        assert self.rvfi_records, 'test produced no architectural observations'
+        actual = [{key:(1 if key=='valid' else r['rvfi_'+key]) for key in self.rvfi_records[0]}
+                  for r in instructions[-len(self.rvfi_records):]]
+        assert actual==self.rvfi_records, 'SV trace file differs from sampled RVFI'
+        faults = [(r['rvfi_pc_rdata'],r['cause'],r['tval'])
+                  for r in instructions[-len(self.rvfi_records):] if r['rvfi_trap']]
+        assert faults==self.faults, 'trace trap diagnostics differ from expected faults'
 
     async def cycle(self, rst=1, grant=None, respond=None, irq=0, fence_ack=None):
         d = self.dut
@@ -251,9 +335,10 @@ class CoreTest(uvm_test):
                 'wb_we0','wb_waddr0','wb_wdata0','wb_cause','wb_tval','trap_valid','trap_pc','trap_cause',
                 'redirect_valid','redirect_addr','de_valid_q','ex_valid_q','mem_valid_q','wb_valid_q',
                 'priv_m_q','mstatus','mie','mip','mtvec','mepc','de_pc_q','mem_pc_q')}
+        rvfi = self.check_rvfi(o, rst)
         if rst:
             if o['wb_retire']:
-                self.retire(o['wb_pc_q'], o['wb_original_q'], o['wb_we0'], o['wb_waddr0'], o['wb_wdata0'])
+                self.retire(rvfi['pc_rdata'], rvfi['insn'], int(rvfi['rd_addr']!=0), rvfi['rd_addr'], rvfi['rd_wdata'])
             if o['wb_exception_fire']:
                 assert not o['wb_retire'] and not o['wb_we0']
                 assert o['wb_pc_q'] == self.pc
@@ -268,6 +353,8 @@ class CoreTest(uvm_test):
                 assert not any(o[n] for n in ('ex_valid_q','mem_valid_q','wb_valid_q'))
                 self.traps.append((self.pc, o['trap_cause']))
                 self.trap(self.pc, o['trap_cause'], 0, True)
+            if o['wb_retire'] or o['wb_exception_fire']:
+                assert self.signal('rvfi_pc_wdata')==self.pc, ('RVFI next PC',self.rvfi_records[-1],self.pc)
             for bus in self.pending:
                 if returns[bus]:
                     self.pending[bus] = None

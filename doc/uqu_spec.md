@@ -60,8 +60,11 @@ effect permission, precise drains, CSR-driven IRQ re-evaluation and fences.
 The native core now connects the actual stages with parent-owned storage,
 GPRs, hazards, shared PMP and controller. Initial full-core program regressions
 check native execution under variable-latency memory. Core XIF/debug adapters,
-the FPU, Spike/RVFI/formal acceptance and the ASIC build flow remain unfinished;
+the FPU, Spike/formal acceptance and the ASIC build flow remain unfinished;
 this integration does not complete the first milestone's verification criteria.
+The [RVFI testbed](../verif/common/README.md) adds passive instruction/register/
+memory observations and SV JSONL tracing; per-CSR channels and formal core
+binding/proofs remain unfinished.
 
 ## Document index
 

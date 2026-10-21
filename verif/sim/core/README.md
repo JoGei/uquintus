@@ -50,7 +50,8 @@ replacement validity. Validity changes only when the corresponding enable is
 asserted. Payload captures only for an enabled valid replacement. Every token
 retains its original PC, instruction bits, length and privilege through WB.
 These internal signals are available to verification; the core adds no trace
-output pins.
+output pins. The simulation top is now `uqu_core_tb`, which instantiates the
+core and the [passive RVFI collector](../../common/README.md).
 
 DE branches redirect only on accepted transfer. EX operands select the resolved
 register, PC, immediate or zero as decoded. Store data is resolved in EX.
@@ -82,7 +83,10 @@ make test COMPONENT=core CONFIG=rv32i_zifencei
 make lint COMPONENT=core CONFIG=rv32i
 ```
 
-The common runner uses [`config/sim/core.yml`](../../../config/sim/core.yml).
+The common runner uses [`config/sim/core.yml`](../../../config/sim/core.yml)
+and Bender target `core_test`, selecting the native RTL plus the SV wrapper,
+RVFI collector and JSONL writer. Bender target `rtl` continues to select only
+processor Verilog sources.
 Select one program suite with `TEST=<name>`; use `WAVES=1` for waveforms.
 Custom complete hardware YAML files use the same `CONFIG=<path>` argument.
 
@@ -106,7 +110,29 @@ Registers must be initialized by software before the interpreter reads them.
 | `extensions` | Configured M operations including zero divisor/signed overflow; configured compressed instructions, cross-word assembly and original instruction identity. |
 | `reset` | Restart at a new boot address during an accepted, incomplete data transaction; no stale retirement/store after reset. |
 
+The interpreter now consumes RVFI retirement records and independently checks
+their consumed operands, mode, next PC, memory lanes, fault masks and handler
+markers. It retains internal controller observations for timing and precise
+fault diagnostics. Every suite also checks the saved SV trace against its
+sampled records.
+
+Each run writes `rvfi.jsonl` beside `results.xml` and `run.json`. Records use
+unsigned JSON integers and one of three types:
+
+- `reset`: consecutive `epoch`, starting at zero.
+- `instruction`: epoch, `rvfi_*` fields (valid is implied), and diagnostic
+  `cause`/`tval` fields, zero for successful retirement.
+- `interrupt`: epoch, saved `pc`, `cause`, and handler `target`; no instruction
+  order is consumed. The next instruction carries `rvfi_intr=1`.
+
+Order counts accepted instruction events, including synchronous traps, and
+restarts at zero in each reset epoch. The writer runs in SystemVerilog at the
+accepting clock edge. `verif/sim/common/rvfi_trace.py` reads and validates the
+file without a simulator. A direct simulator invocation can override the path
+with `+rvfi_trace_file=<path>`; the Make flow uses its isolated run directory.
+
 This interpreter is an initial integration oracle, **not the required Spike
-adapter or RVFI/riscv-formal verification**. Those checks, full architectural
-coverage, CI and ASIC implementation remain follow-ups; passing these programs
-does not complete the first milestone's acceptance criteria.
+adapter or completed riscv-formal verification**. Per-CSR RVFI channels,
+formal core binding/proofs, Spike comparison, full architectural coverage,
+CI and ASIC implementation remain follow-ups; passing these programs does
+not complete the first milestone's acceptance criteria.

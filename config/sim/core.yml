@@ -1,5 +1,5 @@
-top_module: uqu_core
-bender_target: rtl
+top_module: uqu_core_tb
+bender_target: core_test
 test_module: test_uqu_core
 parameters:
   - ISA_E

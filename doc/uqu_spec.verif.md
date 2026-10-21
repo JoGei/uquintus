@@ -55,7 +55,8 @@ RVVI is not a required dependency. SystemVerilog verification instrumentation
 shall provide the trace records from the core's exposed instruction/state
 signals; formatting and file writing shall remain in simulation monitors.
 
-The RVFI revision and profile, signal connections, and adapter/checker integration
+The initial native profile and simulation connections are defined in Section 1.1.
+The pinned formal-tool revision, formal core binding and checker integration
 remain TBD. CSR, floating-point, custom-instruction, and memory-side-effect
 coverage shall be specified explicitly rather than assumed from the base RVFI
 interface. Instrumentation used for formal checking must be compatible with the
@@ -64,6 +65,33 @@ chosen formal tools; simulation file-writing code is separate from that logic.
 An RVFI event-order counter may be generated in verification instrumentation
 without adding sequence tags to the pipeline. Formal verification requirements
 are defined in [verification, Section 2](uqu_spec.verif.md#2-simulation-and-formal-verification); Spike is the simulation reference model.
+
+### 1.1. Initial native RVFI testbed
+
+`verif/common/uqu_rvfi.sv` shall provide a passive, single-channel RV32 collector
+using actual accepted core transfers and consumed operands. The
+[native RVFI profile](../verif/common/README.md) defines the implemented fields
+and limitations. `verif/sim/core/uqu_core_tb.sv` shall isolate simulation
+hierarchy references and expose RVFI without changing synthesizable core ports.
+The separate `uqu_rvfi_trace.sv` writer shall emit JSONL instruction, interrupt
+and reset records in the isolated run directory.
+
+Instruction order shall count successful retirement and accepted synchronous
+traps, with no records for killed instructions or bubbles. IRQ entry shall not
+invent an instruction; the first handler instruction shall carry `rvfi_intr`.
+Verification metadata shall preserve consumed source values through holds and
+flushes. It shall not reconstruct them from a shadow register file that could
+hide operand-selection errors. Raw load responses shall remain distinguishable
+from the extended GPR result. The initial memory profile shall use aligned
+addresses/lane masks and the RVFI memory-fault fields.
+
+Simulation shall compare RVFI with independent execution expectations and check
+the saved trace against sampled records. Reset epochs shall distinguish repeated
+order values after reset. The collector shall contain no simulation I/O or
+environment constraints; simulation formatting/file writing stays in its own
+SV module. Collector tool-compatibility checks shall not be described as core
+formal proofs. Per-CSR channels, formal core signal binding, RVFI_BUS, complete
+instruction proofs and the pinned Spike adapter remain follow-ups.
 
 ## 2. Simulation and formal verification
 
@@ -117,7 +145,7 @@ assumptions used so that the demonstrated scope is explicit.
 
 ### 2.1. Python simulation framework
 
-**Status:** Agreed; shared component runner implemented, full-core integration TBD
+**Status:** Agreed; shared runner and native full-core RVFI testbed implemented
 
 The project-wide simulation testbench stack shall use cocotb for driving/observing
 RTL and scheduling simulation activity, with pyuvm for testbench organization
@@ -149,8 +177,9 @@ and isolated in that shared helper. Component settings come from
 and header generation are shared through `verif/sim/common/hw_config.py`.
 See the [shared simulation guide](../verif/sim/common/README.md) for invocation
 and manifests, and the [register-file](../verif/sim/gpregfile/README.md) and
-[arithmetic](../verif/sim/arith/README.md) guides for test scope. Full-core
-integration and other backends remain open.
+[arithmetic](../verif/sim/arith/README.md) guides for test scope. The
+[core guide](../verif/sim/core/README.md) describes native RVFI integration;
+Spike/formal integration and other simulator backends remain open.
 
 ### 2.2. Independently selectable component regressions
 
@@ -301,10 +330,11 @@ access. Configurations shall distinguish disabled behavior from enabled-feature
 coverage. FPU and core XIF/debug adapters shall reject enabled elaboration
 until implemented.
 
-This initial interpreter is not the selected Spike reference or an RVFI
-adapter. Spike comparison, SystemVerilog trace instrumentation, riscv-formal,
-broader software coverage and supported-configuration CI remain required
-follow-ups. Passing the initial native programs shall not be reported as
+The interpreter consumes the RVFI testbed's retirement records and independently
+checks operands, memory lanes, fault reporting and instruction sequence. It is
+not the selected Spike reference. Spike comparison, CSR RVFI channels,
+riscv-formal core binding/proofs, broader software coverage and configuration CI
+remain required follow-ups. Passing the initial native programs shall not be reported as
 completion of the first milestone's acceptance criteria.
 
 ## 3. Supported-configuration CI coverage
@@ -367,3 +397,4 @@ later decisions determine the active contract.
 | D-256 | Use cocotb and pyuvm project-wide for component, subsystem, and full-core simulation testbenches, including simple leaf tests; allow lightweight tests without unnecessary UVM component hierarchies. | Keep one shared testbench structure while scaling verification complexity to the DUT. | Agreed; finalizes D-254, with runner and compatible versions TBD |
 | D-257 | Place component simulation tests in `verif/sim/<component>/` and full-core tests in `verif/sim/core/`, initially using `test_<module>.py`; keep local environments and HDL wrappers beside their tests and shared utilities in `verif/common/`. | Make tests easy to locate and run independently while growing their structure only as needed. | Agreed; simulation-specific shared helper/wrapper placement refined by D-259 |
 | D-259 | Put shared component-testing Make helpers, simulation utilities, and reusable HDL wrappers in `verif/sim/common/`; use `config/sim/<component>.yml` for DUT/test metadata and shared configuration helpers rather than separate component runner scripts. | Make invocation responsibilities explicit and reuse the flow as components are added. | Agreed; utilities shared with formal verification may remain in `verif/common/` |
+| D-290 | Add a verification-only single-channel RV32 RVFI collector, simulation core wrapper and separate SV JSONL writer; preserve actual consumed operands and raw memory responses, with explicit fault/handler/reset semantics. | Establish architectural observations without changing core RTL/ports or hiding forwarding errors; reuse the collector for later formal binding. | Implemented; Section 1.1; native simulation checks and trace reader available; CSR channels, formal core binding/proofs and Spike adapter remain unfinished |

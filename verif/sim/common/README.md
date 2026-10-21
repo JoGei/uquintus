@@ -8,6 +8,10 @@ Bender's structured source tree, passes them to both lint and simulation, and
 records the source tree/include paths and Verilog-header hashes with run
 metadata. The generated configuration-header directory is also included. `hw_config.py` provides shared hardware YAML
 validation, parameter selection/encoding, and Verilog selector generation.
+The runner keeps `.v` files in Verilog-2005 mode and permits SystemVerilog-2017
+for `.sv` verification files, recording these language options in run metadata.
+`rvfi_trace.py` reads the full-core JSONL stream and checks its schema, reset
+epochs, order, PC continuity, handler markers and basic RVFI invariants.
 
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
 standalone and shared-parent scoreboards. `decode_model.py` supplies the shared

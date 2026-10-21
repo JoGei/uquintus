@@ -7,6 +7,8 @@ The [native processor core](verif/sim/core/README.md) connects all five stages
 with core-owned pipeline registers, hazards, PMP and control. Native execution
 supports the implemented E/M/C, M/U, PMP and Zifencei configurations; FPU,
 core XIF and debug adapters remain unfinished and reject enabled elaboration.
+The core testbed includes a verification-only RVFI collector and SV JSONL trace;
+see the [RVFI profile](verif/common/README.md) for coverage and remaining formal work.
 
 Implemented components:
 
