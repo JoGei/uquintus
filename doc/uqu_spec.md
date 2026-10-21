@@ -18,6 +18,7 @@ it does not grant permission to change an agreed architectural contract.
 The repository contains specifications and standalone
 [DE stage](../verif/sim/de/README.md),
 [core-owned hazard/forwarding](../verif/sim/hazard/README.md),
+[core-owned pipeline controller](../verif/sim/pipeline_ctrl/README.md),
 [native decoder](../verif/sim/decode/README.md),
 [instruction-fetch stage](../verif/sim/if/README.md),
 [instruction-word fetch engine](../verif/sim/ifetch/README.md),
@@ -53,6 +54,9 @@ with EX/MEM and MEM/WB registers and one parent-owned PMP block. A
 adds a real MEM/WB slot, sibling GPR file, and minimal privilege-transition stub
 around WB's commit logic and owned CSR unit. The component guides describe
 implementation and test scope.
+A [controller parent fixture](../verif/sim/pipeline_ctrl_parent/README.md)
+connects actual boundary storage, MEM/LSU and WB/CSR to the controller, testing
+effect permission, precise drains, CSR-driven IRQ re-evaluation and fences.
 The complete processor, full-core verification, and ASIC build flow
 remain to be implemented.
 

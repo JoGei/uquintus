@@ -1,0 +1,10 @@
+top_module: uqu_pipeline_ctrl_tb
+bender_target: pipeline_ctrl_test
+test_module: test_uqu_pipeline_ctrl_parent
+parameters:
+  - ISA_ZIFENCEI
+tests:
+  - flow
+  - faults
+  - interrupts
+  - fences

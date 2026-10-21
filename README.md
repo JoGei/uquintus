@@ -7,6 +7,7 @@ Implemented standalone components:
 
 | Component | RTL | Verification guide |
 | --- | --- | --- |
+| Core pipeline control | [uqu_pipeline_ctrl.v](src/uquintus/uqu_pipeline_ctrl.v) | [Controller interface and tests](verif/sim/pipeline_ctrl/README.md) |
 | Instruction-fetch stage | [uqu_stage_if.v](src/uquintus/uqu_stage_if.v) | [IF interface and tests](verif/sim/if/README.md) |
 | Instruction-word fetch engine | [uqu_ifetch.v](src/uquintus/uqu_ifetch.v) | [Ifetch interface and tests](verif/sim/ifetch/README.md) |
 | Instruction selection and alignment | [uqu_if_aligner.v](src/uquintus/uqu_if_aligner.v) | [Aligner interface and tests](verif/sim/if_aligner/README.md) |
@@ -39,6 +40,9 @@ in `verif/requirements.txt` through your environment. Then run:
 
 ```sh
 make test COMPONENT=ifetch CONFIG=rv32i
+make test COMPONENT=pipeline_ctrl CONFIG=rv32i
+make test COMPONENT=pipeline_ctrl CONFIG=rv32i_zifencei
+make test COMPONENT=pipeline_ctrl_parent CONFIG=rv32i_zifencei
 make test COMPONENT=if CONFIG=rv32i
 make test COMPONENT=if CONFIG=rv32ic
 make test COMPONENT=if CONFIG=rv32ic_decompress_de
@@ -101,6 +105,7 @@ settings live in `config/sim/<component>.yml`; examples are
 [if_aligner.yml](config/sim/if_aligner.yml),
 [if_buffer.yml](config/sim/if_buffer.yml), [if_prefetch.yml](config/sim/if_prefetch.yml),
 [if.yml](config/sim/if.yml), [if_pipeline.yml](config/sim/if_pipeline.yml),
+[pipeline_ctrl.yml](config/sim/pipeline_ctrl.yml), [pipeline_ctrl_parent.yml](config/sim/pipeline_ctrl_parent.yml),
 [hazard.yml](config/sim/hazard.yml), [branch.yml](config/sim/branch.yml), [decode.yml](config/sim/decode.yml), [gpregfile.yml](config/sim/gpregfile.yml), [arith.yml](config/sim/arith.yml),
 [alu.yml](config/sim/alu.yml), [muldiv.yml](config/sim/muldiv.yml),
 [exec_arith.yml](config/sim/exec_arith.yml), [ex.yml](config/sim/ex.yml),
@@ -118,6 +123,9 @@ PMP/CSR tests and the [shared IF/LSU fixture](verif/sim/ifetch_pmp/README.md).
 The [prefetch fixture](verif/sim/if_prefetch/README.md) connects the actual
 fetcher, word FIFO and aligner, checking capacity reservation, mixed-length
 instruction reuse, fault containment and redirects under stalls.
+The [controller parent fixture](verif/sim/pipeline_ctrl_parent/README.md) adds
+actual boundary registers and MEM/WB units for interrupt/CSR re-evaluation,
+precise fault containment, LSU effect permission and remembered fence handshakes.
 Use `make test-runner` to
 check the shared tooling without running an HDL simulator.
 

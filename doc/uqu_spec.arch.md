@@ -540,8 +540,8 @@ separately specified interface contracts.
 
 ### 3.2. Control organization
 
-**Status:** Central global arbitration, local stage/unit control, and separate
-hazard/forwarding logic agreed; detailed event interfaces and sequencing TBD
+**Status:** Native central controller implemented with normalized event inputs;
+full-core binding and optional XIF/debug adapters remain integration work
 
 The core shall use the following division of control responsibilities:
 
@@ -566,15 +566,104 @@ redirect shall not discard older EX/MEM/WB instructions. Trap entry shall wait
 for the older work required by [architecture, Section 9](uqu_spec.arch.md#9-precise-synchronous-exceptions) and finalize synchronous trap entry
 at WB under [architecture, Section 9.2](uqu_spec.arch.md#92-early-exception-containment-and-wb-trap-entry); interrupt entry shall follow the completion policy
 in [interfaces, Section 4](uqu_spec.interfaces.md#4-external-machine-interrupt-sources). Detailed eligibility and priority rules for
-simultaneous global events, including optional debug, remain TBD.
+simultaneous native events are implemented in Section 3.2.1; full optional
+debug-cause and XIF-ID sequencing remain adapter integration work.
 
 Local backpressure shall hold predecessor stages while allowing older stages
 to drain. Central drain or flush control shall identify the affected stages
 and instructions, preserving accepted-memory completion tracking and the
 native arithmetic cancellation contract. The hazard/forwarding block shall
 remain separate from global event arbitration; arithmetic and memory protocol
-state machines shall remain within their respective units. Module names,
-exact event payloads, and central-controller state encoding remain TBD.
+state machines shall remain within their respective units. The native controller
+bindings are defined below; full-core payload/producer wiring remains pending.
+
+#### 3.2.1. Core-owned pipeline control implementation
+
+`src/uquintus/uqu_pipeline_ctrl.v` shall generate stage permits/readiness,
+accepted transfers, parent slot enables/replacement validity, age-qualified
+flushes, memory effect permission, fence synchronization and accepted redirects.
+The [controller guide](../verif/sim/pipeline_ctrl/README.md) defines exact ports
+and the parent update example. Its only configuration parameter shall be
+`ISA_ZIFENCEI`; no independent copy of ISA, forwarding or pipeline state shall
+be introduced. Its only state shall be two fence-handshake control bits.
+Boundary payload/valid registers, current privilege, architectural resume PC,
+hazards, PMP, native execution and bus state machines shall remain elsewhere.
+
+Parent slot occupancy shall be supplied separately from local completion.
+Successful transfer shall permit simultaneous successor drain/replacement, and
+a draining slot without replacement shall become empty. Stalled younger work
+shall not hold older stages. Each parent shall reset validity explicitly, then
+apply controller enable/replacement-valid and capture payload only for accepted
+incoming tokens. A fault or redirect flush shall invalidate the affected
+younger slot even when it is stalled; invalid payload need not be cleared.
+
+An older fault shall flush only younger DE/EX/MEM slots and block new IF work.
+Its owner shall survive and advance toward WB; DE faults shall likewise advance
+unless preempted at the EX-entry interrupt boundary. EX/MEM/WB serialization
+metadata shall block younger DE admission through actual WB acceptance, without
+a separate serializer register. The following cycle shall observe updated
+CSR state before admission. The instruction's accepted WB event shall consume
+its parent slot through normal movement and shall never flush that same WB
+unit. WB commitment permission shall have no combinational dependency on WB
+completion, accepted WB redirects or coprocessor result fields.
+
+The MEM request permit shall cover loads and stores. It shall require a live
+nonfaulting MEM instruction, no known older WB fault/recovery, and either empty
+WB or an explicit proof that its older instruction cannot subsequently fault.
+Such a proof may release the request before WB retirement. A younger fault
+shall not deny older MEM progress. The local LSU shall continue to enforce
+persistent requests and response servicing after presentation.
+
+Machine interrupt eligibility shall use live CSR state and current privilege,
+with external/software/timer priority (causes 11/3/7), and a supplied mask for
+debug/step. Pending state shall not be latched in the controller. Eligibility
+shall stop DE issue/admission while allowing EX/MEM/WB to finish. Entry shall
+require those slots already be empty and external drain readiness true;
+it shall not depend on WB completion in that same cycle. Thus completing
+CSR/MRET changes are observed before entry or resumed DE admission. Eligibility
+withdrawal shall release a preserved DE instruction, including its fault.
+The saved PC shall be the waiting DE PC, otherwise the supplied architectural
+resume PC. `mtvec` shall retain full-width Direct/Vectored arithmetic, including
+32-bit wraparound, and interrupt tval shall be zero. This follows the
+[machine interrupt rules](https://docs.riscv.org/reference/isa/priv/machine.html).
+
+Accepted WB recovery (including successful FENCE.I) shall have priority over
+younger events. At an empty executing boundary the normalized higher-priority
+drain endpoint shall precede machine interrupt entry; a permitted DE taken
+branch shall be lowest priority and shall redirect without flushing its own
+accepted DE transaction. No wrong-path IF token shall transfer on that branch
+edge. The optional drain requester shall own eligibility/cause capture; the
+controller shall own its acceptance and redirect priority. If an older fault
+traps during a requested drain, WB recovery shall occur first and a still-live
+drain request shall subsequently save the post-trap handler PC.
+
+The core shall supply normalized admission and drain-readiness conditions for
+optional debug stepping and standard XIF DE-only kill cleanup. XIF IDs,
+commit-kill arbitration, replay after canceled eviction, Debug Mode, debug cause
+selection and external-DM request/step sequencing remain future core adapters.
+No additional coprocessor signal is defined by these core-internal hooks.
+Unfinished cleanup shall block admission and entry, and its owner shall arrange
+replay of an evicted instruction if entry is canceled.
+
+For a live WB FENCE/FENCE.I, relevant prior data work shall finish before its
+external request starts. Once started, the matching request shall persist until
+acknowledged independently of ordinary commitment stalls. If acknowledged while
+WB is held, the controller shall remember completion, suppress duplicate
+requests and allow exactly one later retirement. The other fence interface's
+acknowledgement shall not count. A WB fault shall bypass synchronization and
+take its normal exception path. FENCE.I shall stop new fetches while present
+and redirect to the original sequential successor on successful retirement;
+ordinary FENCE shall not invalidate IF.
+
+The [controller parent fixture](../verif/sim/pipeline_ctrl_parent/README.md)
+shall keep actual boundary registers outside the controller and connect real
+MEM/LSU and WB/CSR units. It verifies stalled older-safety permission, actual
+memory and CSR faults, younger cancellation with older progress, IRQ
+re-evaluation across CSR/MRET, DE-fault preemption, post-trap drain priority,
+and retained fence acknowledgements. Standalone age/protocol tests and
+flattened combinational-loop checks complement this integration. Full
+`uqu_core`, optional adapters and architectural software execution remain
+implementation work.
 
 ### 3.3. Native Zfinx execution and FPU implementation
 
@@ -3340,7 +3429,7 @@ be resolved when their implementation milestone is undertaken:
 
 | Area | Remaining work |
 | --- | --- |
-| Execution/control | IF/DE/EX/MEM/WB stages, shared hazards and parent-register/GPR fixtures implemented; connect full-core pipeline/controller sequencing, XIF issue/ID/kill tracking and evaluate timing of enabled forwarding paths. |
+| Execution/control | IF/DE/EX/MEM/WB stages, native pipeline controller, shared hazards and parent-register/GPR fixtures implemented; connect full uqu_core pipeline/control, XIF issue/ID/kill and debug adapters, and evaluate timing of enabled forwarding paths. |
 | Memory access | MEM/LSU, registered load readiness, IF PMP query and parent-owned PMP routing verified at component/fixture level; connect CSR-owned PMP state, both stages, precise-effect permission control, and fences in the full core. |
 | Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
@@ -3510,3 +3599,4 @@ later decisions determine the active contract.
 | D-285 | Implement stateless uqu_if_aligner over two ordered words with original instruction/length, next-PC and qualified-consumption suggestions; contain fetch faults with the correct first/second portion address and leave storage, PMP, decode and transfer control outside. | Separate word selection/assembly from transaction handling and configurable compressed decoding while preserving precise fault identity and word reuse. | Implemented; Section 15.3; C-disabled/enabled exhaustive prefix, error/availability, randomized and stream checks; buffer/prefetch fixture under D-286; production IF under D-287; full-core integration pending |
 | D-286 | Implement uqu_if_buffer as a fetched-word FIFO with two read windows, simultaneous pop/push, non-power-of-two capacity and minimal reset; keep prefetch addresses, response reservation and redirect control in IF, verified by a real fetch/buffer/aligner fixture. | Separate storage from instruction selection and bus handling, reserve capacity without duplicate tracking for the one-writer/one-outstanding baseline, and preserve killed-response obligations. | Implemented; Section 15.4; standalone deque tests and C-disabled/enabled prefetch integration at depths 2, 3, 4, 5 and 8; production IF under D-287; full-core integration pending |
 | D-287 | Assemble uqu_stage_if around fetch, word storage, alignment and selected IF expansion; own frontend pointers/containment while leaving IF/DE, PMP and global arbitration in the core; implement none/static_not_taken control with canonical encodings 0/1. | Make native frontend behavior concrete with reserved capacity, independent request/delivery holds, precise original instruction identity and persistent stale-transaction draining. | Implemented; Section 15.5; standalone and real IF/DE/DE parent-fixture tests across compressed paths, both branch modes and variable depths; full-core and standard XIF compressed-channel integration remain pending |
+| D-288 | Implement core-owned uqu_pipeline_ctrl with separate occupancy/completion, parent-owned slot enables/validity, age-qualified fault flushes, live IRQ drain/dispatch, serial metadata, older-WB memory safety proof and two-bit fence request/ack tracking; keep WB readiness independent of result completion and preserve WB's own accepted event. | Make native global sequencing executable without duplicating pipeline/CSR/unit state or creating protocol feedback paths; provide normalized drain/admission hooks for later optional adapters. | Implemented; Section 3.2.1; standalone and real parent/MEM/WB regressions, fence-disabled/enabled profiles and loop/storage checks; full core, XIF-ID and debug adapters remain integration work |

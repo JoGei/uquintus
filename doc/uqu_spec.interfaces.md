@@ -500,8 +500,10 @@ including those of custom operations. No fixed maximum latency is promised
 without bounds on operation completion and external-memory response times.
 
 The input names and drain/exception arbitration rules above are agreed.
-Exact controller sequencing remains an implementation follow-up; required
-architectural priorities shall follow the pinned privileged ISA.
+Native controller sequencing is implemented in
+[architecture, Section 3.2.1](uqu_spec.arch.md#321-core-owned-pipeline-control-implementation).
+Full-core source/state wiring and optional XIF/debug cleanup remain integration
+work; required architectural priorities shall follow the pinned privileged ISA.
 
 ## 5. CV-X-IF custom extension interface
 

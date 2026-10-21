@@ -205,6 +205,19 @@ word-boundary stitching, capacity reservation, accepted branch redirects and
 discarded fault responses across all three compressed paths. Full-core
 retirement/trap comparison remains separate integration work.
 
+The [pipeline-controller tests](../verif/sim/pipeline_ctrl/README.md) shall
+separately exercise stage movement, age-qualified fault barriers, older-safety
+memory permission, live IRQ masks/priority, serial barriers, accepted redirects
+and retained fence handshakes. The
+[controller parent fixture](../verif/sim/pipeline_ctrl_parent/README.md) shall
+connect real boundary storage, MEM/LSU and WB/CSR rather than substitute the
+controller's own expected booleans for those units. Coverage shall include
+late CSR/MEM faults, younger cancellation with older progress, CSR/MRET-driven
+interrupt re-evaluation, a DE exception preempted at the EX-entry boundary and
+fence acknowledgement while WB is held. Lint and flattened combinational-loop
+checks shall ensure that WB ready and external interrupt entry have no
+combinational dependence on WB result completion or its accepted redirect.
+
 Runs shall report the selected component, test/suite, configuration, simulator
 and tool versions, and seed needed to reproduce a failure. Simulation failures,
 checker mismatches, and watchdog expiry shall cause a failed run and nonzero

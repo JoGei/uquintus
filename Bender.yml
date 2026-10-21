@@ -6,6 +6,12 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
+      - target: any(pipeline_ctrl, pipeline_ctrl_test, rtl)
+        files:
+          - src/uquintus/uqu_pipeline_ctrl.v
+      - target: pipeline_ctrl_test
+        files:
+          - verif/sim/pipeline_ctrl_parent/uqu_pipeline_ctrl_tb.v
       - target: any(if_buffer, if, if_pipeline_test, if_prefetch_test, rtl)
         files:
           - src/uquintus/uqu_if_buffer.v
@@ -75,19 +81,19 @@ sources:
       - target: ex_pipeline_test
         files:
           - verif/sim/ex_pipeline/uqu_ex_pipeline_tb.v
-      - target: any(lsu, mem, mem_pipeline_test, ifetch_pmp_test, rtl)
+      - target: any(lsu, mem, mem_pipeline_test, pipeline_ctrl_test, ifetch_pmp_test, rtl)
         files:
           - src/uquintus/uqu_lsu.v
-      - target: any(mem, mem_pipeline_test, rtl)
+      - target: any(mem, mem_pipeline_test, pipeline_ctrl_test, rtl)
         files:
           - src/uquintus/uqu_stage_mem.v
       - target: mem_pipeline_test
         files:
           - verif/sim/mem_pipeline/uqu_mem_pipeline_tb.v
-      - target: any(csregfile, wb, wb_pipeline_test, rtl)
+      - target: any(csregfile, wb, wb_pipeline_test, pipeline_ctrl_test, rtl)
         files:
           - src/uquintus/uqu_csregfile.v
-      - target: any(wb, wb_pipeline_test, rtl)
+      - target: any(wb, wb_pipeline_test, pipeline_ctrl_test, rtl)
         files:
           - src/uquintus/uqu_stage_wb.v
       - target: wb_pipeline_test

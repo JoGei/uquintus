@@ -4,7 +4,8 @@
 
 Build/configuration contracts and project organization. A shared component
 simulation/lint flow supports the register file, ALU, arithmetic datapath, native
-multiply/divide, native decoder, DE branch unit, DE/EX hazard unit, IF, DE, EX,
+multiply/divide, native decoder, DE branch unit, DE/EX hazard unit, pipeline
+controller, IF, DE, EX,
 MEM/LSU, instruction-word fetch/buffer/aligner, WB, PMP checker, CSR register file, and shared-arithmetic/prefetch/parent-register
 fixtures; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
@@ -330,6 +331,8 @@ verif/
       wb_model.py         # WB commitment and CSR/GPR reference state
     branch/         # Branch targets/conditions/alignment and decoder-fed fixture
     hazard/         # Shared DE/EX hazards, forwarding and optional DE retention
+    pipeline_ctrl/  # Stage movement, age barriers, interrupts and fence protocol
+    pipeline_ctrl_parent/ # Real parent slots, controller, MEM/LSU and WB/CSR
     decode/         # Native encoding/operand/control tests; ISA oracle in common/
     de/             # Decode-stage control, runtime faults and coupled XIF issue
     de_pipeline/    # Parent IF/DE + DE/EX, real GPRs and shared hazard integration
