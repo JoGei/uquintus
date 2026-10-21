@@ -1,7 +1,10 @@
 `default_nettype none
-// Verification-only expansion -> native decoder and DE integration, no storage.
+`include "uqu_config.vh"
+// Verification-only expansion/strategy controls and DE integration, no storage.
 module uqu_decompressor_tb #(
     parameter ISA_C = 0,
+    parameter MUA_C_IMPL = `UQU_C_IMPL_DECOMPRESS,
+    parameter MUA_C_DECOMPRESS_STAGE = `UQU_C_DECOMPRESS_IF,
     parameter ISA_E = 0,
     parameter ISA_M = 0,
     parameter ISA_ZFINX = 0
@@ -53,12 +56,19 @@ module uqu_decompressor_tb #(
     output wire [31:0] de_exception_tval_o,
     output wire [4:0] de_exception_cause_o
 );
+    localparam EXPAND_IF = (MUA_C_IMPL == `UQU_C_IMPL_DECOMPRESS) &&
+                          (MUA_C_DECOMPRESS_STAGE == `UQU_C_DECOMPRESS_IF);
     uqu_decompressor #(.ISA_C(ISA_C)) u_decompressor (
         .instr_i(instr_i), .instr_o(instr_o), .original_instr_o(original_instr_o),
         .compressed_o(compressed_o), .illegal_o(illegal_o), .hint_o(hint_o)
     );
-    uqu_decoder #(.ISA_E(ISA_E), .ISA_M(ISA_M), .ISA_ZFINX(ISA_ZFINX)) u_decoder (
-        .instr_i(instr_o),
+    uqu_decoder_select #(
+        .ISA_C(ISA_C), .ISA_E(ISA_E), .ISA_M(ISA_M), .ISA_ZFINX(ISA_ZFINX),
+        .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE)
+    ) u_decoder_select (
+        .instr_i(EXPAND_IF ? instr_o : instr_i),
+        .original_instr_i(original_instr_o), .compressed_i(compressed_o),
+        .xif_force_i(1'b0), .illegal_c_o(),
         .native_o(dec_native_o),
         .illegal_o(dec_illegal_o),
         .illegal_reg_o(dec_illegal_reg_o),
@@ -89,6 +99,8 @@ module uqu_decompressor_tb #(
     );
     uqu_stage_de #(
         .ISA_C(ISA_C),
+        .MUA_C_IMPL(MUA_C_IMPL),
+        .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .ISA_E(ISA_E),
         .ISA_M(ISA_M),
         .ISA_ZFINX(ISA_ZFINX)
@@ -102,14 +114,14 @@ module uqu_decompressor_tb #(
         .ready_i(ready_i),
         .permit_i(permit_i),
         .pc_i(pc_i),
-        .instr_i(instr_o),
+        .instr_i(EXPAND_IF ? instr_o : instr_i),
         .original_instr_i(original_instr_o),
         .compressed_i(compressed_o),
         .priv_m_i(1'b1),
         .debug_mode_i(1'd0),
         .tw_i(1'd0),
         .frm_i(3'd0),
-        .exception_valid_i(illegal_o),
+        .exception_valid_i(EXPAND_IF && illegal_o),
         .exception_cause_i(5'd2),
         .exception_tval_i(original_instr_o),
         .rs0_i(rs0_i),

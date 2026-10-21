@@ -1,0 +1,7 @@
+top_module: uqu_decoder_c
+bender_target: decode_c
+test_module: test_uqu_decoder_c
+parameters:
+  - ISA_E
+tests:
+  - exhaustive

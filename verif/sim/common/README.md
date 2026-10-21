@@ -12,7 +12,9 @@ validation, parameter selection/encoding, and Verilog selector generation.
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
 standalone and shared-parent scoreboards. `decode_model.py` supplies the shared
 mask/match ISA oracle to decoder and DE tests; `de_model.py` adds DE runtime,
-readiness, control-flow and local XIF issue behavior. `ex_model.py` provides instruction-level
+readiness, compressed strategy selection, control-flow and local XIF issue
+behavior. `compressed_model.py` independently assembles RV32C semantics for
+the decompressor/strategy, direct decoder and DE regressions. `ex_model.py` provides instruction-level
 EX outcomes to the stage and parent-register fixture scoreboards.
 `lsu_model.py` provides byte-addressed memory and native load/store expectations
 shared by LSU and MEM tests. `mem_model.py` adds MEM token/result expectations

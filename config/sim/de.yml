@@ -5,6 +5,8 @@ parameters:
   - ISA_E
   - ISA_M
   - ISA_C
+  - MUA_C_IMPL
+  - MUA_C_DECOMPRESS_STAGE
   - ISA_ZFINX
   - ISA_ZIFENCEI
   - ISA_F
@@ -17,6 +19,7 @@ parameters:
 tests:
   - native
   - hazards
+  - compressed
   - control
   - xif
   - randomized

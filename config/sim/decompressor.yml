@@ -3,6 +3,8 @@ bender_target: decompressor_test
 test_module: test_uqu_decompressor
 parameters:
   - ISA_C
+  - MUA_C_IMPL
+  - MUA_C_DECOMPRESS_STAGE
   - ISA_E
   - ISA_M
   - ISA_ZFINX

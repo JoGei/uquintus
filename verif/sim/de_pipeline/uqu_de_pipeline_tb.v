@@ -1,10 +1,13 @@
 `default_nettype none
+`include "uqu_config.vh"
 // Verification-only core parent: real IF/DE and DE/EX storage, GPRs and hazard
 // unit. EX computation and MEM/WB producers are externally controlled stubs.
 module uqu_de_pipeline_tb #(
     parameter ISA_E = 0,
     parameter ISA_M = 0,
     parameter ISA_C = 0,
+    parameter MUA_C_IMPL = `UQU_C_IMPL_DECOMPRESS,
+    parameter MUA_C_DECOMPRESS_STAGE = `UQU_C_DECOMPRESS_IF,
     parameter ISA_ZFINX = 0,
     parameter ISA_ZIFENCEI = 0,
     parameter ISA_UMODE = 1,
@@ -51,6 +54,12 @@ module uqu_de_pipeline_tb #(
     input wire [31:0] wb_result_i,
     input wire  wb_advance_i,
     output wire  de_slot_valid_o,
+    output wire [31:0] de_instr_o,
+    output wire [31:0] de_original_o,
+    output wire  de_compressed_o,
+    output wire  de_fault_o,
+    output wire [4:0] de_cause_o,
+    output wire [31:0] de_tval_o,
     output wire  de_transfer_o,
     output wire  branch_resolve_o,
     output wire  branch_taken_o,
@@ -60,6 +69,9 @@ module uqu_de_pipeline_tb #(
     output wire [4:0] ex_cause_o,
     output wire [4:0] ex_rd_o,
     output wire [31:0] ex_instr_o,
+    output wire [31:0] ex_original_o,
+    output wire  ex_compressed_o,
+    output wire [31:0] ex_link_o,
     output wire [31:0] ex_pc_o,
     output wire [31:0] ex_tval_o,
     output wire [31:0] ex_a_o,
@@ -72,7 +84,8 @@ module uqu_de_pipeline_tb #(
     reg de_valid_q, de_compressed_q, de_fault_q;
     reg [31:0] de_instr_q, de_original_q, de_pc_q, de_tval_q;
     reg [4:0] de_cause_q;
-    reg ex_valid_q, ex_fault_q, ex_mem_we_q;
+    reg ex_valid_q, ex_fault_q, ex_mem_we_q, ex_compressed_q;
+    reg [31:0] ex_original_q, ex_link_q;
     reg [31:0] ex_instr_q, ex_pc_q, ex_tval_q, ex_imm_q;
     reg [4:0] ex_cause_q, ex_rd_q;
     reg [1:0] ex_pending_q, ex_a_sel_q, ex_b_sel_q;
@@ -87,7 +100,10 @@ module uqu_de_pipeline_tb #(
     wire stage_valid, stage_ready, de_fire, ex_advance;
     wire fault;
     wire [4:0] cause, rd;
-    wire [31:0] tval, immediate;
+    wire [31:0] tval, immediate, link;
+    wire [31:0] selected_instr, selected_tval;
+    wire selected_fault;
+    wire [4:0] selected_cause;
     wire [1:0] pending, a_sel, b_sel;
     wire mem_we;
     wire ex_operands_ready = ((ex_ready & ex_used_q) == ex_used_q);
@@ -95,9 +111,18 @@ module uqu_de_pipeline_tb #(
     assign de_fire = stage_valid && (!ex_valid_q || ex_advance);
     assign fetch_ready_o = stage_ready;
     assign de_slot_valid_o = de_valid_q;
+    assign de_instr_o = de_instr_q;
+    assign de_original_o = de_original_q;
+    assign de_compressed_o = de_compressed_q;
+    assign de_fault_o = de_valid_q && de_fault_q;
+    assign de_cause_o = de_cause_q;
+    assign de_tval_o = de_tval_q;
     assign de_transfer_o = de_fire;
     assign ex_valid_o = ex_valid_q;
     assign ex_instr_o = ex_instr_q;
+    assign ex_original_o = ex_original_q;
+    assign ex_compressed_o = ex_compressed_q;
+    assign ex_link_o = ex_link_q;
     assign ex_pc_o = ex_pc_q;
     assign ex_fault_o = ex_valid_q && ex_fault_q;
     assign ex_cause_o = ex_cause_q;
@@ -108,6 +133,30 @@ module uqu_de_pipeline_tb #(
     assign ex_a_o = ex_a_sel_q == 2'd1 ? ex_pc_q : ex_a_sel_q == 2'd0 ? ex_source[0] : 32'd0;
     assign ex_b_o = ex_b_sel_q == 2'd1 ? ex_imm_q : ex_b_sel_q == 2'd0 ? ex_source[1] : 32'd0;
     assign ex_store_data_o = ex_mem_we_q ? ex_source[1] : 32'd0;
+    // Exercise the real IF placement across the parent-owned IF/DE register.
+    // DE placement instead instantiates its expander inside uqu_stage_de.
+    generate
+        if ((ISA_C == 1) && (MUA_C_IMPL == `UQU_C_IMPL_DECOMPRESS) &&
+            (MUA_C_DECOMPRESS_STAGE == `UQU_C_DECOMPRESS_IF)) begin : gen_expand_if
+            wire [31:0] expanded;
+            wire is_compressed, is_illegal;
+            wire expansion_fault = fetch_compressed_i && (!is_compressed || is_illegal);
+            uqu_decompressor #(.ISA_C(1)) u_decompressor (
+                .instr_i(fetch_instr_i), .instr_o(expanded), .original_instr_o(),
+                .compressed_o(is_compressed), .illegal_o(is_illegal), .hint_o()
+            );
+            assign selected_instr = fetch_compressed_i ? (is_compressed ? expanded : 32'd0) : fetch_instr_i;
+            assign selected_fault = fetch_fault_i || expansion_fault;
+            assign selected_cause = fetch_fault_i ? fetch_cause_i : expansion_fault ? 5'd2 : 5'd0;
+            assign selected_tval = fetch_fault_i ? fetch_tval_i :
+                                   expansion_fault ? {16'd0, fetch_original_i[15:0]} : 32'd0;
+        end else begin : gen_raw_if
+            assign selected_instr = fetch_instr_i;
+            assign selected_fault = fetch_fault_i;
+            assign selected_cause = fetch_cause_i;
+            assign selected_tval = fetch_tval_i;
+        end
+    endgenerate
     always @(posedge clk_i) begin
         if (!rst_ni || flush_i) begin
             de_valid_q <= 1'b0;
@@ -117,19 +166,22 @@ module uqu_de_pipeline_tb #(
             if (stage_ready) begin
                 de_valid_q <= fetch_valid_i;
                 if (fetch_valid_i) begin
-                    de_instr_q <= fetch_instr_i;
-                    de_original_q <= fetch_original_i;
+                    de_instr_q <= selected_instr;
+                    de_original_q <= fetch_compressed_i ? {16'd0, fetch_original_i[15:0]} : fetch_original_i;
                     de_pc_q <= fetch_pc_i;
                     de_compressed_q <= fetch_compressed_i;
-                    de_fault_q <= fetch_fault_i;
-                    de_cause_q <= fetch_cause_i;
-                    de_tval_q <= fetch_tval_i;
+                    de_fault_q <= selected_fault;
+                    de_cause_q <= selected_cause;
+                    de_tval_q <= selected_tval;
                 end
             end
             if (!ex_valid_q || ex_advance) begin
                 ex_valid_q <= stage_valid;
                 if (stage_valid) begin
                     ex_instr_q <= de_instr_q;
+                    ex_original_q <= de_original_q;
+                    ex_compressed_q <= de_compressed_q;
+                    ex_link_q <= link;
                     ex_pc_q <= de_pc_q;
                     ex_fault_q <= fault;
                     ex_cause_q <= cause;
@@ -252,6 +304,8 @@ module uqu_de_pipeline_tb #(
         .ISA_E(ISA_E),
         .ISA_M(ISA_M),
         .ISA_C(ISA_C),
+        .MUA_C_IMPL(MUA_C_IMPL),
+        .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .ISA_ZFINX(ISA_ZFINX),
         .ISA_ZIFENCEI(ISA_ZIFENCEI),
         .ISA_UMODE(ISA_UMODE),
@@ -298,7 +352,7 @@ module uqu_de_pipeline_tb #(
         .b_o(),
         .c_o(),
         .rm_o(),
-        .pass_data_o(),
+        .pass_data_o(link),
         .store_data_o(),
         .rd_we_o(),
         .rd_o(rd),

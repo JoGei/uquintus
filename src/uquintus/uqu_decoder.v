@@ -2,7 +2,7 @@
 `include "uqu_isa.vh"
 `include "uqu_ctrl.vh"
 
-// Stateless native instruction decoder. IF supplies expanded 32-bit instructions;
+// Stateless native instruction decoder. The strategy adapter supplies 32-bit instructions;
 // DE/core own operands, runtime permissions, hazards, XIF and exception events.
 module uqu_decoder #(
     parameter ISA_E = 0,

@@ -6,9 +6,15 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
-      - target: any(decompressor, decompressor_test, rtl)
+      - target: any(decompressor, decompressor_test, de, de_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_decompressor.v
+      - target: any(decode_c, decompressor_test, de, de_pipeline_test, rtl)
+        files:
+          - src/uquintus/uqu_decoder_c.v
+      - target: any(decompressor_test, de, de_pipeline_test, rtl)
+        files:
+          - src/uquintus/uqu_decoder_select.v
       - target: decompressor_test
         files:
           - verif/sim/decompressor/uqu_decompressor_tb.v

@@ -1,4 +1,12 @@
 {
+  "MUA_C_IMPL": {
+    "decompress": {"value": 0, "macro": "UQU_C_IMPL_DECOMPRESS"},
+    "decode_compressed": {"value": 1, "macro": "UQU_C_IMPL_DECODE_COMPRESSED"}
+  },
+  "MUA_C_DECOMPRESS_STAGE": {
+    "if": {"value": 0, "macro": "UQU_C_DECOMPRESS_IF"},
+    "de": {"value": 1, "macro": "UQU_C_DECOMPRESS_DE"}
+  },
   "MUA_MUL": {
     "parallel": {"value": 0, "macro": "UQU_MUL_PARALLEL"},
     "parallel+stages+2": {"value": 1, "macro": "UQU_MUL_PARALLEL_2"},

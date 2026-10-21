@@ -19,6 +19,8 @@ The repository contains specifications and standalone
 [DE stage](../verif/sim/de/README.md),
 [core-owned hazard/forwarding](../verif/sim/hazard/README.md),
 [native decoder](../verif/sim/decode/README.md),
+[compressed expansion/strategy selection](../verif/sim/decompressor/README.md),
+[direct compressed decoder](../verif/sim/decode_c/README.md),
 [DE branch unit](../verif/sim/branch/README.md),
 [register-file](../verif/sim/gpregfile/README.md),
 [CSR register-file](../verif/sim/csregfile/README.md),

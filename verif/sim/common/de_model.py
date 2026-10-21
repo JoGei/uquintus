@@ -1,5 +1,6 @@
 """DE contract model: ISA oracle, use points, branch semantics and local XIF state."""
 from decode_model import decode
+from compressed_model import expand
 
 MASK = (1 << 32)-1
 
@@ -30,7 +31,14 @@ class DEModel:
         self.operands = [None]*self.p['XIF_NUM_RS']
 
     def evaluate(self, i):
-        d, _ = decode(i['instr'], self.p)
+        instruction = i['instr']
+        compressed_bad = False
+        if (self.p['ISA_C'] and i['compressed'] and not (self.p['XIF'] and i['xif_force']) and
+                (self.p.get('MUA_C_IMPL', 0) == 1 or self.p.get('MUA_C_DECOMPRESS_STAGE', 0) == 1)):
+            expanded, _ = expand(i['original_instr'], True)
+            compressed_bad = not expanded['compressed'] or expanded['illegal']
+            instruction = 0 if compressed_bad else expanded['instr']
+        d, _ = decode(instruction, self.p)
         if self.p['XIF'] and i['xif_force']:
             d.update(native=0, branch=0, pass_link=0)
         active = bool(i['rst_n'] and not i['flush'] and i['valid'])
@@ -40,7 +48,7 @@ class DEModel:
         restricted = (d['system'] == 3 and (not machine or debug) or
                       d['system'] == 4 and not debug or
                       d['system'] == 5 and not machine and i['tw'])
-        early = (i['exception_valid'] or i['compressed'] and not self.p['ISA_C'] or
+        early = (i['exception_valid'] or compressed_bad or i['compressed'] and not self.p['ISA_C'] or
                  self.p['XIF'] and i['xif_force'] and (not self.p['ISA_C'] or not i['compressed']) or
                  d['native'] and (d['illegal'] or restricted or d['fu'] == 2 and d['rm'] == 7 and rm > 4))
         offer = bool(self.p['XIF'] and not d['native'] and not early)

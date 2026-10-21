@@ -197,6 +197,8 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_FORWARD_MEM_TO_EX` | `0`: disable MEM-result forwarding to EX; `1`: enable it when the producer result is available; inactive when `MUA_FORWARDING = 0`. | `1` |
 | `MUA_FORWARD_WB_TO_EX` | `0`: disable WB-result forwarding to EX; `1`: enable it when the producer result is available; inactive when `MUA_FORWARDING = 0`. | `1` |
 | `MUA_DE_OPERAND_RETENTION` | `uqu_hazard` option: `0`: continuously resolve DE sources; `1`: retain correctly resolved DE operands while their instruction waits. | `0` |
+| `MUA_C_IMPL` | `decompress`: expand into base instructions, then use the main decoder; `decode_compressed`: directly decode compressed instructions in parallel with the main decoder. Inactive when `ISA_C = 0`. | `decompress` |
+| `MUA_C_DECOMPRESS_STAGE` | `if`: expansion before IF/DE; `de`: expansion after IF/DE and before the main decoder. Inactive when `ISA_C = 0` or `MUA_C_IMPL = decode_compressed`. | `if` |
 | `MUA_BRANCH_PREDICTOR` | `none`, `static_not_taken`; additional implementations TBD. | `none` |
 | `MUA_REGFILE_IMPL` | `ff`: flip-flop storage; `latch`: latch storage. | `ff` |
 | `MUA_IF_BUFFER_WORDS` | Integer capacity of at least `2` in 32-bit fetch words; non-power-of-two capacities supported. | `2` |
@@ -207,8 +209,8 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 
 Enumerated selectors use readable YAML labels translated into integer RTL
 values through the canonical definition in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets); their exact numeric
-encodings are defined for MUL/DIV in `config/selectors.json` and for the
-register file in Section 17; predictor encoding remains TBD.
+encodings are defined for MUL/DIV, compressed decoding and the register file in
+`config/selectors.json`; predictor encoding remains TBD.
 `MUA_MULDIV_ITERUNROLL` is an integer factor passed to RTL
 unchanged. Every hardware configuration shall explicitly set all parameters,
 including inactive ones, under [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
@@ -218,6 +220,15 @@ Section 4.2 and accepted as an explicit integer boolean by the component runner.
 All hardware presets shall set it; existing presets use zero, and
 `config/rv32i_retained.yml` selects one for comparison. Core/stage integration
 remains pending.
+
+Compressed-decode selectors shall also be set explicitly when inactive. Their
+labels shall still be validated and mapped through the canonical catalog.
+`MUA_C_IMPL` uses `decompress = 0`, `decode_compressed = 1`;
+`MUA_C_DECOMPRESS_STAGE` uses `if = 0`, `de = 1`. The three effective C-enabled
+paths and parent payload rules are defined in Section 15.1. Presets
+`rv32ic`, `rv32ic_decompress_de` and `rv32ic_decoder_c` select them respectively.
+All three paths are implemented at component/DE level; the production IF and
+complete core remain integration work.
 
 `MUA_HARDENED` is a planned future feature. Every hardware configuration shall
 explicitly set it to zero until its implementation is supported. An enabled
@@ -1035,8 +1046,10 @@ a recognized native instruction using an unavailable GPR remains a native
 exception, not an extension override. Unknown instructions may still be claimed
 by XIF through parallel recognition; the decoder shall not own offload acceptance.
 Runtime privilege/WFI/rounding checks and branch alignment belong in DE/core;
-CSR address/access checks remain at WB. IF supplies expanded 32-bit instructions
-while the parent preserves original bits/length for faults and links.
+CSR address/access checks remain at WB. The DE-owned `uqu_decoder_select`
+adapter applies the compressed-decode strategy from Section 15.1, supplying
+expanded instructions to the main decoder or selecting direct compressed
+controls. The parent preserves original bits/length for faults and links.
 
 The decoder supports the base ISA, mandatory Zicsr and system/fence classes,
 optional M, Zfinx encoding recognition, Zifencei and debug DRET. FPU execution
@@ -1046,7 +1059,8 @@ outputs; synthesis shall retain no decoder state.
 
 ### 3.12. Decode stage and parent-pipeline integration
 
-`src/uquintus/uqu_stage_de.v` owns the native decoder, branch unit, runtime
+`src/uquintus/uqu_stage_de.v` owns the native decoder and compressed-decode
+adapter, branch unit, runtime
 legality, operand/control selection and optional CV-X-IF issue state. Its
 [component guide](../verif/sim/de/README.md) defines concrete ports, normalized
 controls, exception priorities, standard offload fields and integration rules.
@@ -1102,13 +1116,25 @@ held EX operands, register-file fallback, store-data selection, one-time
 branch resolution, fault identity and flush. It does not replace the production
 core controller or implement XIF ID/kill arbitration.
 
-Standalone suites pass across twelve native/optional profiles; the two fixture
-suites pass across ten forwarding/retention/ISA/GPR profiles. Lint and synthesis
+The initial standalone suites pass across twelve native/optional profiles; the
+initial two fixture suites pass across ten forwarding/retention/ISA/GPR profiles. Lint and synthesis
 checks infer no latches. Generic optimized native DE state is zero; paired XIF
 adds 72 bits with two sources or 105 with three, only local protocol/operand
 state. Netlist reachability checks confirm no combinational path from standard
 issue/register response inputs to standard issue/register outputs. Full-core
 integration, RVFI/Spike and frontend/global event sequencing remain follow-ups.
+
+The compressed-strategy regression adds six DE suites across all three
+strategies with I, E+Zfinx and two-/three-source XIF, C-disabled selector cases
+and a direct-decoder inactive-placement alias. Exhaustive selected-control and
+leaf decoder checks cover all halfwords, and a parent fixture suite verifies
+held compressed calls, ALU controls and original fault identity. The fixture
+instantiates real IF-mode expansion before IF/DE or real DE expansion/direct
+decoding after it, consuming raw compressed inputs in all modes. A mixed-length
+stream scoreboard checks both parent registers under backpressure and permission
+stalls, with original bits/length, PC wraparound and call links preserved. All native
+strategies remain combinational; synthesis confirms that unselected compressed
+units are removed and invalid selector encodings fail elaboration.
 
 ## 4. Configurable operand forwarding
 
@@ -2491,7 +2517,7 @@ independently of the selected depth. Requests shall reserve response capacity
 as required in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories). Increasing buffer depth shall not increase the
 number of permitted outstanding requests. The buffer shall preserve the
 instruction PC, length, and fault information needed for correct execution and
-tracing. Initial decompression placement is defined in [architecture, Section 15.1](uqu_spec.arch.md#151-separate-compressed-instruction-decompressor); detailed
+tracing. Compressed decoding is defined in [architecture, Section 15.1](uqu_spec.arch.md#151-configurable-compressed-instruction-decoding); detailed
 fetch-fault association and redirect handling remain TBD.
 
 Fetch shall continue filling available buffer space during downstream pipeline
@@ -2524,79 +2550,96 @@ which uses word-aligned prefetches and internal handling of halfword-aligned
 instructions. Its buffer depth and outstanding-request count do not prescribe
 those choices for uquintus.
 
-### 15.1. Separate compressed-instruction decompressor
+### 15.1. Configurable compressed-instruction decoding
 
-**Status:** Stateless integer RV32C component implemented; IF integration pending
+**Status:** Three strategies implemented at component/DE level; production IF
+and full-core integration pending
 
-Compressed-instruction expansion shall be implemented as a separate
-Verilog-2005 module, initially placed in IF after instruction selection/assembly
-and before the IF/DE pipeline register. The implementation is
-[`uqu_decompressor`](../src/uquintus/uqu_decompressor.v), with its
-[interface and regression guide](../verif/sim/decompressor/README.md).
-Its separation shall allow placement to be revisited after timing evaluation
-without merging its logic into the main decoder. No additional pipeline stage
-or decompression-placement parameter is required by this decision.
+`ISA_C` selects the software-visible extension. Two independent elaboration
+selectors configure its implementation without changing the ISA:
 
-As a future timing/area exploration, the same stateless module may instead
-sit immediately after IF/DE and before the native DE decoder. Placing it in
-IF adds expansion to the fetch selection/assembly path; placing it in DE
-adds expansion ahead of decoding, register reads, hazard resolution and branch
-computation. DE placement may also reduce duplicated instruction storage at
-IF/DE by registering only the original selected instruction and metadata,
-then deriving the normalized word combinationally. Actual timing and register
-cost shall determine whether this is worthwhile. Moving the logic across the
-existing boundary need not add a pipeline stage or an instruction cycle.
+| `MUA_C_IMPL` | `MUA_C_DECOMPRESS_STAGE` | Datapath |
+| --- | --- | --- |
+| `decompress` | `if` (default) | IF selection/assembly → decompressor → IF/DE → main decoder. |
+| `decompress` | `de` | IF selection/assembly → IF/DE → decompressor → main decoder. |
+| `decode_compressed` | Inactive, but explicitly set | IF selection/assembly → IF/DE → parallel native/compressed decoders → control selection. |
 
-Such an exploration shall adapt the boundary payload and expansion-fault
-generation together while preserving original PC/bits/length, fetch-fault
-priority and precise exceptions. IF shall still determine two-/four-byte
-length from the original prefix for instruction selection and sequential
-fetching, even if full expansion occurs in DE. IF remains the initial placement;
-this alternative is an optimization target rather than a new configuration
-parameter or an implementation change.
+Both selectors shall be inactive when `ISA_C = 0`, with no compressed-decode
+hardware retained. Inactive labels shall still be valid and explicitly set in
+hardware configurations. Numeric values and defaults are defined in Section 2.2
+and `config/selectors.json`. Selecting a strategy shall not add a pipeline stage
+or inherently add an instruction cycle. Timing/area evaluation shall compare
+complete paths and boundary register costs rather than assume a winner.
 
-When `ISA_C = 1`, the module shall expand supported 16-bit instructions into
-equivalent 32-bit encodings for the native DE decoder. Native 32-bit instruction
-encodings shall pass through unchanged. The prefetch buffer shall continue to
-store fetched words as defined by `MUA_IF_BUFFER_WORDS`; expansion shall occur
-on the selected instruction rather than change buffer entries into expanded
-instructions. With `ISA_C = 0`, the compressed expansion logic shall be bypassed
-and excluded at elaboration or eliminated by synthesis.
+`uqu_decompressor` shall remain a separate stateless Verilog-2005 module,
+independent of placement. It expands supported 16-bit instructions into 32-bit
+base instructions and passes native words unchanged. Its initial/default
+placement is IF, after instruction selection/assembly and before IF/DE.
+DE placement puts expansion ahead of decoding, register reads, hazard resolution
+and branch computation; it may reduce duplicated instruction storage at IF/DE
+by registering original bits and deriving the expanded word combinationally.
+The prefetch buffer shall store fetched words, not expanded instructions.
 
-The IF/DE boundary shall preserve the instruction PC, original encoding,
-original length or equivalent compressed flag, and fetch/expansion fault
-information alongside the normalized encoding. Downstream control shall use
-the original length for sequential PCs and link addresses: compressed calls
-shall link to `pc + 2`, while ordinary 32-bit calls shall link to `pc + 4`.
-Original bits shall remain available for `mtval` and architectural tracing.
-An illegal compressed encoding shall retain its fault indication rather than
-be silently converted into a valid instruction. See the
-[RISC-V compressed instruction specification](https://docs.riscv.org/reference/isa/unpriv/c-st-ext.html).
+`uqu_decoder_c` shall decode supported integer RV32C encodings directly into
+the same register-use, immediate, FU, LSU, branch, WB and system controls as
+`uqu_decoder`. It shall not construct an intermediate base instruction or
+instantiate the decompressor/main decoder. In this strategy, the two full
+recognition paths operate in parallel in DE and `uqu_decoder_select` selects
+controls from the compressed path for a native compressed token. Selection
+shall depend on original length metadata, not an XIF acceptance response.
+Operand selection, hazards, runtime checks, branch computation and retirement
+remain shared. Recognized compressed instructions using unavailable RV32E
+registers shall remain native illegal instructions, never extension overrides.
 
-The combinational interface consumes an assembled `instr_i[31:0]` and exposes
-`instr_o[31:0]`, `original_instr_o[31:0]`, `compressed_o`, `illegal_o` and
-`hint_o`. It owns no clock, reset, handshake, PC or pipeline storage. IF shall
-assemble native words across fetch boundaries before presenting them, qualify
-outputs with its token validity and preserve earlier fetch-fault priority.
-Compressed original bits shall be zero-extended. Unsupported compressed words
-shall produce a zero normalized word and assert `illegal_o`; the parent shall
-retain original bits and form a cause-2 exception token if no earlier fetch
-fault applies. With C disabled, both words pass unchanged and all flags are zero.
+The IF/DE payload shall follow the selected strategy:
 
-The implementation supports integer RV32C and its HINT encodings. HINTs shall
-expand to their corresponding base operations with register fields preserved;
-`hint_o` is advisory and shall not bypass decoder legality. Canonical C.NOP
-shall expand normally without setting the noncanonical HINT annotation.
-RV32E register restrictions remain with the native decoder. RV64-only forms,
-reserved encodings, RV32 custom shifts with shamt[5]=1 and compressed FP
-transfers remain unsupported. Zfinx does not enable compressed FP transfers.
+- With `decompress/if`, IF shall preserve the normalized instruction alongside
+  original bits, length and fetch/expansion fault metadata. It shall convert an
+  unsupported compressed encoding into a cause-2 token with original bits as
+  tval, unless an earlier fetch fault applies.
+- With `decompress/de` or `decode_compressed`, IF shall retain the original selected
+  instruction and fetch metadata. The DE adapter consumes `original_instr_i`
+  for native compressed decoding; `instr_i` can share the same parent storage.
+  DE shall generate compressed legality faults. IF still determines original
+  two-/four-byte length from the prefix for selection and sequential fetching.
 
-DE shall retain its normal decoder and the parallel native/XIF recognition
-organization in [interfaces, Section 5](uqu_spec.interfaces.md#5-cv-x-if-custom-extension-interface). Support for extension-defined compressed
-encodings and any optional CV-X-IF compressed interface remains part of the
-frontend/interface-profile work still to be implemented. This native expander
-does not implement a coprocessor channel. Timing constraints and final frontend
-integration remain open.
+All strategies shall preserve original PC, bits and length through the pipeline.
+Downstream links and sequential PCs shall use original length: compressed calls
+link to PC+2, ordinary calls to PC+4. Original compressed bits shall be
+zero-extended for `mtval` and tracing. Fetch faults take priority over compressed
+legality; unsupported compressed words shall not execute or be sent raw over
+XIF's 32-bit issue channel. A compressed-marked token presented to either DE
+compressed path with a native 32-bit prefix shall fault rather than execute.
+
+The decompressor's interface is `instr_i[31:0]` to `instr_o[31:0]`,
+`original_instr_o[31:0]`, `compressed_o`, `illegal_o` and advisory `hint_o`.
+It owns no clock, reset, handshake, PC or pipeline storage. Unsupported
+compressed words yield zero normalized bits and assert `illegal_o`; with C
+disabled, both words pass unchanged and all flags are zero. Native 32-bit
+legality belongs to the main decoder.
+
+Both implementations shall support integer RV32C and its HINT encodings under
+[C version 2.0](https://docs.riscv.org/reference/isa/v20260120/unpriv/c-st-ext.html).
+HINT register fields shall retain their corresponding base-operation meaning
+for RV32E checks; a HINT annotation shall not bypass register legality.
+Canonical C.NOP shall expand normally without setting the decompressor's
+noncanonical HINT flag. RV64-only forms, reserved encodings, RV32 custom shifts
+with shamt[5]=1 and compressed FP transfers remain unsupported. Zfinx does not
+enable compressed FP transfers. The direct decoder need not emit an expanded
+instruction or a HINT annotation.
+
+DE shall retain the native/XIF ownership rules in
+[interfaces, Section 5](uqu_spec.interfaces.md#5-cv-x-if-custom-extension-interface).
+An extension-expanded compressed token marked `xif_force_i` shall bypass the
+native compressed paths in every strategy and offer its supplied 32-bit
+`instr_i` to XIF, preserving the original bits and length. This remains
+core-internal origin metadata, with no added coprocessor signals. The standard
+compressed XIF channel and frontend translation/ownership integration are still
+pending; these native decoding choices do not implement that channel.
+
+The [decompressor/strategy guide](../verif/sim/decompressor/README.md),
+[direct decoder guide](../verif/sim/decode_c/README.md) and
+[DE guide](../verif/sim/de/README.md) define concrete ports and regressions.
 
 ## 16. Optional instruction-fetch fence
 
@@ -3070,7 +3113,7 @@ be resolved when their implementation milestone is undertaken:
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
 | ISA/CSR/PMP | WB owns decoded CSR state/access checks, optional PMP/FP state, counters and accepted trap/MRET updates; integrate with the full-core controller and two-port PMP checker, preserve instruction-age/retirement rules, and connect XIF issue/tracking and the core debug controller to implemented WB endpoints. |
-| Frontend | Decompressor implementation, detailed prefetch/fault association and redirect tracking, and future predictor implementations; preserve agreed initial IF placement and request persistence. |
+| Frontend | Integrate selected compressed-decode strategy, prefetch/fault association, redirect tracking and future predictors; preserve original instruction identity and request persistence. |
 | Milestones | Implementation order and acceptance criteria for optional ISA features, PMP, XIF, latch storage, and non-default configurations after the baseline milestone. |
 
 Full F and its separate register file are deferred in favor of Zfinx. `ISA_A`
@@ -3129,7 +3172,7 @@ later decisions determine the active contract.
 | D-119 | Initially hardwire `mvendorid`, `marchid`, and `mimpid` to zero as standard read-only identification CSRs. | Use permitted initial values while deferring project-specific identifiers. | Agreed |
 | D-139 | Configure instruction-fetch buffer capacity through `MUA_IF_BUFFER_WORDS`, defaulting to two 32-bit word slots while retaining one outstanding fetch request. | Support instruction reuse and assembly with an adjustable buffer size independent of bus concurrency. | Agreed; supported capacities defined by D-217, prefetch policy defined by D-140 |
 | D-140 | Continue filling available instruction-buffer space during downstream stalls, subject to capacity, one outstanding request, and control-flow/synchronization restrictions. | Overlap fetch latency with pipeline stalls while retaining precise fault handling and correct redirect recovery. | Agreed; detailed frontend control implementation TBD |
-| D-141 | Implement compressed-instruction expansion in a separate module, initially in IF before the IF/DE register, retaining original encoding, PC, length, and fault metadata. | Reuse the native DE decoder and keep decompression placement easy to revisit after timing evaluation. | Native component implemented under D-282; full IF integration and timing evaluation pending |
+| D-141 | Implement compressed-instruction expansion in a separate module, initially in IF before the IF/DE register, retaining original encoding, PC, length, and fault metadata. | Reuse the native DE decoder and keep decompression placement easy to revisit after timing evaluation. | Native component implemented under D-282; configurable strategies under D-283; full IF integration and timing evaluation pending |
 | D-142 | Keep PMP CSRs and permission checks inside the core before memory requests; expose no privilege/PMP attributes for external enforcement, and consume external bus faults through the normal error responses. | Make protection a core responsibility while keeping the memory interface independent of PMP implementation. | Agreed; enable/default defined by D-143 and fixed capacity by D-251; remaining field details and milestone open |
 | D-143 | Select internal PMP through `ISA_PMP`, defaulting to `0`; omit permission-checking logic and writable PMP-entry storage when disabled. | Keep PMP optional and preserve the default implementation scope. | Agreed; disabled CSR behavior defined by D-144; fixed sixteen-entry enabled capacity by D-251 |
 | D-144 | When `ISA_PMP = 0`, keep standard PMP CSRs accessible in M-mode with reads returning zero and permitted writes ignored; retain normal CSR privilege checks. | Allow software probing without writable PMP-entry storage. | Agreed |
@@ -3229,3 +3272,4 @@ later decisions determine the active contract.
 | D-279 | Implement the standalone hazard unit with normalized producer inputs, DE/EX source resolution, movement-qualified guarantees and optional DE operand retention; add explicit boolean configuration support and a retained-RV32I preset. | Make the agreed dependency policies executable and testable before assembling DE or the full core. | Implemented; Section 4.2.5 and hazard component guide; forty-profile regression, lint, configuration guards and optimized storage checks; core/stage integration pending |
 | D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented; Section 3.12; component and native parent-fixture regressions, lint and optimized-state/signal-dependency checks; full-core controller/frontend/XIF ID integration pending |
 | D-282 | Implement stateless integer RV32C expansion with explicit original bits, compressed/illegal/HINT flags, C-disabled bypass and unchanged native words; preserve HINT register fields for downstream RV32E checks. | Reuse the decoder and DE, retain precise fault/link identity and eliminate expansion logic when C is disabled. | Implemented; Section 15.1; exhaustive halfword and decoder/DE integration tests; fetch assembly and optional XIF compressed-channel integration pending |
+| D-283 | Select compressed decoding through MUA_C_IMPL = decompress or decode_compressed, with MUA_C_DECOMPRESS_STAGE = if or de for expansion placement; default to decompress/if and ignore the selectors when C is disabled. | Compare expansion placement against parallel direct decoding while preserving ISA, original instruction identity, shared DE execution control and standard XIF ownership. | Component/DE paths implemented and tested; Section 15.1; full frontend/core integration and PPA evaluation pending |

@@ -187,6 +187,20 @@ invent irrelevant pipeline or protocol scenarios. Full-core tests shall retain
 Spike comparison; an isolated component shall use a suitable component model
 or checker rather than require Spike for every unit test.
 
+Compressed-instruction verification shall cover all three microarchitecture
+strategies: `decompress/if`, `decompress/de` and `decode_compressed`. Leaf tests shall
+exhaust 16-bit encoding space, including HINTs, unsupported encodings and RV32E
+register restrictions. Integration fixtures shall place the real decompressor
+on the selected side of actual IF/DE storage, rather than substitute a software
+expansion before that boundary. Direct mode shall instantiate `uqu_decoder_c`
+and check its normalized controls against equivalent base semantics.
+Placement coverage shall include mixed 16-/32-bit tokens, stalls/backpressure,
+permission, flush, earlier fetch-fault priority, original PC/bits/length and
+PC+2 versus PC+4 links. See the
+[placement fixture](../verif/sim/de_pipeline/README.md) and
+[direct decoder tests](../verif/sim/decode_c/README.md). Bus fetching and
+word-boundary stitching remain separate frontend verification work.
+
 Runs shall report the selected component, test/suite, configuration, simulator
 and tool versions, and seed needed to reproduce a failure. Simulation failures,
 checker mismatches, and watchdog expiry shall cause a failed run and nonzero

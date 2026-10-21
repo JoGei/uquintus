@@ -5,6 +5,8 @@ parameters:
   - ISA_E
   - ISA_M
   - ISA_C
+  - MUA_C_IMPL
+  - MUA_C_DECOMPRESS_STAGE
   - ISA_ZFINX
   - ISA_ZIFENCEI
   - ISA_UMODE
@@ -19,3 +21,5 @@ parameters:
 tests:
   - dependencies
   - branch_faults
+  - compressed_tokens
+  - compressed_stream

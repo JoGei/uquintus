@@ -1,5 +1,6 @@
 `default_nettype none
 `include "uqu_ctrl.vh"
+`include "uqu_config.vh"
 
 // DE execution/control only. The parent owns IF/DE and DE/EX registers,
 // instruction identity, GPRs, hazards, global events and XIF ID allocation.
@@ -7,6 +8,8 @@ module uqu_stage_de #(
     parameter ISA_E = 0,
     parameter ISA_M = 0,
     parameter ISA_C = 0,
+    parameter MUA_C_IMPL = `UQU_C_IMPL_DECOMPRESS,
+    parameter MUA_C_DECOMPRESS_STAGE = `UQU_C_DECOMPRESS_IF,
     parameter ISA_ZFINX = 0,
     parameter ISA_ZIFENCEI = 0,
     parameter ISA_F = 0,
@@ -115,7 +118,7 @@ module uqu_stage_de #(
     wire active = enabled && valid_i;
     wire debug_mode = (DEBUG == 1) && debug_mode_i;
     wire machine = (ISA_UMODE == 0) || priv_m_i || debug_mode;
-    wire dec_native, dec_illegal, unused_dec_illegal_reg;
+    wire dec_native, dec_illegal, dec_illegal_c, unused_dec_illegal_reg;
     // IF marks an extension-expanded compressed instruction for mandatory
     // re-offload, even if the expansion resembles a native 32-bit instruction.
     wire core_native = dec_native && !((XIF == 1) && xif_force_i);
@@ -137,7 +140,7 @@ module uqu_stage_de #(
     wire length_illegal = (ISA_C == 0) && compressed_i;
     wire native_illegal = core_native && (dec_illegal || privilege_illegal || rounding_illegal);
     wire force_illegal = (XIF == 1) && xif_force_i && ((ISA_C == 0) || !compressed_i);
-    wire pre_fault = exception_valid_i || length_illegal || native_illegal || force_illegal;
+    wire pre_fault = exception_valid_i || length_illegal || native_illegal || force_illegal || dec_illegal_c;
     wire xif_candidate = (XIF == 1) && !core_native && !pre_fault;
     wire xif_done, xif_accept, xif_bad, xif_clean;
     wire [1:0] xif_writeback;
@@ -223,11 +226,14 @@ module uqu_stage_de #(
     assign csr_src_zero_o = native_payload && (dec_wb_kind == `UQU_WB_CSR) &&
                            (instr_i[19:15] == 5'd0);
 
-    uqu_decoder #(
+    uqu_decoder_select #(
+        .ISA_C(ISA_C), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .ISA_E(ISA_E), .ISA_M(ISA_M), .ISA_ZFINX(ISA_ZFINX),
         .ISA_ZIFENCEI(ISA_ZIFENCEI), .ISA_F(ISA_F), .ISA_A(ISA_A), .DEBUG(DEBUG)
-    ) u_decoder (
-        .instr_i(instr_i), .native_o(dec_native), .illegal_o(dec_illegal),
+    ) u_decoder_select (
+        .instr_i(instr_i), .original_instr_i(original_instr_i), .compressed_i(compressed_i),
+        .xif_force_i((XIF == 1) && xif_force_i), .illegal_c_o(dec_illegal_c),
+        .native_o(dec_native), .illegal_o(dec_illegal),
         .illegal_reg_o(unused_dec_illegal_reg), .rs_used_o(dec_rs_used),
         .rs1_o(dec_rs0), .rs2_o(dec_rs1), .rs3_o(dec_rs2), .rd_we_o(dec_rd_we),
         .rd_o(dec_rd), .imm_o(dec_imm), .fu_o(dec_fu), .op_o(dec_op),

@@ -13,6 +13,7 @@ from pyuvm import uvm_root, uvm_test
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from de_model import DEModel, inputs
 from decode_model import RULES, decode
+from compressed_model import expand
 
 
 def word(opcode=0x33, rd=3, rs1=1, rs2=2, funct3=0, upper=0):
@@ -110,6 +111,49 @@ class HazardsTest(DETest):
         r = await self.check(instr=word(), exception_valid=1, exception_cause=1,
                              exception_tval=0xDEAD, rs_ready=0)
         assert r['valid'] and r['exception_valid'] and r['rs_used'] == 0
+        self.report()
+        self.drop_objection()
+
+
+class CompressedTest(DETest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.reset()
+        if not self.p['ISA_C']:
+            for raw in (0x0085, 0x9002, 0x9082, 0):
+                r = await self.check(instr=raw, original_instr=raw, compressed=1)
+                assert r['exception_valid'] and r['exception_cause'] == 2
+            self.drop_objection()
+            return
+        expand_if = self.p['MUA_C_IMPL'] == 0 and self.p['MUA_C_DECOMPRESS_STAGE'] == 0
+        for index in range(2048):
+            raw = self.rng.getrandbits(16)
+            raw = raw & ~3 | (index % 3)
+            expanded, _ = expand(raw, True)
+            fetch_fault = index % 13 == 0
+            i = inputs(instr=expanded['instr'] if expand_if else raw,
+                original_instr=raw, compressed=1, pc=0x1002,
+                rs0=self.rng.getrandbits(32), rs1=self.rng.getrandbits(32),
+                rs_ready=self.rng.randrange(8), rs_ex_guaranteed=self.rng.randrange(8),
+                permit=self.rng.randrange(2), ready=self.rng.randrange(2),
+                exception_valid=int(fetch_fault or expand_if and expanded['illegal']),
+                exception_cause=1 if fetch_fault else 2,
+                exception_tval=0x2000 if fetch_fault else raw)
+            r = await self.check(i)
+            assert not r['xif_issue_valid']  # No raw 16-bit offload on the 32-bit issue channel.
+            if fetch_fault:
+                assert r['exception_valid'] and r['exception_cause'] == 1
+                assert r['exception_tval'] == 0x2000
+            elif expanded['illegal']:
+                assert r['exception_valid'] and r['exception_cause'] == 2
+                assert r['exception_tval'] == raw
+        # Illegal native E operands remain native faults, never XIF overrides.
+        for raw in (0x0805, 0x0801, 0x0842, 0xC042):
+            expanded, _ = expand(raw, True)
+            r = await self.check(instr=expanded['instr'] if expand_if else raw,
+                                 original_instr=raw, compressed=1)
+            assert not r['xif_issue_valid']
+            assert bool(r['exception_valid']) == bool(self.p['ISA_E'])
         self.report()
         self.drop_objection()
 
@@ -286,6 +330,11 @@ async def native(_dut):
 @cocotb.test(timeout_time=1000, timeout_unit='us')
 async def hazards(_dut):
     await uvm_root().run_test(HazardsTest)
+
+
+@cocotb.test(timeout_time=1000, timeout_unit='us')
+async def compressed(_dut):
+    await uvm_root().run_test(CompressedTest)
 
 
 @cocotb.test(timeout_time=1000, timeout_unit='us')

@@ -12,7 +12,7 @@ from pyuvm import uvm_root, uvm_test
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from decode_model import decode
-from decompressor_model import expand, immediate
+from compressed_model import expand, immediate
 
 
 class DecompressorTest(uvm_test):

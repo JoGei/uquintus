@@ -63,6 +63,37 @@ class ComponentRunnerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing=.*MUA_DE_OPERAND_RETENTION"):
             load_configuration(path, catalog)
 
+    def test_compressed_decode_selectors_are_explicit_and_encoded(self):
+        from hw_config import write_header
+
+        catalog = json.loads((ROOT / "config/selectors.json").read_text())
+        config = load_configuration(ROOT / "config/rv32i.yml", catalog)
+        names = ["MUA_C_IMPL", "MUA_C_DECOMPRESS_STAGE"]
+        path = self.directory / "compressed.yml"
+        # Placement stays explicit and valid even when inactive (C=0 or direct).
+        for enabled in (0, 1):
+            for impl, impl_value in (("decompress", 0), ("decode_compressed", 1)):
+                for stage, stage_value in (("if", 0), ("de", 1)):
+                    path.write_text(yaml.safe_dump(dict(config, ISA_C=enabled,
+                        MUA_C_IMPL=impl, MUA_C_DECOMPRESS_STAGE=stage)))
+                    checked = load_configuration(path, catalog)
+                    self.assertEqual(parameters_for_component(checked, names, catalog),
+                        dict(MUA_C_IMPL=impl_value, MUA_C_DECOMPRESS_STAGE=stage_value))
+        for name in names:
+            incomplete = {key:value for key,value in config.items() if key != name}
+            path.write_text(yaml.safe_dump(incomplete))
+            with self.assertRaisesRegex(ValueError, "missing=.*"+name):
+                load_configuration(path, catalog)
+            for invalid in (0, True, "unknown", "IF", "decoder_c"):
+                path.write_text(yaml.safe_dump(dict(config, **{name:invalid})))
+                with self.assertRaisesRegex(ValueError, "unsupported "+name):
+                    load_configuration(path, catalog)
+        write_header(catalog, self.directory)
+        header = (self.directory / "uqu_config.vh").read_text()
+        for name in names:
+            for entry in catalog[name].values():
+                self.assertIn(f"`define {entry['macro']} {entry['value']}", header)
+
     def test_bender_nested_include_dirs_preserve_order_and_paths(self):
         first = self.directory / "first headers"
         second = self.directory / "nested"

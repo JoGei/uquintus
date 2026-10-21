@@ -1,6 +1,7 @@
 # Decode stage
 
 [uqu_stage_de.v](../../../src/uquintus/uqu_stage_de.v) owns the native decoder,
+compressed-decode strategy adapter,
 branch unit, operand/control selection, runtime legality and optional CV-X-IF
 issue tracking. It owns neither IF/DE nor DE/EX registers, the GPR file,
 forwarding/hazard logic, XIF ID allocation, privilege state nor global control.
@@ -8,6 +9,8 @@ forwarding/hazard logic, XIF ID allocation, privilege state nor global control.
 ```sh
 make test COMPONENT=de CONFIG=rv32i
 make test COMPONENT=de CONFIG=rv32i_xif_debug
+make test COMPONENT=de CONFIG=rv32ic_decompress_de
+make test COMPONENT=de CONFIG=rv32ic_decoder_c
 make lint COMPONENT=de CONFIG=rv32i
 make test COMPONENT=de_pipeline CONFIG=rv32i
 make test COMPONENT=de_pipeline CONFIG=rv32i_retained
@@ -20,11 +23,27 @@ parameters select supported decode features. Full F/A remain unsupported.
 Zfinx enables decoding and effective rounding checks here; it does not implement
 the still-unimplemented EX FPU backend.
 
+`MUA_C_IMPL` selects `decompress` (0) or `decode_compressed` (1).
+`MUA_C_DECOMPRESS_STAGE` selects `if` (0, default) or `de` (1), and is inactive
+in direct mode. With C disabled both selectors are inactive. The generated
+`uqu_config.vh` supplies integer macros from the canonical catalog.
+The [strategy contract](../../../doc/uqu_spec.arch.md#151-configurable-compressed-instruction-decoding)
+and [component comparison tests](../decompressor/README.md) describe the paths.
+
+For `decompress/if`, the parent supplies expanded `instr_i` and any expansion
+fault with original metadata. For the other paths, `original_instr_i` provides
+native compressed bits and DE generates any compressed legality fault;
+`instr_i` may share the same original-instruction register. Native 32-bit words
+continue through `instr_i` in all modes. An XIF-forced token always supplies its
+expanded 32-bit `instr_i` and bypasses native compressed decoding. Unrecognized
+raw compressed instructions fault locally and are not offered on the XIF issue
+channel. Earlier fetch faults retain priority. No new pipeline state is added.
+
 ## Parent and handshake
 
 | Inputs | Meaning |
 | --- | --- |
-| `valid_i`, `pc_i`, `instr_i`, `original_instr_i`, `compressed_i` | Parent-owned IF/DE token. `instr_i` is expanded to 32 bits; retain original bits and length separately through the pipeline. |
+| `valid_i`, `pc_i`, `instr_i`, `original_instr_i`, `compressed_i` | Parent-owned IF/DE token. `instr_i` is expanded for `decompress/if`; native compressed tokens use original bits in the other strategies. Retain original bits and length through the pipeline. |
 | `exception_valid_i`, `exception_cause_i`, `exception_tval_i` | Earlier IF fault, taking priority over DE faults and suppressing offload/actions. |
 | `priv_m_i`, `debug_mode_i`, `tw_i`, `frm_i` | Current core-owned runtime state. Serialized updates must be visible before a subsequent instruction executes. |
 | `ready_i` | Capacity to accept the decoded instruction in parent-owned DE/EX. |
@@ -163,14 +182,15 @@ and coprocessor inputs are ignored.
 
 ## Verification
 
-The five pyuvm/cocotb suites cover native classes/control payloads; all readiness
+The six pyuvm/cocotb suites cover native classes/control payloads; all readiness
 and guarantee masks for representative consumers; runtime privilege, rounding,
 fault priorities and transfer-qualified branches; XIF partial stable operands,
 acceptance/rejection, paired/E register cases, forced compressed offload and
-cleanup; and 5,000 seeded randomized inputs. The shared mask/match ISA oracle
+cleanup; compressed strategy/fault/register handling with 2,048 randomized
+compressed encodings; and 5,000 seeded randomized inputs. The shared mask/match ISA oracle
 and DE behavioral model live in `verif/sim/common/`.
 
-The twelve-profile regression spans RV32I/M/E/C, M-only, Zfinx, debug/FENCE.I
+The original twelve-profile regression spans RV32I/M/E/C, M-only, Zfinx, debug/FENCE.I
 and XIF two-/three-source/paired combinations. The
 [parent fixture](../de_pipeline/README.md) separately checks real IF/DE and
 DE/EX ownership with actual GPR storage and hazard resolution.
@@ -180,3 +200,8 @@ control/validity resets synchronously. No latches are inferred. Combinational
 netlist reachability checks cut sequential boundaries and verify no forbidden
 issue-response-to-issue/register-output path. These are component checks;
 full-core execution, RVFI/Spike and frontend/global-control integration remain.
+
+The additional fourteen-profile strategy sweep covers IF expansion, DE
+expansion and direct C decoding with I, E+Zfinx and two-/three-source XIF,
+plus C-disabled inactive-selector cases. All six suites and lint run for every
+profile. The parent fixture also runs for all three C-enabled strategies.

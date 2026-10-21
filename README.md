@@ -8,6 +8,7 @@ Implemented standalone components:
 | Component | RTL | Verification guide |
 | --- | --- | --- |
 | Compressed-instruction expander | [uqu_decompressor.v](src/uquintus/uqu_decompressor.v) | [Decompressor interface and tests](verif/sim/decompressor/README.md) |
+| Direct compressed decoder | [uqu_decoder_c.v](src/uquintus/uqu_decoder_c.v) | [Direct decode interface and tests](verif/sim/decode_c/README.md) |
 | Decode stage | [uqu_stage_de.v](src/uquintus/uqu_stage_de.v) | [DE interface and tests](verif/sim/de/README.md) |
 | Core-owned DE/EX hazards and forwarding | [uqu_hazard.v](src/uquintus/uqu_hazard.v) | [Hazard interface and tests](verif/sim/hazard/README.md) |
 | DE branch resolution | [uqu_branch.v](src/uquintus/uqu_branch.v) | [Branch interface and tests](verif/sim/branch/README.md) |
@@ -34,6 +35,9 @@ in `verif/requirements.txt` through your environment. Then run:
 
 ```sh
 make test COMPONENT=decompressor CONFIG=rv32ic
+make test COMPONENT=decompressor CONFIG=rv32ic_decompress_de
+make test COMPONENT=decompressor CONFIG=rv32ic_decoder_c
+make test COMPONENT=decode_c CONFIG=rv32ic_decoder_c
 make lint COMPONENT=decompressor CONFIG=rv32ic
 make test COMPONENT=decode CONFIG=rv32i
 make test COMPONENT=de CONFIG=rv32i
@@ -65,10 +69,17 @@ from the component manifest, and `SEED` to reproduce randomized stimulus.
 The build does not install dependencies or manage containers.
 Run `make clean` to remove the generated `build/` directory.
 
+Compressed decoding uses `MUA_C_IMPL: decompress | decode_compressed` and, for
+decompression, `MUA_C_DECOMPRESS_STAGE: if | de`. The three `rv32ic*` profiles
+above select the corresponding paths; the default is `decompress/if`.
+All hardware configurations explicitly set both selectors, even with C disabled.
+DE mode selection and direct decoding are implemented; production IF/frontend
+integration remains pending.
+
 Make invokes the shared component-testing helper in
 [verif/sim/common/](verif/sim/common/README.md). Component-specific DUT and test
 settings live in `config/sim/<component>.yml`; examples are
-[decompressor.yml](config/sim/decompressor.yml), [de.yml](config/sim/de.yml), [de_pipeline.yml](config/sim/de_pipeline.yml),
+[decompressor.yml](config/sim/decompressor.yml), [decode_c.yml](config/sim/decode_c.yml), [de.yml](config/sim/de.yml), [de_pipeline.yml](config/sim/de_pipeline.yml),
 [hazard.yml](config/sim/hazard.yml), [branch.yml](config/sim/branch.yml), [decode.yml](config/sim/decode.yml), [gpregfile.yml](config/sim/gpregfile.yml), [arith.yml](config/sim/arith.yml),
 [alu.yml](config/sim/alu.yml), [muldiv.yml](config/sim/muldiv.yml),
 [exec_arith.yml](config/sim/exec_arith.yml), [ex.yml](config/sim/ex.yml),

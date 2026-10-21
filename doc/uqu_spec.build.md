@@ -79,6 +79,14 @@ containing the former `+unroll+<factor>` suffix shall fail configuration
 validation.
 The validated numeric `MUA_MULDIV_ITERUNROLL` factor shall be passed to RTL
 unchanged.
+Compressed decoding shall use `MUA_C_IMPL: decompress` or `decode_compressed`, and
+`MUA_C_DECOMPRESS_STAGE: if` or `de`. Defaults are `decompress` and `if`.
+Both selectors remain mandatory in every hardware YAML file even when C is
+disabled; placement is inactive for `decode_compressed`. Their canonical encodings in
+`config/selectors.json` are `decompress = 0`, `decode_compressed = 1`, `if = 0` and
+`de = 1`, with corresponding generated Verilog macros. No nested YAML settings
+or string-valued RTL parameters are required. The comparison presets are
+`rv32ic.yml`, `rv32ic_decompress_de.yml` and `rv32ic_decoder_c.yml`.
 Configuration helpers
 shall validate the labels and translate them into integer RTL parameter values,
 using a consistent mapping across simulation, formal, and synthesis flows.
