@@ -2,7 +2,8 @@
 
 [uqu_ifetch.v](../../../src/uquintus/uqu_ifetch.v) is the IF-owned, single-word
 OBI transaction engine. It has private request/result storage, independent of
-the future prefetch buffer, instruction aligner and parent-owned IF/DE register.
+the future prefetch buffer, [instruction aligner](../if_aligner/README.md) and
+parent-owned IF/DE register.
 It implements no ISA decoding, PMP rules, CSR storage or redirect arbitration.
 
 ```sh
@@ -113,5 +114,6 @@ The [shared-PMP fixture](../ifetch_pmp/README.md) connects one real core-owned
 checker to both real engines. Standalone and fixture lint use Verilog-2005.
 Synthesis finds 67 storage bits, only four with synchronous reset; no latches,
 combinational bus-response-to-result path or flush-to-bus withdrawal path.
-These are component/integration checks; the prefetch buffer, aligner, IF stage,
-fetch-fault association, RVFI and software-level verification remain pending.
+These are component/integration checks. The aligner is separately implemented;
+prefetch buffering, IF-stage integration, fault containment, RVFI and
+software-level verification remain pending.

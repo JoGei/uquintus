@@ -8,6 +8,7 @@ Implemented standalone components:
 | Component | RTL | Verification guide |
 | --- | --- | --- |
 | Instruction-word fetch engine | [uqu_ifetch.v](src/uquintus/uqu_ifetch.v) | [Ifetch interface and tests](verif/sim/ifetch/README.md) |
+| Instruction selection and alignment | [uqu_if_aligner.v](src/uquintus/uqu_if_aligner.v) | [Aligner interface and tests](verif/sim/if_aligner/README.md) |
 | Compressed-instruction expander | [uqu_decompressor.v](src/uquintus/uqu_decompressor.v) | [Decompressor interface and tests](verif/sim/decompressor/README.md) |
 | Direct compressed decoder | [uqu_decoder_c.v](src/uquintus/uqu_decoder_c.v) | [Direct decode interface and tests](verif/sim/decode_c/README.md) |
 | Decode stage | [uqu_stage_de.v](src/uquintus/uqu_stage_de.v) | [DE interface and tests](verif/sim/de/README.md) |
@@ -37,6 +38,8 @@ in `verif/requirements.txt` through your environment. Then run:
 ```sh
 make test COMPONENT=ifetch CONFIG=rv32i
 make test COMPONENT=ifetch_pmp CONFIG=rv32i_pmp
+make test COMPONENT=if_aligner CONFIG=rv32i
+make test COMPONENT=if_aligner CONFIG=rv32ic
 make test COMPONENT=decompressor CONFIG=rv32ic
 make test COMPONENT=decompressor CONFIG=rv32ic_decompress_de
 make test COMPONENT=decompressor CONFIG=rv32ic_decoder_c
@@ -84,6 +87,7 @@ Make invokes the shared component-testing helper in
 settings live in `config/sim/<component>.yml`; examples are
 [decompressor.yml](config/sim/decompressor.yml), [decode_c.yml](config/sim/decode_c.yml), [de.yml](config/sim/de.yml), [de_pipeline.yml](config/sim/de_pipeline.yml),
 [ifetch.yml](config/sim/ifetch.yml), [ifetch_pmp.yml](config/sim/ifetch_pmp.yml),
+[if_aligner.yml](config/sim/if_aligner.yml),
 [hazard.yml](config/sim/hazard.yml), [branch.yml](config/sim/branch.yml), [decode.yml](config/sim/decode.yml), [gpregfile.yml](config/sim/gpregfile.yml), [arith.yml](config/sim/arith.yml),
 [alu.yml](config/sim/alu.yml), [muldiv.yml](config/sim/muldiv.yml),
 [exec_arith.yml](config/sim/exec_arith.yml), [ex.yml](config/sim/ex.yml),

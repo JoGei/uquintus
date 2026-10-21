@@ -6,6 +6,9 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
+      - target: any(if_aligner, rtl)
+        files:
+          - src/uquintus/uqu_if_aligner.v
       - target: any(ifetch, ifetch_pmp_test, rtl)
         files:
           - src/uquintus/uqu_ifetch.v

@@ -1,0 +1,10 @@
+top_module: uqu_if_aligner
+bender_target: if_aligner
+test_module: test_uqu_if_aligner
+parameters:
+  - ISA_C
+tests:
+  - directed
+  - prefixes
+  - randomized
+  - stream

@@ -2517,8 +2517,9 @@ independently of the selected depth. Requests shall reserve response capacity
 as required in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories). Increasing buffer depth shall not increase the
 number of permitted outstanding requests. The buffer shall preserve the
 instruction PC, length, and fault information needed for correct execution and
-tracing. Compressed decoding is defined in [architecture, Section 15.1](uqu_spec.arch.md#151-configurable-compressed-instruction-decoding); detailed
-fetch-fault association and redirect handling remain TBD.
+tracing. Compressed decoding is defined in [architecture, Section 15.1](uqu_spec.arch.md#151-configurable-compressed-instruction-decoding).
+Selected-word assembly and fault portions are defined in Section 15.3; buffer
+integration and redirect handling remain pending.
 
 Fetch shall continue filling available buffer space during downstream pipeline
 stalls. A downstream stall alone shall not suppress new instruction requests:
@@ -2684,8 +2685,58 @@ The [shared-PMP fixture](../verif/sim/ifetch_pmp/README.md) connects exactly one
 core checker to the real ifetch and LSU engines, checking execute versus R/W
 permissions, independent privilege, concurrent bus progress, retained outcomes
 and discarded IF error responses. Standalone ifetch tests cover permission,
-bus waits/errors, backpressure, killed drains and reset. The word buffer,
-aligner, complete IF stage and full-core integration remain pending.
+bus waits/errors, backpressure, killed drains and reset. The aligner is defined
+in Section 15.3; word buffering, complete IF stage and full-core integration
+remain pending.
+
+### 15.3. Stateless instruction aligner
+
+`src/uquintus/uqu_if_aligner.v` shall select one original instruction from the
+word containing `pc_i` and its consecutive successor. Its sole parameter shall
+be `ISA_C`, default zero. The [component guide](../verif/sim/if_aligner/README.md)
+defines its exact interface, consumption rules and byte-window regression.
+The module shall own no state, buffer, PMP checker, bus transaction or decoder.
+The parent shall guarantee the supplied words' address association and retain
+PC, word data/errors and pipeline storage until their applicable transfers.
+
+With C disabled, valid aligned PCs shall select a complete 32-bit word without
+using prefix or successor inputs. With C enabled, low prefix bits shall select
+two or four original bytes. A 32-bit instruction at an upper-halfword PC shall
+join that halfword with the next word's lower halfword; delivery shall wait if
+the successor is unavailable. Short instructions shall be zero-extended and
+shall not require a second word. Compressed legality and all expansion/direct
+decode strategy choices remain downstream. Unsupported longer prefixes shall
+deliver the core's first 32-bit instruction window, not enable longer execution.
+
+The aligner shall expose candidate validity, original bits, compressed status,
+sequential next PC, whether the head word can be released and whether a second
+word is needed. The parent shall apply PC/word-consumption suggestions only on
+an accepted transfer. Low-halfword compressed instructions shall retain their
+word; all other successful selections shall release exactly one head word,
+retaining an unused upper halfword of a successor when applicable. Sequential
+PC arithmetic shall wrap at 32 bits.
+
+A valid first-word error shall immediately yield an instruction-access-fault
+token with cause 1 and tval equal to the original PC, without trusting its data
+or waiting for a successor. A successor error shall matter only for a crossing
+instruction, with tval equal to PC+2, including wraparound. Invalid-word error
+inputs and errors on unused successor data shall be ignored. Incomplete inputs
+shall wait without producing instruction/fault data. Fault tokens shall expose
+zero instruction/length placeholders, retain PC, propose no word consumption
+and preserve their fault metadata for the pipeline. After fault transfer the
+parent shall contain it and prevent repeated delivery until redirect/flush.
+
+Misaligned input PCs shall assert a diagnostic and suppress output validity;
+the aligner shall not create a replacement architectural misalignment trap.
+Branch/jump alignment exceptions remain with their originating DE instruction,
+and boot/return/debug PC validation retains its existing ownership. No clock,
+reset, ready input or internal acceptance tracking belongs to the aligner.
+
+The implementation and regressions cover C-disabled/enabled selection, all
+16-bit prefixes at both halfword positions, missing/error word combinations,
+informative fault portions, wraparound, and mixed-length stream consumption
+under stalls. Full buffer/stage integration and architectural verification
+remain pending.
 
 ## 16. Optional instruction-fetch fence
 
@@ -3319,4 +3370,5 @@ later decisions determine the active contract.
 | D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented; Section 3.12; component and native parent-fixture regressions, lint and optimized-state/signal-dependency checks; full-core controller/frontend/XIF ID integration pending |
 | D-282 | Implement stateless integer RV32C expansion with explicit original bits, compressed/illegal/HINT flags, C-disabled bypass and unchanged native words; preserve HINT register fields for downstream RV32E checks. | Reuse the decoder and DE, retain precise fault/link identity and eliminate expansion logic when C is disabled. | Implemented; Section 15.1; exhaustive halfword and decoder/DE integration tests; fetch assembly and optional XIF compressed-channel integration pending |
 | D-283 | Select compressed decoding through MUA_C_IMPL = decompress or decode_compressed, with MUA_C_DECOMPRESS_STAGE = if or de for expansion placement; default to decompress/if and ignore the selectors when C is disabled. | Compare expansion placement against parallel direct decoding while preserving ISA, original instruction identity, shared DE execution control and standard XIF ownership. | Component/DE paths implemented and tested; Section 15.1; full frontend/core integration and PPA evaluation pending |
-| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented; Section 15.2; standalone and real shared-PMP/LSU fixture tests; buffer, aligner and IF/core integration pending |
+| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented; Section 15.2; standalone and real shared-PMP/LSU fixture tests; aligner under D-285; buffer and IF/core integration pending |
+| D-285 | Implement stateless uqu_if_aligner over two ordered words with original instruction/length, next-PC and qualified-consumption suggestions; contain fetch faults with the correct first/second portion address and leave storage, PMP, decode and transfer control outside. | Separate word selection/assembly from transaction handling and configurable compressed decoding while preserving precise fault identity and word reuse. | Implemented; Section 15.3; C-disabled/enabled exhaustive prefix, error/availability, randomized and stream checks; word buffer and IF/core integration pending |
