@@ -183,6 +183,12 @@ privileged state, optional extensions, custom operations, and memory protocols
 remain TBD. Verification results shall state the checks, configurations, and
 assumptions used so that the demonstrated scope is explicit.
 
+The [shared build report](uqu_spec.build.md#61-shared-build-report) shall visualize
+retained verification results across configurations and preserve drill-down to
+cases, diagnostics and provenance. Its aggregation does not expand the scope of
+a test or proof. Missing evidence, partial suites, failures, skipped checks and
+changed/unknown inputs shall remain distinguishable from verification success.
+
 ### 2.1. Python simulation framework
 
 **Status:** Agreed; shared runner and native full-core RVFI testbed implemented

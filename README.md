@@ -103,6 +103,14 @@ The optional [ELF program flow](verif/sim/core_elf/README.md) also requires an
 external RISC-V GCC or Clang/LLD; directed component/core tests do not.
 Run `make clean` to remove the generated `build/` directory.
 
+Run `make report` to collect existing results into
+[`build/report/index.html`](build/report/index.html). The static report includes
+category pages, searchable run history, logs/results, a configuration matrix and
+parameter comparison, plus Markdown/JSON summaries. See the
+[reporting guide](scripts/README.md) for outcome/provenance semantics and the
+common record for future synthesis, formal and benchmark flows. The generated
+directory can later be published as a static site; deployment is not configured.
+
 Compressed decoding uses `MUA_C_IMPL: decompress | decode_compressed` and, for
 decompression, `MUA_C_DECOMPRESS_STAGE: if | de`. The three `rv32ic*` profiles
 above select the corresponding paths; the default is `decompress/if`.

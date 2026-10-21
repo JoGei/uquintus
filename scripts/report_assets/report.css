@@ -1,0 +1,61 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; color: #203047; background: #f4f7fb; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+a { color: #165da7; text-decoration: none; }
+a:hover { text-decoration: underline; }
+header { display: flex; justify-content: space-between; gap: 1rem; align-items: center; padding: 1.3rem 3vw; background: #16283d; color: white; }
+header a { color: white; }
+.brand { font-size: 1.35rem; font-weight: 750; letter-spacing: .02em; }
+.brand span { font-size: .9rem; font-weight: 400; color: #b8cadd; margin-left: .7rem; }
+nav { display: flex; gap: 1.2rem; overflow-x: auto; padding: .9rem 3vw; background: white; border-bottom: 1px solid #dbe3ed; white-space: nowrap; }
+main { max-width: 1600px; margin: auto; padding: 1.6rem 3vw 3rem; }
+h1 { font-size: 1.9rem; margin: 0 0 1rem; }
+h2 { font-size: 1.1rem; }
+p { line-height: 1.6; }
+.lead { font-size: 1.15rem; color: #506781; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin: 1.4rem 0; }
+.stats > div, section, .card { background: white; padding: 1.3rem; border: 1px solid #dbe3ed; border-radius: .6rem; }
+.stats b { display: block; font-size: 2rem; color: #16283d; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+.card { display: block; color: inherit; }
+.card:hover { border-color: #4d85bc; text-decoration: none; }
+.card h2 { margin-top: 0; }
+.card p { font-size: .85rem; color: #536578; }
+section { margin: 1.3rem 0; }
+.badge { display: inline-block; padding: .25rem .5rem; border-radius: .25rem; font-size: .78rem; font-weight: 650; white-space: nowrap; background: #e7edf5; color: #344e68; }
+.passed, .match { background: #d9f1e5; color: #145b3b; }
+.failed, .error { background: #ffe0e0; color: #8d2424; }
+.running, .changed { background: #fff0cd; color: #785000; }
+.skipped, .unknown, .not_reported { background: #e7edf5; color: #536578; }
+.status-bar { display: flex; min-height: .7rem; border-radius: .3rem; overflow: hidden; background: #dbe3ed; }
+.status-bar .passed { background: #2a9668; }
+.status-bar .failed, .status-bar .error { background: #d45151; }
+.status-bar .running { background: #c18b1d; }
+.status-bar .skipped { background: #91a2b8; }
+.filters { display: flex; align-items: end; flex-wrap: wrap; gap: 1rem; margin: 1.2rem 0; }
+label { display: flex; flex-direction: column; gap: .35rem; font-size: .85rem; }
+input, select { font: inherit; border: 1px solid #aebed0; border-radius: .3rem; padding: .6rem; background: white; min-width: 160px; max-width: 80vw; }
+input { min-width: 280px; }
+#visible-count { font-size: .85rem; padding-bottom: .65rem; }
+.table-scroll { overflow-x: auto; margin: 1rem 0; }
+table { width: 100%; border-collapse: collapse; background: white; font-size: .86rem; text-align: left; }
+th, td { padding: .8rem; border-bottom: 1px solid #e3eaf2; vertical-align: top; }
+th { background: #eaf0f7; white-space: nowrap; }
+tbody tr:hover { background: #f5f9ff; }
+tr[hidden] { display: none; }
+small { display: block; margin-top: .35rem; color: #65778c; font-size: .74rem; }
+.sort { font: inherit; font-weight: 650; border: 0; background: none; cursor: pointer; padding: 0; color: inherit; }
+.sort:after { content: ' ↕'; color: #7e91a8; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 1100px; line-height: 1.5; font-size: .8rem; }
+code { overflow-wrap: anywhere; }
+details { margin: 1.5rem 0; padding: 1rem; border: 1px solid #dbe3ed; background: white; }
+summary { cursor: pointer; }
+.notice, .empty { padding: 1rem; background: #fff1d7; border-left: 3px solid #bb8c28; }
+.empty { background: #eaf0f7; border-color: #829bb8; }
+.different td { background: #fff4da; }
+.metric-row { display: grid; grid-template-columns: minmax(150px, 2fr) 4fr minmax(100px, 1fr); align-items: center; gap: 1rem; padding: .55rem 0; font-size: .85rem; }
+.bar-track { height: .8rem; border-radius: .2rem; background: #edf2f8; }
+.bar-track span { display: block; height: 100%; background: #377fba; border-radius: .2rem; }
+.context { font-size: .8rem; color: #65778c; overflow-wrap: anywhere; }
+footer { padding: 1.5rem 3vw; font-size: .8rem; color: #65778c; border-top: 1px solid #dbe3ed; }
+@media (max-width: 650px) { header { align-items: start; } .brand span { display: block; margin: .4rem 0 0; } .metric-row { grid-template-columns: 1fr 1fr; } .metric-row b { grid-column: 2; } }

@@ -318,6 +318,55 @@ uqu_isa.vh/uqu_ctrl.vh live beside the core modules and are included, not
 separately compiled. Run metadata records Verilog-header hashes alongside source
 hashes so header-only changes remain identifiable.
 
+### 6.1. Shared build report
+
+**Status:** Initial artifact aggregation implemented; publication and future
+flow adapters remain follow-ups
+
+`make report` shall collect retained artifacts across hardware configurations
+and flows into `build/report/`, alongside the per-configuration output roots.
+This is the shared reporting exception to the per-configuration layout above.
+Reporting shall consume existing results without launching design builds or
+tests. Raw run artifacts remain authoritative; regenerating the report updates
+the view from the artifacts still retained.
+
+Use `index.html` as the primary landing page, with local static assets, category
+pages, run details, configuration matrices and parameter comparison. Generate a
+compact `index.md` summary and a versioned `data.json` dataset from the same
+normalized records. Relative links and bundled supporting files shall allow the
+whole directory to work locally and later on GitHub Pages without a runtime
+service or frontend package dependencies. Publishing is a separate future step.
+
+The initial reporter shall collect native component/core regressions, lint and
+software build records. Synthesis/PPA, formal verification and benchmark pages
+shall show absent evidence explicitly until corresponding producers exist.
+Future producers shall integrate through a versioned per-run `report.json`
+record with outcome, full hardware configuration, target/component/scenario,
+timestamps, provenance, metrics with units, comparison context and artifact
+references. The [reporting guide](../scripts/README.md) defines the initial
+record contract and generated layout.
+
+Keep different parameter snapshots under the same configuration name distinct.
+Retain failures and history; latest-per-scenario aggregation shall not let a
+passing partial suite or different seed hide an independent failure. Distinguish
+not-reported, skipped, running, failed, error and passed outcomes. Collection
+errors and inconsistent successful metadata shall remain visible. Legacy input
+hashes and timestamps shall identify their limited scope; unrecorded revisions
+or inputs shall remain unknown rather than be attributed to the workspace HEAD.
+
+Quantitative comparisons shall retain units and matching declared comparison
+contexts. PPA context shall identify platform/library/corner, constraints, stage
+and tools; benchmark context shall identify workload/input, compiler/flags and
+measurement conditions. Missing context shall prevent automatic comparison
+plots. Test wall time and incidental ELF cycle counts shall not become benchmark
+claims. Formal results shall retain the property/assumption/tool/bound scope.
+
+Only generated report directories shall be replaced, after successful rendering;
+concurrent report writers shall serialize. Selected small logs/metadata/results
+shall be bundled, while oversized raw traces, binaries and waveforms may stay in
+their original run directories with an explicit omission label. Artifact
+retention across CI jobs and deployment remain separate follow-ups.
+
 ## 7. Project directory layout proposal
 
 **Status:** Overall layout proposed; `src/uquintus/`, `src/wrap/`, `src/adapt/`,
@@ -476,3 +525,4 @@ later decisions determine the active contract.
 | D-137 | Use readable YAML labels for enumerated hardware selectors and translate validated labels into integer RTL parameter values; initially use predictor labels `none`/`static_not_taken` and register-file labels `ff`/`latch`. | Keep hardware configurations readable while providing consistent numeric tool inputs across build flows. | Agreed; exact integer encodings TBD, declaration mechanism defined by D-138 |
 | D-138 | Generate guarded Verilog-2005 `.vh` macro headers for shared selector encodings from one canonical definition also used by YAML configuration translation. | Keep synthesis-compatible RTL constants and build-tool mappings consistent without SystemVerilog packages in the synthesizable design. | Agreed; catalog format, numeric values, and generator details TBD |
 | D-258 | Place common processor RTL directly in `src/uquintus/`, with `src/wrap/` for protocol-specific top levels and `src/adapt/` for reusable protocol adapters as sibling directories. | Keep common core files together without an extra directory level. | Agreed; replaces D-131 |
+| D-295 | Generate a shared static report under build/report with an HTML landing page, category/run pages, configuration comparison, Markdown summary and versioned JSON data; collect existing flow artifacts and accept a common per-run record for future flows. | Visualize evidence across configurations without losing failures, provenance or comparison conditions, and produce a portable artifact suitable for later website publication. | Initial aggregation implemented; Section 6.1; synthesis/formal/benchmark producers, CI retention and deployment remain follow-ups |
