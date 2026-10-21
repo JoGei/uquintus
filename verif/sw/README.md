@@ -20,3 +20,8 @@ The shared Make helper lives in `verif/sim/common/software_build.py`; this
 directory contains software sources and linker/startup files. Compiler/ISA
 selection, generated artifacts and simulation commands are described in the
 [ELF execution guide](../sim/core_elf/README.md).
+
+The [pinned riscv-tests adapter](riscv_tests/README.md) adds external instruction
+regressions without submodules. Both flows use shared external-compiler discovery
+through `RISCV_CC`, `$RISCV/bin` or `PATH`, and record compiler family/version and
+effective target for reporting.

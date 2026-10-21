@@ -19,6 +19,12 @@ zero-fill tails, symbols and the test completion encoding without simulator or
 ELF-library dependencies. `software_build.py` is the shared Make helper behind
 `make sw`, deriving compiler ISA/ABI arguments from the hardware YAML. See the
 [ELF execution guide](../core_elf/README.md).
+`toolchain.py` discovers external GCC/Clang and records its family, version,
+RV32 target and ISA/ABI. `riscv_tests.py` handles explicit pinned archive fetching
+and adapted ISA builds; `elf_suite.py` executes their frozen manifest through
+the common runner, sharing only a compatible compiled simulator. Each execution
+retains a fresh process and artifact directory. See the
+[riscv-tests guide](../../sw/riscv_tests/README.md).
 
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
 standalone and shared-parent scoreboards. `decode_model.py` supplies the shared

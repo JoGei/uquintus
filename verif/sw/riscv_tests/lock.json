@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/riscv-software-src/riscv-tests",
+  "revision": "3df703cd52d5f0d8224e3c50bf03c6cb70efff98",
+  "archive_url": "https://codeload.github.com/riscv-software-src/riscv-tests/tar.gz/3df703cd52d5f0d8224e3c50bf03c6cb70efff98",
+  "archive_sha256": "26f60be0c065cae656e1bd6c23677693461d8c78380ae654ec2dceb770282981"
+}

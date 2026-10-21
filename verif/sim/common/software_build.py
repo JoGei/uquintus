@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path
 import re
-import shutil
 import subprocess
 import sys
 
@@ -12,6 +11,7 @@ import yaml
 
 from elf_image import load_elf
 from hw_config import load_configuration
+from toolchain import compiler_command, discover_compiler, identify_compiler
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -20,15 +20,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', default='rv32i')
     parser.add_argument('--program', default='smoke')
-    parser.add_argument('--cc', default='riscv32-unknown-elf-gcc')
+    parser.add_argument('--cc', default='')
     args = parser.parse_args()
     if not re.fullmatch('[a-z][a-z0-9_]*', args.program):
         raise ValueError('program must name a directory under verif/sw/')
     source = ROOT / 'verif/sw' / args.program / 'main.c'
     if not source.is_file():
         raise ValueError(f'program source not found: {source}')
-    if not shutil.which(args.cc):
-        raise ValueError(f'compiler not found: {args.cc}; provide GCC or Clang externally')
     config_path = Path(args.config)
     if not config_path.is_file():
         config_path = ROOT / 'config' / f'{args.config}.yml'
@@ -36,19 +34,13 @@ def main():
     config = load_configuration(config_path, catalog)
     if any(config[name] for name in ('ISA_F', 'ISA_ZFINX', 'ISA_A', 'XIF', 'DEBUG', 'MUA_HARDENED')):
         raise ValueError('software smoke build requires the implemented native core profile')
-    march = 'rv32' + ('e' if config['ISA_E'] else 'i')
-    march += ('m' if config['ISA_M'] else '') + ('c' if config['ISA_C'] else '') + '_zicsr'
-    march += '_zifencei' if config['ISA_ZIFENCEI'] else ''
-    abi = 'ilp32e' if config['ISA_E'] else 'ilp32'
+    compiler = identify_compiler(discover_compiler(args.cc), config)
     directory = ROOT / 'build' / f'uquintus-{config_path.stem}' / 'sw' / args.program
     directory.mkdir(parents=True, exist_ok=True)
-    compiler = subprocess.check_output([args.cc, '--version'], text=True)
     common = ROOT / 'verif/sw/common'
     inputs = [common / 'crt0.S', source, common / 'link.ld']
-    command = [args.cc]
-    if 'clang' in compiler.lower():
-        command += ['--target=riscv32-unknown-elf', '-fuse-ld=lld']
-    command += [f'-march={march}', f'-mabi={abi}', '-mcmodel=medany', '-mno-relax',
+    command = compiler_command(compiler)
+    command += ['-mcmodel=medany', '-mno-relax',
                 '-msmall-data-limit=0', '-ffreestanding', '-fno-builtin', '-fno-pic',
                 '-fno-stack-protector', '-ffunction-sections', '-fdata-sections',
                 '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-nostdlib',
@@ -56,7 +48,8 @@ def main():
                 '-Wl,--gc-sections,--no-relax,-Map,program.map', '-o', 'program.elf']
     metadata = {
         'configuration': str(config_path.resolve()), 'parameters': config,
-        'compiler': compiler.strip(), 'command': command, 'status': 'running',
+        'compiler': compiler['version_string'], 'compiler_info': compiler,
+        'command': command, 'status': 'running',
         'source_sha256': {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in inputs},
     }

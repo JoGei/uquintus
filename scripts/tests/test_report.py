@@ -176,7 +176,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(len(report.read_json(output / 'data.json')['records']), 1)
 
     def test_script_data_is_escaped_and_failed_generation_preserves_previous_site(self):
-        self.run_record(parameters={'value': '</script><script>bad</script>'})
+        self.run_record(component='core', parameters={'value': '</script><script>bad</script>'})
         output = self.build / 'report'
         report.generate(self.build, output, self.root)
         old = (output / 'index.html').read_text()
@@ -195,6 +195,63 @@ class ReportTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'not generated'):
             report.generate(self.build, output, self.root)
         self.assertEqual((output / 'keep.txt').read_text(), 'user content')
+
+    def test_core_configuration_view_excludes_component_only_experiments(self):
+        unit = self.run_record('unit', parameters={'unit_only': 1}, component='alu')
+        core = self.run_record('core', parameters={'core_experiment': 1}, component='core_elf')
+        self.run_record('preset-component', component='alu')
+        data = report.generate(self.build, self.build / 'report', self.root)
+        unit_config = next(r['configuration'] for r in data['records'] if r['source'].endswith('unit/run.json'))
+        core_config = next(r['configuration'] for r in data['records'] if r['source'].endswith('core/run.json'))
+        configurations = {c['id']: c for c in data['configurations']}
+        self.assertEqual(configurations[unit_config['id']]['scope'], 'component')
+        self.assertEqual(configurations[core_config['id']]['scope'], 'core')
+        self.assertTrue(any(c['preset'] and c['scope'] == 'core' for c in configurations.values()))
+        page = (self.build / 'report/configurations.html').read_text()
+        self.assertNotIn(unit_config['id'], page)
+        self.assertIn(core_config['id'], page)
+        self.assertEqual(len(data['records']), 3)
+        unit_run = next(r for r in data['records'] if r['source'].endswith('unit/run.json'))
+        self.assertTrue((self.build / 'report/runs' / (unit_run['id'] + '.html')).exists())
+
+    def test_producers_can_mark_custom_core_wrappers_explicitly(self):
+        path = self.native()
+        raw = report.read_json(path / 'report.json')
+        raw.update(component='custom_wrapper', configuration_scope='core',
+                   configuration=dict(name='wrapped-core', parameters={'ISA_E': 1}))
+        (path / 'report.json').write_text(json.dumps(raw))
+        data = report.collect(self.build, self.root)
+        self.assertEqual(next(c for c in data['configurations'] if c['name'] == 'wrapped-core')['scope'], 'core')
+        raw['configuration_scope'] = 'unknown-scope'
+        (path / 'report.json').write_text(json.dumps(raw))
+        self.assertIn('configuration_scope', report.collect(self.build, self.root)['issues'][0]['detail'])
+
+    def test_each_page_explains_outcomes_and_input_evidence(self):
+        for name, meaning in {**report.OUTCOME_LABELS, **report.INPUT_LABELS}.items():
+            self.assertIn(report.esc(meaning), report.badge(name))
+        html = report.page('Example', '<p>Body</p>')
+        self.assertIn('id="legend"', html)
+        self.assertIn('Run outcomes', html)
+        self.assertIn('Recorded inputs', html)
+        self.assertIn('not a test failure', html)
+        self.assertIn('A skipped check is not a pass', html)
+
+    def test_suite_declared_exclusions_are_skipped_evidence_not_passed_cases(self):
+        path = self.native()
+        raw = report.read_json(path / 'report.json')
+        raw.update(kind='test', results_file='suite-results.xml', required_tests=['add'],
+                   excluded_tests=[dict(name='ma_data', reason='misaligned access policy')],
+                   compiler_info=dict(family='gcc', version='14.2.0'))
+        (path / 'report.json').write_text(json.dumps(raw))
+        (path / 'suite-results.xml').write_text('<testsuites><testsuite><testcase name="add"/>'
+            '<testcase name="ma_data"><skipped message="misaligned access policy"/></testcase></testsuite></testsuites>')
+        record = report.collect(self.build, self.root)['records'][0]
+        self.assertEqual(record['status'], 'passed')
+        self.assertEqual([c['status'] for c in record['cases']], ['passed', 'skipped'])
+        self.assertEqual(record['tools']['compiler_info']['family'], 'gcc')
+        raw['excluded_tests'] = []
+        (path / 'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
 
     @unittest.skipUnless(shutil.which('node'), 'optional Node.js check of interactive controls')
     def test_interactive_filters_and_configuration_comparison(self):

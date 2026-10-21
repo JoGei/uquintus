@@ -462,9 +462,43 @@ and software-initialization contracts are defined in the execution guide.
 
 Verify initialized data, BSS, shared memory visibility, stack/calls and explicit
 failure/timeout fixtures before integrating external instruction suites.
-`riscv-tests`, architectural tests and Spike comparison remain separate
-follow-ups; ELF execution alone does not establish architectural compliance or
+The initial `riscv-tests` adapter is defined in Section 2.7. Architectural tests
+and Spike comparison remain follow-ups; ELF execution alone does not establish architectural compliance or
 complete the first milestone's verification acceptance criteria.
+
+### 2.7. Pinned riscv-tests instruction regression
+
+**Status:** Initial RV32I/M/C adapter implemented; architectural certification
+and Spike comparison remain separate work
+
+Consume unchanged instruction bodies and scalar macros from a checksum-pinned
+`riscv-tests` archive without repository submodules. The
+[source lock and adapter](../verif/sw/riscv_tests/README.md) define the exact
+commit/archive hash and local bare-metal environment. Adapt startup/pass/fail
+macros to the existing ELF runner and `tohost` contract; do not require the
+upstream `env` submodule or its privileged runtime probing.
+
+Select applicable `rv32ui`, `rv32um` and `rv32uc` cases from the pinned Makefrag
+lists. Gate M/C/FENCE.I cases on the matching ISA parameters. Explicitly exclude
+`ma_data`, which requires successful misaligned accesses rather than the agreed
+traps, and reject RV32E for these upper-register-using tests. Other privileged,
+virtual-memory and ISA families remain outside this initial adapter. Preserve
+each exclusion reason and reject requests for unknown/excluded tests.
+
+Freeze selected ELF hashes, full hardware parameters, compiler identity, source
+pin and exclusions in a suite manifest. Execute each ELF in a fresh simulator
+process through the existing RVFI/CSR checks, independent instruction oracle,
+shared memory and seeded OBI timing. Reuse a compiled simulator only when all
+recorded HDL/header/order/parameter/top/language/simulator/waveform inputs match.
+Continue remaining selected cases after a failure and fail the command if any
+required case fails. Keep per-ELF artifacts and suite JUnit/JSON summaries.
+
+The shared report shall show the suite and independent ELF runs, including
+compiler family/version/target and upstream revision. Declared incompatible
+cases shall appear as skipped evidence rather than passes; all required cases
+must succeed for the selected cohort to pass. Passing this adapted instruction
+suite does not replace pipeline/error/reset regressions, Spike comparison or
+architectural certification tests.
 
 ## 3. Supported-configuration CI coverage
 
@@ -533,4 +567,5 @@ later decisions determine the active contract.
 | D-291 | Defer formal core binding and proof execution until a working open-source formal toolchain and configuration are selected; retain the planned riscv-formal direction and current RVFI simulation checks. | Avoid implementing a tool-specific formal harness before selecting its actual frontend, orchestration and solver; distinguish simulation/structural checks from proofs. | Deferred pending toolchain selection; qualifies implementation timing under D-071 |
 | D-292 | Add native per-CSR RVFI channels with actual pre-/post-state, registered event alignment, 64-bit counter aliases, implicit trap/MRET updates and sparse JSONL diagnostics checked against the CSR model. | Observe CSR behavior without duplicating WARL/locking logic or changing processor RTL; preserve the formal deferral under D-291. | Implemented; Section 1.2; native simulation coverage and structural checks; formal binding/proofs remain deferred |
 | D-293 | Make a reusable RVFI formal integration a verification goal: shared passive collectors, a formal-compatible core wrapper, symbolic OBI environment, RVFI_BUS observations and documented riscv-formal checker configuration. | Reuse execution observations across simulation and formal verification while checking their connection to actual core and bus behavior and stating the demonstrated proof scope. | Agreed goal; Section 2.5; implementation and proof execution remain deferred under D-291 |
-| D-294 | Add reusable ELF32 software execution with shared instruction/data RAM, PT_LOAD zero-fill, bare-metal startup/linker files, retired-store tohost completion, configurable watchdog and preserved ELF/RVFI diagnostics. | Establish a compiler-built software execution foundation reusable by later ISA suites without adding test-completion ports to the processor. | Implemented initial native environment; Section 2.6; external suites and Spike comparison remain follow-ups |
+| D-294 | Add reusable ELF32 software execution with shared instruction/data RAM, PT_LOAD zero-fill, bare-metal startup/linker files, retired-store tohost completion, configurable watchdog and preserved ELF/RVFI diagnostics. | Establish a compiler-built software execution foundation reusable by later ISA suites without adding test-completion ports to the processor. | Implemented initial native environment; Section 2.6; riscv-tests added under D-296; architectural tests and Spike comparison remain follow-ups |
+| D-296 | Integrate checksum/commit-pinned riscv-tests without submodules, using adapted bare-metal instruction tests, explicit ISA/misalignment exclusions, independent ELF runs, compatible simulator-build reuse and compiler family/version/target discovery from RISCV_CC, RISCV or PATH. | Add reproducible external instruction coverage while preserving the chosen core behavior, externally supplied tools and honest cross-configuration reporting. | Initial RV32I/M/C adapter implemented; Section 2.7; build contract in build Section 1.2; other ISA/privileged families, architectural certification and Spike remain separate |

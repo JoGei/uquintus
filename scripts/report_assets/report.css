@@ -50,6 +50,11 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 1100px; line-he
 code { overflow-wrap: anywhere; }
 details { margin: 1.5rem 0; padding: 1rem; border: 1px solid #dbe3ed; background: white; }
 summary { cursor: pointer; }
+.legend summary { font-weight: 650; }
+.legend-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; }
+.legend dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .7rem 1rem; }
+.legend dt, .legend dd { margin: 0; }
+.legend dd, .legend p { font-size: .85rem; line-height: 1.55; }
 .notice, .empty { padding: 1rem; background: #fff1d7; border-left: 3px solid #bb8c28; }
 .empty { background: #eaf0f7; border-color: #829bb8; }
 .different td { background: #fff4da; }

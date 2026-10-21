@@ -111,6 +111,20 @@ parameter comparison, plus Markdown/JSON summaries. See the
 common record for future synthesis, formal and benchmark flows. The generated
 directory can later be published as a static site; deployment is not configured.
 
+The [riscv-tests integration](verif/sw/riscv_tests/README.md) uses a commit- and
+checksum-pinned source archive, without submodules. Fetch explicitly once, then
+build/run applicable tests with a supplied compiler:
+
+```sh
+make riscv-tests-fetch
+make riscv-tests CONFIG=rv32i
+make report
+```
+
+Compiler discovery uses `RISCV_CC`, `$RISCV/bin` or `PATH`; GCC/Clang identity,
+version and effective target are recorded in reports. Use `RISCV_TESTS` for a
+partial selection and `CONFIG=rv32im`/`rv32ic` for implemented M/C cases.
+
 Compressed decoding uses `MUA_C_IMPL: decompress | decode_compressed` and, for
 decompression, `MUA_C_DECOMPRESS_STAGE: if | de`. The three `rv32ic*` profiles
 above select the corresponding paths; the default is `decompress/if`.

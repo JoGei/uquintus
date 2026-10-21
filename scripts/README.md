@@ -55,6 +55,15 @@ workflow is installed or executed by `make report`.
 
 ## Reading results
 
+- Every HTML page has a collapsible label legend; badges also provide tooltip
+  explanations. Run outcomes (`passed`, `failed`, `error`, `running`, `skipped`,
+  `not reported`) are separate from recorded-input evidence (`match`, `changed`,
+  `unknown`). A changed input identifies historical evidence, not a failed test.
+- The configurations page and its comparison selectors show current core
+  presets plus snapshots used by core-level flows. Component-only experiments
+  remain in category pages, run details and JSON, without populating the core
+  configuration matrix. Configuration entries in `data.json` carry a `scope`
+  (`core` or `component`); the landing count covers core configurations.
 - Configuration names are paired with a SHA-256 fingerprint of the recorded
   parameter object. Legacy simulation records use the complete `config.yml`
   snapshot when available; selected RTL parameters alone cannot identify the
@@ -141,6 +150,21 @@ workload/input, compiler/flags/toolchain, measurement definition and environment
 for benchmarks; property set, assumptions, solver, bound/strategy for formal.
 Record source revision/dirty state and complete consumed-input hashes. These
 records do not make an absent flow implemented or certify verification coverage.
+
+Optional `configuration_scope: "core" | "component"` explicitly identifies the
+scope for custom wrappers or component-level implementation flows. Without it,
+the known `core`, `core_elf`, `uqu_core`, `riscv-tests` components and software
+builds supply core-level evidence; other components do not promote their
+experimental configurations into the core configuration view. Current presets
+from `config/*.yml` are always included, even without core run results.
+
+Test-suite producers may name a relative `results_file` instead of `results.xml`
+and declare `required_tests` plus `excluded_tests` (name/reason objects). A passed
+suite must have matching JUnit names, every required case passed, and only
+explicitly excluded cases skipped. Those skips remain visible and do not count
+as passes. The riscv-tests adapter supplies this cohort summary alongside its
+independent ELF runs. Structured `compiler_info` and `upstream` fields are shown
+with tool provenance; attached software build metadata is bundled when available.
 
 Comparison bars use only passed latest records with a nonempty, exactly matching
 context, metric name and unit. Missing/different contexts are never merged into

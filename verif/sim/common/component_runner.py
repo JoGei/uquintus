@@ -93,7 +93,21 @@ def bender_include_dirs(source_tree, root=ROOT):
     return directories
 
 
-def main():
+def simulator_build_key(sources, headers, includes, parameters, top, simulator, waves, generated):
+    def location(path):
+        return 'generated/' + str(path.relative_to(generated)) if path.is_relative_to(generated) else str(path)
+
+    inputs = {
+        'sources': [(str(p), hashlib.sha256(p.read_bytes()).hexdigest()) for p in sources],
+        'headers': [(location(p), hashlib.sha256(p.read_bytes()).hexdigest()) for p in headers],
+        'includes': [location(p) for p in includes],
+        'parameters': parameters, 'top': top, 'language': HDL_LANGUAGE_ARGS,
+        'simulator': simulator, 'waves': waves,
+    }
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
+
+
+def main(argv=None, shared_build=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--action", choices=("test", "lint"), default="test")
     parser.add_argument("--component", required=True, help="manifest name under config/sim/")
@@ -104,8 +118,9 @@ def main():
     parser.add_argument("--test", default="all", help="all or a test named by the component manifest")
     parser.add_argument("--waves", type=int, choices=(0, 1), default=0)
     parser.add_argument("--elf", help="statically linked RV32 ELF for a requires_elf component")
+    parser.add_argument('--label', help='scenario label for an ELF suite member')
     parser.add_argument("--max-cycles", type=int, default=100000, help="ELF execution watchdog")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     component = load_component(args.component)
     if args.test != "all" and args.test not in component["tests"]:
         raise ValueError(f"unknown test {args.test!r} for {args.component}; "
@@ -153,6 +168,7 @@ def main():
     headers = sorted({header for directory in include_dirs for header in directory.rglob("*.vh")})
     metadata = {
         "component": args.component, "action": args.action, "test": args.test,
+        'target': args.sim,
         "seed": args.seed, "configuration": str(config_path), "parameters": parameters,
         "component_manifest": component,
         "hdl_language_args": HDL_LANGUAGE_ARGS,
@@ -166,6 +182,10 @@ def main():
         "status": "running",
     }
     metadata_path = run_dir / "run.json"
+    if args.label:
+        if elf_path is None:
+            raise ValueError('--label requires ELF execution')
+        metadata['selection'] = args.label
     extra_env = {"UQU_COMPONENT_PARAMS": json.dumps(parameters)}
     if elf_path is not None:
         program = run_dir / 'program.elf'
@@ -176,6 +196,22 @@ def main():
             'segments': [{'address': s.address, 'file_size': len(s.data),
                           'memory_size': s.size, 'flags': s.flags} for s in image.segments],
         }
+        build_metadata = elf_path.parent / 'build.json'
+        if build_metadata.is_file():
+            software = json.loads(build_metadata.read_text())
+            if (software.get('status') == 'passed' and
+                    software.get('elf_sha256') == metadata['elf']['sha256']):
+                shutil.copyfile(build_metadata, run_dir / 'software-build.json')
+                for key in ('compiler', 'compiler_info', 'upstream'):
+                    if key in software:
+                        metadata[key] = software[key]
+                metadata['source_sha256'].update(software.get('source_sha256', {}))
+                metadata['input_scope'] = 'HDL, headers and recorded software sources'
+                compiler = software.get('compiler_info')
+                if compiler:
+                    metadata['context'] = {key: compiler[key] for key in ('family', 'version', 'target', 'march', 'abi')}
+                    if software.get('upstream'):
+                        metadata['context']['suite_revision'] = software['upstream']['revision']
         extra_env.update(UQU_ELF=str(program), UQU_MAX_CYCLES=str(args.max_cycles))
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"Artifacts: {run_dir}", flush=True)
@@ -197,33 +233,45 @@ def main():
             from cocotb.runner import get_runner
             metadata["packages"] = {name: importlib.metadata.version(name)
                                     for name in ("cocotb", "pyuvm", "PyYAML")}
-            runner = get_runner(args.sim)
-            runner.build(
-                verilog_sources=sources, includes=include_dirs,
-                parameters=parameters, hdl_toplevel=component["top_module"],
-                build_args=HDL_LANGUAGE_ARGS,
-                build_dir=run_dir / "obj", timescale=("1ns", "1ps"),
-                waves=bool(args.waves), log_file=run_dir / "build.log",
-            )
+            build_key = simulator_build_key(sources, headers, include_dirs, parameters,
+                component['top_module'], metadata['simulator'], args.waves, run_dir / 'include')
+            if shared_build is not None and shared_build.get('key') == build_key:
+                runner = shared_build['runner']
+                build_dir = shared_build['directory']
+                metadata['reused_simulator_build'] = str(build_dir)
+            else:
+                runner = get_runner(args.sim)
+                build_dir = run_dir / 'obj'
+                runner.build(
+                    verilog_sources=sources, includes=include_dirs,
+                    parameters=parameters, hdl_toplevel=component["top_module"],
+                    build_args=HDL_LANGUAGE_ARGS,
+                    build_dir=build_dir, timescale=("1ns", "1ps"),
+                    waves=bool(args.waves), log_file=run_dir / "build.log",
+                )
+                if shared_build is not None:
+                    shared_build.update(key=build_key, runner=runner, directory=build_dir)
             test_dir = ROOT / "verif/sim" / args.component
             sys.path.insert(0, str(test_dir))
             results = run_dir / "results.xml"
             runner.test(
                 hdl_toplevel=component["top_module"], test_module=component["test_module"],
                 testcase=",".join(selected_tests),
-                seed=args.seed, build_dir=run_dir / "obj", test_dir=run_dir,
+                seed=args.seed, build_dir=build_dir, test_dir=run_dir,
                 results_xml=str(results), waves=bool(args.waves),
                 extra_env=extra_env,
                 log_file=run_dir / "simulation.log",
             )
             metadata["tests_passed"] = check_results(results, selected_tests)
         metadata["status"] = "passed"
-    except BaseException:
+    except BaseException as error:
         metadata["status"] = "failed"
+        error.run_dir = run_dir
         raise
     finally:
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"PASS: {args.action} {config_path.stem} {args.test} seed={args.seed}")
+    return run_dir
 
 
 if __name__ == "__main__":

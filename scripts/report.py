@@ -25,9 +25,23 @@ KINDS = {
     'benchmark': 'Benchmarks',
 }
 STATES = ('error', 'failed', 'running', 'skipped', 'passed')
+CORE_COMPONENTS = {'core', 'core_elf', 'uqu_core', 'riscv-tests'}
+OUTCOME_LABELS = {
+    'passed': 'The reported checks passed for their stated scope. Declared exclusions remain skipped.',
+    'failed': 'The run was unsuccessful: a test, check, build or tool invocation failed.',
+    'error': 'Evidence is inconsistent or unusable, or the runner reported an error. Read the run diagnostics.',
+    'running': 'No final outcome has been recorded. An interrupted run may retain this label.',
+    'skipped': 'The check was excluded or not executed. A skipped check is not a pass.',
+    'not_reported': 'No retained results exist for this configuration and flow.',
+}
+INPUT_LABELS = {
+    'match': 'All recorded input hashes match the available files. Unrecorded inputs and tool changes are not covered.',
+    'changed': 'At least one recorded input differs from the current workspace. This labels historical evidence; it is not a test failure.',
+    'unknown': 'No input hashes were recorded, or recorded input files are unavailable, so a match cannot be established.',
+}
 FILES = ('run.json', 'build.json', 'report.json', 'results.xml', 'execution.json',
          'config.yml', 'component.yml', 'selectors.json', 'lint.log',
-         'simulation.log', 'build.log', 'program.map')
+         'simulation.log', 'build.log', 'program.map', 'software-build.json')
 
 
 def digest(value):
@@ -51,7 +65,22 @@ def esc(value):
 
 
 def badge(state, label=None):
-    return f'<span class="badge {esc(state)}">{esc(label or state.replace("_", " "))}</span>'
+    explanation = {**OUTCOME_LABELS, **INPUT_LABELS}.get(state, '')
+    return f'<span class="badge {esc(state)}" title="{esc(explanation)}">{esc(label or state.replace("_", " "))}</span>'
+
+
+def legend():
+    def entries(labels):
+        return ''.join(f'<dt>{badge(label)}</dt><dd>{esc(explanation)}</dd>'
+                       for label, explanation in labels.items())
+
+    return f'''<details class="legend" id="legend"><summary>Label legend: outcomes and recorded inputs</summary>
+<p>Run outcomes and input evidence describe different things. A passed historical run can have changed inputs today.</p>
+<div class="legend-grid"><div><h2>Run outcomes</h2><dl>{entries(OUTCOME_LABELS)}</dl></div>
+<div><h2>Recorded inputs</h2><dl>{entries(INPUT_LABELS)}</dl>
+<h2>Configuration labels</h2><p><b>Current preset</b>: defined in <code>config/*.yml</code> now.
+<b>Core artifact snapshot</b>: recorded by a core-level flow; it may differ from current presets.
+The fingerprint identifies the recorded parameter values.</p></div></div></details>'''
 
 
 def aggregate(records):
@@ -167,7 +196,7 @@ def normalize(path, build, root, hashes):
         'time_basis': time_basis, 'source': rel, 'context': context,
         'metrics': list(metrics), 'cases': [], 'notes': [], 'artifacts': [],
         'revision': raw.get('revision'),
-        'tools': {k: raw[k] for k in ('simulator', 'bender', 'compiler', 'packages') if k in raw},
+        'tools': {k: raw[k] for k in ('simulator', 'bender', 'compiler', 'compiler_info', 'upstream', 'packages') if k in raw},
         'workload': raw.get('workload', raw.get('elf', {}).get('sha256')),
     }
     for field in ('component', 'target', 'selection'):
@@ -175,6 +204,12 @@ def normalize(path, build, root, hashes):
             raise ValueError(f'{field} must be a nonempty string')
     if record['seed'] is not None and type(record['seed']) is not int:
         raise ValueError('seed must be an integer or null')
+    scope = raw.get('configuration_scope')
+    if scope is None:
+        scope = 'core' if kind == 'software' or record['component'] in CORE_COMPONENTS else 'component'
+    if scope not in ('core', 'component'):
+        raise ValueError('configuration_scope must be core or component')
+    record['configuration_scope'] = scope
     inputs = dict(raw.get('source_sha256', {}))
     inputs.update(raw.get('header_sha256', {}))
     inputs.update(raw.get('input_sha256', {}))
@@ -182,19 +217,26 @@ def normalize(path, build, root, hashes):
     record['inputs']['scope'] = raw.get('input_scope', 'declared inputs' if native else
         'software sources' if kind == 'software' else 'HDL and available headers only')
     if kind in ('regression', 'test'):
-        results = path.parent / 'results.xml'
+        results = (path.parent / raw.get('results_file', 'results.xml')).resolve()
+        if not results.is_relative_to(path.parent.resolve()):
+            raise ValueError('results_file escapes the run directory')
         if results.is_file():
             record['cases'] = junit(results)
             manifest = raw.get('component_manifest', {})
             expected = manifest.get('tests') if raw.get('test') == 'all' else (
                 [raw['test']] if raw.get('test') else None)
+            excluded = {e['name'] for e in raw.get('excluded_tests', [])}
+            if native and 'required_tests' in raw:
+                expected = [*raw['required_tests'], *sorted(excluded)]
             names = [case['name'] for case in record['cases']]
             if state == 'passed' and (not names or
-                    any(case['status'] != 'passed' for case in record['cases']) or
+                    any(case['status'] != 'passed' and not (
+                        case['status'] == 'skipped' and case['name'] in excluded)
+                        for case in record['cases']) or
                     (expected is not None and sorted(names) != sorted(expected))):
                 record['status'] = 'error'
                 record['notes'].append('Passed metadata conflicts with JUnit selection/results.')
-        elif not native and state == 'passed':
+        elif state == 'passed' and (not native or 'results_file' in raw):
             record['status'] = 'error'
             record['notes'].append('Passed test metadata has no results.xml evidence.')
     execution = path.parent / 'execution.json'
@@ -259,11 +301,14 @@ def collect(build, root):
     latest = {r['id'] for r in newest.values()}
     for record in records:
         record['latest'] = record['id'] in latest
-    configs = {r['configuration']['id']: dict(r['configuration'], preset=False) for r in records}
+    configs = {r['configuration']['id']: dict(r['configuration'], preset=False, scope='component') for r in records}
+    for record in records:
+        if record['configuration_scope'] == 'core':
+            configs[record['configuration']['id']]['scope'] = 'core'
     for path in sorted((root / 'config').glob('*.yml')):
         try:
             config = configuration(path.stem, yaml.safe_load(path.read_text()))
-            configs[config['id']] = dict(config, preset=True)
+            configs[config['id']] = dict(config, preset=True, scope='core')
         except (ValueError, TypeError, OSError, yaml.YAMLError) as error:
             issues.append({'source': f'config/{path.name}', 'detail': str(error)})
     try:
@@ -288,7 +333,7 @@ def page(title, body, depth=0):
 <script defer src="{prefix}assets/report.js"></script></head><body>
 <header><a class="brand" href="{prefix}index.html">uquintus <span>build report</span></a>
 <a href="{prefix}data.json">JSON data ↗</a></header><nav>{links}</nav><main><h1>{esc(title)}</h1>
-{body}</main><footer>Generated from flow artifacts · No result means no evidence ·
+{legend()}{body}</main><footer>Generated from flow artifacts · No result means no evidence ·
 Matching recorded inputs does not cover unrecorded testbench or tool changes.</footer></body></html>'''
 
 
@@ -341,6 +386,7 @@ def metric_charts(records):
 
 def render(site, data):
     records = data['records']
+    core_configs = [c for c in data['configurations'] if c['scope'] == 'core']
     latest = [r for r in records if r['latest']]
     counts = Counter(r['status'] for r in latest)
     total = len(latest) or 1
@@ -356,7 +402,7 @@ def render(site, data):
     body = f'''<p class="lead">Configurations, execution results and implementation evidence in one artifact.</p>
 <p>Generated {esc(data['generated_at'])} · Workspace revision <code>{esc(data['workspace_revision'] or 'unknown')}</code></p>
 <div class="stats"><div><b>{len(records)}</b> recorded runs</div><div><b>{len(latest)}</b> latest scenarios</div>
-<div><b>{len(data['configurations'])}</b> configuration snapshots</div><div><b>{len(data['issues'])}</b> collection issues</div></div>
+<div><b>{len(core_configs)}</b> core configurations</div><div><b>{len(data['issues'])}</b> collection issues</div></div>
 <div class="status-bar" aria-label="Latest scenario outcomes">{chart}</div>
 <p>{' · '.join(f'{counts[s]} {s}' for s in STATES if counts[s]) or 'No runs recorded'}</p>
 <div class="cards">{''.join(cards)}</div>
@@ -378,7 +424,7 @@ Run records without revision metadata are not attributed to the current commit. 
         (directory / 'index.html').write_text(page(label, body, 1))
 
     rows = []
-    for config in data['configurations']:
+    for config in core_configs:
         selected = [r for r in latest if r['configuration']['id'] == config['id']]
         cells = []
         for kind in KINDS:
@@ -387,11 +433,13 @@ Run records without revision metadata are not attributed to the current commit. 
             label = ', '.join(f'{v} {k}' for k, v in sorted(counts.items())) or 'not reported'
             cells.append(f'<td><a href="{kind}/index.html?config={config["id"]}">{badge(aggregate(subset), label)}</a></td>')
         rows.append(f'<tr data-search="{esc((config["name"] + " " + config["id"]).lower())}" data-status="{aggregate(selected)}">'
-                    f'<td>{esc(config["name"])}<small>{config["fingerprint"][:8]} · {"current preset" if config["preset"] else "artifact snapshot"}</small></td>{"".join(cells)}</tr>')
-    options = ''.join(f'<option value="{c["id"]}">{esc(c["name"])} · {c["fingerprint"][:8]}</option>' for c in data['configurations'])
+                    f'<td>{esc(config["name"])}<small>{config["fingerprint"][:8]} · {"current preset" if config["preset"] else "core artifact snapshot"}</small></td>{"".join(cells)}</tr>')
+    options = ''.join(f'<option value="{c["id"]}">{esc(c["name"])} · {c["fingerprint"][:8]}</option>' for c in core_configs)
     # Escaping '<' prevents script termination through configuration values.
-    config_json = json.dumps(data['configurations'], allow_nan=False).replace('<', '\\u003c').replace('&', '\\u0026')
-    body = f'''<p>Names are paired with a full parameter fingerprint. Reusing a YAML filename with changed parameters creates a distinct snapshot.</p>
+    config_json = json.dumps(core_configs, allow_nan=False).replace('<', '\\u003c').replace('&', '\\u0026')
+    body = f'''<p>This view covers current core presets and configuration snapshots recorded by core-level flows.
+Component-only experiments remain available on the component regression and run-detail pages.</p>
+<p>Names are paired with a full parameter fingerprint. Reusing a YAML filename with changed parameters creates a distinct snapshot.</p>
 <section><h2>Compare parameters</h2><div class="filters"><label>Configuration A<select id="compare-a">{options}</select></label>
 <label>Configuration B<select id="compare-b">{options}</select></label></div>
 <div id="parameter-comparison" class="table-scroll"></div><script type="application/json" id="configuration-data">{config_json}</script></section>
@@ -487,7 +535,7 @@ def main():
         fcntl.flock(lock, fcntl.LOCK_EX)
         data = generate(args.build, args.output, artifact_limit=args.artifact_limit)
     print(f'Report: {args.output.resolve() / "index.html"}')
-    print(f'{len(data["records"])} runs, {len(data["configurations"])} configuration snapshots, '
+    print(f'{len(data["records"])} runs, {sum(c["scope"] == "core" for c in data["configurations"])} core configurations, '
           f'{len(data["issues"])} collection issues')
 
 

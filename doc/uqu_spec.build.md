@@ -69,6 +69,34 @@ the simulation watchdog; it shall not introduce a processor timeout. The
 the loader/completion contract specified in
 [verification, Section 2.6](uqu_spec.verif.md#26-elf-software-execution).
 
+### 1.2. Pinned instruction suites and external compiler identity
+
+The initial `riscv-tests` adapter shall consume the commit and archive SHA-256
+recorded in `verif/sw/riscv_tests/lock.json`, without adding a Git submodule or
+tracked upstream source tree. `make riscv-tests-fetch` shall explicitly fetch
+and verify the archive, or accept a matching offline archive, into `build/deps/`.
+Build/run targets shall require that cache and shall not fetch implicitly.
+
+`make riscv-tests-build` shall compile the selected applicable tests;
+`make riscv-tests-run` shall execute the last successfully built manifest.
+`make riscv-tests` shall combine those steps. `RISCV_TESTS` shall select all
+applicable tests or comma-separated full upstream names. The
+[adapter guide](../verif/sw/riscv_tests/README.md) defines source integrity,
+selection, output paths and simulator-build reuse.
+
+Both native software and instruction-suite builds shall discover an externally
+supplied compiler through explicit `RISCV_CC`, then the installation root
+`$RISCV/bin`, then `PATH`. Automatic discovery shall support RV32/RV64-prefixed
+bare-metal GCC and Clang with an explicit RISC-V target and external LLD. Derive
+ISA/ABI options from hardware YAML and probe that the compiler actually targets
+RV32. Invalid explicit tools or unsupported targets shall fail clearly.
+
+Report the compiler executable/resolved path, GCC/Clang family, numeric version
+from predefined macros, complete version banner, effective target, ISA/ABI and
+exact command. Build and execution artifacts shall preserve that identity and
+the test-suite revision for the shared report. No compiler installation,
+dependency build or container invocation shall become implicit in Make.
+
 ## 2. Shared core configuration and separate build targets
 
 **Status:** Agreed; YAML selected, schema and target details TBD
@@ -347,6 +375,12 @@ references. The [reporting guide](../scripts/README.md) defines the initial
 record contract and generated layout.
 
 Keep different parameter snapshots under the same configuration name distinct.
+The configurations view and parameter selectors shall include current core
+presets and snapshots from core-level flows. Keep component-only experiments
+accessible in their regression/run pages without adding them to that view.
+Custom producers may declare their configuration scope explicitly. Explain run
+outcomes separately from input-hash evidence in a shared HTML legend and badge
+tooltips; changed inputs shall not be presented as a test failure.
 Retain failures and history; latest-per-scenario aggregation shall not let a
 passing partial suite or different seed hide an independent failure. Distinguish
 not-reported, skipped, running, failed, error and passed outcomes. Collection

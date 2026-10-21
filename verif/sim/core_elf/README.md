@@ -14,8 +14,10 @@ make test COMPONENT=core_elf CONFIG=rv32i \
 ```
 
 `PYTHON=.venv/bin/python` selects an existing verification virtual environment.
-Alternatively use `RISCV_CC=riscv32-unknown-elf-gcc` (the default), or the path to
-a compatible GCC executable. Clang requires an external LLD. Neither Make target
+Alternatively set `RISCV_CC=riscv32-unknown-elf-gcc` or a compiler path; automatic
+discovery searches `$RISCV/bin` and then `PATH` for bare-metal GCC or Clang.
+Compiler family/version and effective target are probed and recorded.
+Clang requires an external LLD. Neither Make target
 installs tools or invokes containers. `SW=smoke` is the default program; build
 inputs live in [`verif/sw/`](../../sw/README.md).
 
@@ -90,4 +92,6 @@ make test COMPONENT=core_elf CONFIG=rv32i MAX_CYCLES=600 \
 The first reports exit code 7; the second expires the execution watchdog.
 Loader/protocol tooling tests also run without a compiler or simulator through
 `make test-runner`. External ISA suites and reference-model adapters can reuse
-the loader and execution environment; `riscv-tests` integration is a follow-up.
+the loader and execution environment; the
+[pinned riscv-tests adapter](../../sw/riscv_tests/README.md) uses this target for
+independent ELF runs with compatible simulator-build reuse.

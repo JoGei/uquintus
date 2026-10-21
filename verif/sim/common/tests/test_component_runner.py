@@ -10,7 +10,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from component_runner import ROOT, bender_include_dirs, check_results, load_component
+from component_runner import ROOT, bender_include_dirs, check_results, load_component, simulator_build_key
 from hw_config import load_configuration, parameters_for_component
 
 
@@ -151,6 +151,26 @@ class ComponentRunnerTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             check_results(path, ["smoke"])
 
+    def test_simulator_reuse_requires_matching_inputs_order_parameters_and_tools(self):
+        a, b = self.directory / 'a.v', self.directory / 'b.v'
+        a.write_text('module a; endmodule')
+        b.write_text('module b; endmodule')
+        first, second = self.directory / 'first', self.directory / 'second'
+        first.mkdir()
+        second.mkdir()
+        for directory in (first, second):
+            (directory / 'config.vh').write_text('`define SETTING 0')
+
+        def key(directory=first, sources=None, parameters=None, simulator='Verilator 5'):
+            return simulator_build_key(sources or [a, b], [directory / 'config.vh'],
+                [directory], parameters or {'ISA_M': 0}, 'top', simulator, 0, directory)
+
+        self.assertEqual(key(), key(second))  # Output directory alone is irrelevant.
+        self.assertNotEqual(key(), key(sources=[b, a]))
+        self.assertNotEqual(key(), key(parameters={'ISA_M': 1}))
+        self.assertNotEqual(key(), key(simulator='Verilator 6'))
+        (second / 'config.vh').write_text('`define SETTING 1')
+        self.assertNotEqual(key(), key(second))
     def test_failed_and_skipped_tests_cannot_pass(self):
         path = self.directory / "results.xml"
         for tag in ("failure", "error", "skipped"):
