@@ -6,16 +6,22 @@ sources:
   - include_dirs:
       - src/uquintus
     files:
+      - target: any(decompressor, decompressor_test, rtl)
+        files:
+          - src/uquintus/uqu_decompressor.v
+      - target: decompressor_test
+        files:
+          - verif/sim/decompressor/uqu_decompressor_tb.v
       - target: any(hazard, de_pipeline_test, rtl)
         files:
           - src/uquintus/uqu_hazard.v
-      - target: any(decode, branch_test, de, de_pipeline_test, rtl)
+      - target: any(decode, branch_test, de, de_pipeline_test, decompressor_test, rtl)
         files:
           - src/uquintus/uqu_decoder.v
-      - target: any(branch, branch_test, de, de_pipeline_test, rtl)
+      - target: any(branch, branch_test, de, de_pipeline_test, decompressor_test, rtl)
         files:
           - src/uquintus/uqu_branch.v
-      - target: any(de, de_pipeline_test, rtl)
+      - target: any(de, de_pipeline_test, decompressor_test, rtl)
         files:
           - src/uquintus/uqu_stage_de.v
       - target: de_pipeline_test

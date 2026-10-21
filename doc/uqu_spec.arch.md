@@ -2526,15 +2526,34 @@ those choices for uquintus.
 
 ### 15.1. Separate compressed-instruction decompressor
 
-**Status:** Separate module agreed; IF selected as the initial placement
+**Status:** Stateless integer RV32C component implemented; IF integration pending
 
 Compressed-instruction expansion shall be implemented as a separate
 Verilog-2005 module, initially placed in IF after instruction selection/assembly
-and before the IF/DE pipeline register. For example, the module may be named
-`uqu_decompressor` in a matching `.v` file under `src/uquintus/`.
+and before the IF/DE pipeline register. The implementation is
+[`uqu_decompressor`](../src/uquintus/uqu_decompressor.v), with its
+[interface and regression guide](../verif/sim/decompressor/README.md).
 Its separation shall allow placement to be revisited after timing evaluation
 without merging its logic into the main decoder. No additional pipeline stage
 or decompression-placement parameter is required by this decision.
+
+As a future timing/area exploration, the same stateless module may instead
+sit immediately after IF/DE and before the native DE decoder. Placing it in
+IF adds expansion to the fetch selection/assembly path; placing it in DE
+adds expansion ahead of decoding, register reads, hazard resolution and branch
+computation. DE placement may also reduce duplicated instruction storage at
+IF/DE by registering only the original selected instruction and metadata,
+then deriving the normalized word combinationally. Actual timing and register
+cost shall determine whether this is worthwhile. Moving the logic across the
+existing boundary need not add a pipeline stage or an instruction cycle.
+
+Such an exploration shall adapt the boundary payload and expansion-fault
+generation together while preserving original PC/bits/length, fetch-fault
+priority and precise exceptions. IF shall still determine two-/four-byte
+length from the original prefix for instruction selection and sequential
+fetching, even if full expansion occurs in DE. IF remains the initial placement;
+this alternative is an optimization target rather than a new configuration
+parameter or an implementation change.
 
 When `ISA_C = 1`, the module shall expand supported 16-bit instructions into
 equivalent 32-bit encodings for the native DE decoder. Native 32-bit instruction
@@ -2554,11 +2573,30 @@ An illegal compressed encoding shall retain its fault indication rather than
 be silently converted into a valid instruction. See the
 [RISC-V compressed instruction specification](https://docs.riscv.org/reference/isa/unpriv/c-st-ext.html).
 
+The combinational interface consumes an assembled `instr_i[31:0]` and exposes
+`instr_o[31:0]`, `original_instr_o[31:0]`, `compressed_o`, `illegal_o` and
+`hint_o`. It owns no clock, reset, handshake, PC or pipeline storage. IF shall
+assemble native words across fetch boundaries before presenting them, qualify
+outputs with its token validity and preserve earlier fetch-fault priority.
+Compressed original bits shall be zero-extended. Unsupported compressed words
+shall produce a zero normalized word and assert `illegal_o`; the parent shall
+retain original bits and form a cause-2 exception token if no earlier fetch
+fault applies. With C disabled, both words pass unchanged and all flags are zero.
+
+The implementation supports integer RV32C and its HINT encodings. HINTs shall
+expand to their corresponding base operations with register fields preserved;
+`hint_o` is advisory and shall not bypass decoder legality. Canonical C.NOP
+shall expand normally without setting the noncanonical HINT annotation.
+RV32E register restrictions remain with the native decoder. RV64-only forms,
+reserved encodings, RV32 custom shifts with shamt[5]=1 and compressed FP
+transfers remain unsupported. Zfinx does not enable compressed FP transfers.
+
 DE shall retain its normal decoder and the parallel native/XIF recognition
 organization in [interfaces, Section 5](uqu_spec.interfaces.md#5-cv-x-if-custom-extension-interface). Support for extension-defined compressed
 encodings and any optional CV-X-IF compressed interface remains part of the
-interface-profile details still to be defined. The decompressor's exact ports,
-internal implementation, and timing constraints remain TBD.
+frontend/interface-profile work still to be implemented. This native expander
+does not implement a coprocessor channel. Timing constraints and final frontend
+integration remain open.
 
 ## 16. Optional instruction-fetch fence
 
@@ -3091,7 +3129,7 @@ later decisions determine the active contract.
 | D-119 | Initially hardwire `mvendorid`, `marchid`, and `mimpid` to zero as standard read-only identification CSRs. | Use permitted initial values while deferring project-specific identifiers. | Agreed |
 | D-139 | Configure instruction-fetch buffer capacity through `MUA_IF_BUFFER_WORDS`, defaulting to two 32-bit word slots while retaining one outstanding fetch request. | Support instruction reuse and assembly with an adjustable buffer size independent of bus concurrency. | Agreed; supported capacities defined by D-217, prefetch policy defined by D-140 |
 | D-140 | Continue filling available instruction-buffer space during downstream stalls, subject to capacity, one outstanding request, and control-flow/synchronization restrictions. | Overlap fetch latency with pipeline stalls while retaining precise fault handling and correct redirect recovery. | Agreed; detailed frontend control implementation TBD |
-| D-141 | Implement compressed-instruction expansion in a separate module, initially in IF before the IF/DE register, retaining original encoding, PC, length, and fault metadata. | Reuse the native DE decoder and keep decompression placement easy to revisit after timing evaluation. | Agreed; exact module interface and implementation TBD |
+| D-141 | Implement compressed-instruction expansion in a separate module, initially in IF before the IF/DE register, retaining original encoding, PC, length, and fault metadata. | Reuse the native DE decoder and keep decompression placement easy to revisit after timing evaluation. | Native component implemented under D-282; full IF integration and timing evaluation pending |
 | D-142 | Keep PMP CSRs and permission checks inside the core before memory requests; expose no privilege/PMP attributes for external enforcement, and consume external bus faults through the normal error responses. | Make protection a core responsibility while keeping the memory interface independent of PMP implementation. | Agreed; enable/default defined by D-143 and fixed capacity by D-251; remaining field details and milestone open |
 | D-143 | Select internal PMP through `ISA_PMP`, defaulting to `0`; omit permission-checking logic and writable PMP-entry storage when disabled. | Keep PMP optional and preserve the default implementation scope. | Agreed; disabled CSR behavior defined by D-144; fixed sixteen-entry enabled capacity by D-251 |
 | D-144 | When `ISA_PMP = 0`, keep standard PMP CSRs accessible in M-mode with reads returning zero and permitted writes ignored; retain normal CSR privilege checks. | Allow software probing without writable PMP-entry storage. | Agreed |
@@ -3190,3 +3228,4 @@ later decisions determine the active contract.
 | D-278 | Use three explicitly named DE/EX source slots with address/value/use information, a DE need-now mask, EX captured-valid bits and per-source resolved values/readiness; invalidate optional DE retention through de_valid_i/de_clear_i with clear priority at the edge and no combinational output suppression. | Keep operand availability separate from stage stall control and instruction lifetime explicit without introducing a second EX operand bank. | Standalone interface implemented under D-279; consumer/lifecycle bindings in Section 4.2.4 |
 | D-279 | Implement the standalone hazard unit with normalized producer inputs, DE/EX source resolution, movement-qualified guarantees and optional DE operand retention; add explicit boolean configuration support and a retained-RV32I preset. | Make the agreed dependency policies executable and testable before assembling DE or the full core. | Implemented; Section 4.2.5 and hazard component guide; forty-profile regression, lint, configuration guards and optimized storage checks; core/stage integration pending |
 | D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented; Section 3.12; component and native parent-fixture regressions, lint and optimized-state/signal-dependency checks; full-core controller/frontend/XIF ID integration pending |
+| D-282 | Implement stateless integer RV32C expansion with explicit original bits, compressed/illegal/HINT flags, C-disabled bypass and unchanged native words; preserve HINT register fields for downstream RV32E checks. | Reuse the decoder and DE, retain precise fault/link identity and eliminate expansion logic when C is disabled. | Implemented; Section 15.1; exhaustive halfword and decoder/DE integration tests; fetch assembly and optional XIF compressed-channel integration pending |

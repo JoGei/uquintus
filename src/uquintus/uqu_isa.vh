@@ -59,6 +59,36 @@
 `define UQU_FUNCT3_CSRRSI  3'b110
 `define UQU_FUNCT3_CSRRCI  3'b111
 
+// RV32C quadrants and major groups. Floating-point/Zc groups are not selected.
+`define UQU_C_Q0 2'b00
+`define UQU_C_Q1 2'b01
+`define UQU_C_Q2 2'b10
+`define UQU_C_Q0_ADDI4SPN 3'b000
+`define UQU_C_Q0_LW       3'b010
+`define UQU_C_Q0_SW       3'b110
+`define UQU_C_Q1_ADDI     3'b000
+`define UQU_C_Q1_JAL      3'b001
+`define UQU_C_Q1_LI       3'b010
+`define UQU_C_Q1_LUI_SP   3'b011
+`define UQU_C_Q1_ALU      3'b100
+`define UQU_C_Q1_J        3'b101
+`define UQU_C_Q1_BEQZ     3'b110
+`define UQU_C_Q1_BNEZ     3'b111
+`define UQU_C_Q2_SLLI     3'b000
+`define UQU_C_Q2_LWSP     3'b010
+`define UQU_C_Q2_CR       3'b100
+`define UQU_C_Q2_SWSP     3'b110
+`define UQU_C_ALU_SRLI 2'b00
+`define UQU_C_ALU_SRAI 2'b01
+`define UQU_C_ALU_ANDI 2'b10
+`define UQU_C_ALU_REG  2'b11
+`define UQU_C_REG_SUB 2'b00
+`define UQU_C_REG_XOR 2'b01
+`define UQU_C_REG_OR  2'b10
+`define UQU_C_REG_AND 2'b11
+
+`define UQU_INSTR_NOP 32'h00000013
+
 // Canonical SYSTEM instructions, including required reserved zero fields.
 `define UQU_INSTR_ECALL  32'h00000073
 `define UQU_INSTR_EBREAK 32'h00100073

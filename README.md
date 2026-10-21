@@ -7,6 +7,7 @@ Implemented standalone components:
 
 | Component | RTL | Verification guide |
 | --- | --- | --- |
+| Compressed-instruction expander | [uqu_decompressor.v](src/uquintus/uqu_decompressor.v) | [Decompressor interface and tests](verif/sim/decompressor/README.md) |
 | Decode stage | [uqu_stage_de.v](src/uquintus/uqu_stage_de.v) | [DE interface and tests](verif/sim/de/README.md) |
 | Core-owned DE/EX hazards and forwarding | [uqu_hazard.v](src/uquintus/uqu_hazard.v) | [Hazard interface and tests](verif/sim/hazard/README.md) |
 | DE branch resolution | [uqu_branch.v](src/uquintus/uqu_branch.v) | [Branch interface and tests](verif/sim/branch/README.md) |
@@ -32,6 +33,8 @@ Provide Bender, Verilator, GNU Make, a C++ compiler, and the Python dependencies
 in `verif/requirements.txt` through your environment. Then run:
 
 ```sh
+make test COMPONENT=decompressor CONFIG=rv32ic
+make lint COMPONENT=decompressor CONFIG=rv32ic
 make test COMPONENT=decode CONFIG=rv32i
 make test COMPONENT=de CONFIG=rv32i
 make test COMPONENT=de_pipeline CONFIG=rv32i
@@ -65,7 +68,7 @@ Run `make clean` to remove the generated `build/` directory.
 Make invokes the shared component-testing helper in
 [verif/sim/common/](verif/sim/common/README.md). Component-specific DUT and test
 settings live in `config/sim/<component>.yml`; examples are
-[de.yml](config/sim/de.yml), [de_pipeline.yml](config/sim/de_pipeline.yml),
+[decompressor.yml](config/sim/decompressor.yml), [de.yml](config/sim/de.yml), [de_pipeline.yml](config/sim/de_pipeline.yml),
 [hazard.yml](config/sim/hazard.yml), [branch.yml](config/sim/branch.yml), [decode.yml](config/sim/decode.yml), [gpregfile.yml](config/sim/gpregfile.yml), [arith.yml](config/sim/arith.yml),
 [alu.yml](config/sim/alu.yml), [muldiv.yml](config/sim/muldiv.yml),
 [exec_arith.yml](config/sim/exec_arith.yml), [ex.yml](config/sim/ex.yml),
