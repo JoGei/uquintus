@@ -67,6 +67,25 @@ def command_output(command):
     return subprocess.check_output(command, cwd=ROOT, text=True).strip()
 
 
+def bender_include_dirs(source_tree, root=ROOT):
+    """Collect selected Bender source-group include paths in declaration order."""
+    directories = []
+
+    def visit(group):
+        for value in group.get("include_dirs", []):
+            directory = (root / value).resolve()
+            if not directory.is_dir():
+                raise ValueError(f"Bender include directory does not exist: {directory}")
+            if directory not in directories:
+                directories.append(directory)
+        for child in group.get("files", []):
+            if isinstance(child, dict):
+                visit(child)
+
+    visit(source_tree)
+    return directories
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--action", choices=("test", "lint"), default="test")
@@ -106,6 +125,10 @@ def main():
                if line.strip() and not line.lstrip().startswith("//")]
     if not sources or any(not path.is_file() for path in sources):
         raise ValueError("Bender did not produce an existing HDL source list")
+    source_tree_text = command_output([args.bender, "sources", "-t", component["bender_target"]])
+    (run_dir / "bender_sources.json").write_text(source_tree_text + "\n")
+    include_dirs = [run_dir / "include", *bender_include_dirs(json.loads(source_tree_text))]
+    headers = sorted({header for directory in include_dirs for header in directory.rglob("*.vh")})
     metadata = {
         "component": args.component, "action": args.action, "test": args.test,
         "seed": args.seed, "configuration": str(config_path), "parameters": parameters,
@@ -114,6 +137,9 @@ def main():
         "bender": command_output([args.bender, "--version"]),
         "source_sha256": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
                           for path in sources},
+        "include_dirs": [str(directory) for directory in include_dirs],
+        "header_sha256": {str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path):
+                          hashlib.sha256(path.read_bytes()).hexdigest() for path in headers},
         "status": "running",
     }
     metadata_path = run_dir / "run.json"
@@ -122,8 +148,8 @@ def main():
     try:
         if args.action == "lint":
             command = [args.sim, "--lint-only", "--language", "1364-2005",
-                       "--top-module", component["top_module"],
-                       f"-I{run_dir / 'include'}"]
+                       "--top-module", component["top_module"]]
+            command += [f"-I{directory}" for directory in include_dirs]
             command += [f"-G{key}={value}" for key, value in parameters.items()]
             command += [str(path) for path in sources]
             result = subprocess.run(command, cwd=run_dir, text=True,
@@ -139,7 +165,7 @@ def main():
                                     for name in ("cocotb", "pyuvm", "PyYAML")}
             runner = get_runner(args.sim)
             runner.build(
-                verilog_sources=sources, includes=[run_dir / "include"],
+                verilog_sources=sources, includes=include_dirs,
                 parameters=parameters, hdl_toplevel=component["top_module"],
                 build_args=["--language", "1364-2005"],
                 build_dir=run_dir / "obj", timescale=("1ns", "1ps"),

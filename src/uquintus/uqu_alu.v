@@ -1,4 +1,5 @@
 `default_nettype none
+`include "uqu_ctrl.vh"
 
 // One-cycle RV32I/E ALU. EX owns the external uqu_arith instance and
 // reserves it for this instruction; arithmetic has no separate handshake.
@@ -26,16 +27,16 @@ module uqu_alu (
     // Low three bits match funct3; bit three distinguishes SUB and SRA.
     // Decode normalizes this modifier; it is not raw instruction bit 30
     // for immediate operations or unrelated funct3 values.
-    localparam [3:0] OP_ADD  = 4'b0000;
-    localparam [3:0] OP_SLL  = 4'b0001;
-    localparam [3:0] OP_SLT  = 4'b0010;
-    localparam [3:0] OP_SLTU = 4'b0011;
-    localparam [3:0] OP_XOR  = 4'b0100;
-    localparam [3:0] OP_SRL  = 4'b0101;
-    localparam [3:0] OP_OR   = 4'b0110;
-    localparam [3:0] OP_AND  = 4'b0111;
-    localparam [3:0] OP_SUB  = 4'b1000;
-    localparam [3:0] OP_SRA  = 4'b1101;
+    localparam [3:0] OP_ADD  = `UQU_ALU_ADD;
+    localparam [3:0] OP_SLL  = `UQU_ALU_SLL;
+    localparam [3:0] OP_SLT  = `UQU_ALU_SLT;
+    localparam [3:0] OP_SLTU = `UQU_ALU_SLTU;
+    localparam [3:0] OP_XOR  = `UQU_ALU_XOR;
+    localparam [3:0] OP_SRL  = `UQU_ALU_SRL;
+    localparam [3:0] OP_OR   = `UQU_ALU_OR;
+    localparam [3:0] OP_AND  = `UQU_ALU_AND;
+    localparam [3:0] OP_SUB  = `UQU_ALU_SUB;
+    localparam [3:0] OP_SRA  = `UQU_ALU_SRA;
 
     reg held_valid_q;
     reg [31:0] held_result_q;

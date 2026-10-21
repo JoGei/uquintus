@@ -1,4 +1,5 @@
 `default_nettype none
+`include "uqu_ctrl.vh"
 `include "uqu_config.vh"
 
 // EX execution/control only. The parent owns DE/EX and EX/MEM registers,
@@ -38,10 +39,10 @@ module uqu_stage_ex #(
     output wire [4:0]  exception_cause_o,
     output wire [31:0] exception_tval_o
 );
-    localparam [1:0] FU_ALU = 2'd0;
-    localparam [1:0] FU_MULDIV = 2'd1;
-    localparam [1:0] FU_FPU = 2'd2;
-    localparam [1:0] FU_PASS = 2'd3;
+    localparam [1:0] FU_ALU = `UQU_FU_ALU;
+    localparam [1:0] FU_MULDIV = `UQU_FU_MULDIV;
+    localparam [1:0] FU_FPU = `UQU_FU_FPU;
+    localparam [1:0] FU_PASS = `UQU_FU_PASS;
     localparam [4:0] CAUSE_ILLEGAL_INSTRUCTION = 5'd2;
 
     // Tracks unit request acceptance or pass-through operand qualification,
@@ -54,10 +55,10 @@ module uqu_stage_ex #(
     wire fpu_selected = (fu_i == FU_FPU);
     wire pass_selected = (fu_i == FU_PASS);
     wire alu_op_valid = !op_i[4] && ((!op_i[3]) ||
-                        (op_i[3:0] == 4'd8) || (op_i[3:0] == 4'd13));
+                        (op_i[3:0] == `UQU_ALU_SUB) || (op_i[3:0] == `UQU_ALU_SRA));
     wire illegal_control = (alu_selected && !alu_op_valid) ||
         (muldiv_selected && ((ISA_M == 0) || (op_i[4:3] != 2'b00))) ||
-        (fpu_selected && ((ISA_ZFINX == 0) || (op_i > 5'd21)));
+        (fpu_selected && ((ISA_ZFINX == 0) || (op_i > `UQU_FPU_FCVT_S_WU)));
     wire fault = exception_valid_i || illegal_control;
     wire request_valid = active && !fault && !issued_q && operands_ready_i;
     wire result_ready = active && !fault && ready_i;

@@ -10,7 +10,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from component_runner import ROOT, check_results, load_component
+from component_runner import ROOT, bender_include_dirs, check_results, load_component
 from hw_config import load_configuration, parameters_for_component
 
 
@@ -46,6 +46,18 @@ class ComponentRunnerTests(unittest.TestCase):
         self.assertIn(f"`define UQU_TEST_SELECTOR {parameters['SELECTOR']}", header)
         with self.assertRaisesRegex(ValueError, "unknown hardware parameters"):
             parameters_for_component({}, ["UNKNOWN"], catalog)
+
+    def test_bender_nested_include_dirs_preserve_order_and_paths(self):
+        first = self.directory / "first headers"
+        second = self.directory / "nested"
+        first.mkdir()
+        second.mkdir()
+        tree = {"include_dirs": [first.name], "files": ["unit.v", {
+            "include_dirs": [str(second), first.name], "files": []}]}
+        self.assertEqual(bender_include_dirs(tree, self.directory), [first, second])
+        self.assertEqual(bender_include_dirs({"files": []}, self.directory), [])
+        with self.assertRaisesRegex(ValueError, "does not exist"):
+            bender_include_dirs({"include_dirs": ["missing"]}, self.directory)
 
     def test_results_require_exact_selected_tests(self):
         path = self.directory / "results.xml"

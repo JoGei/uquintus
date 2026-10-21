@@ -1,4 +1,5 @@
 `default_nettype none
+`include "uqu_ctrl.vh"
 
 // WB commit/control and CSR state. The parent owns MEM/WB, the GPR file,
 // current privilege, serialization, event arbitration, and redirects.
@@ -102,12 +103,12 @@ module uqu_stage_wb #(
     output wire [2:0]   frm_o,
     output wire [4:0]   fflags_o
 );
-    localparam [2:0] KIND_RESULT = 3'd0;
-    localparam [2:0] KIND_CSR = 3'd1;
-    localparam [2:0] KIND_MRET = 3'd2;
-    localparam [2:0] KIND_XIF = 3'd3;
-    localparam [2:0] KIND_DRET = 3'd4;
-    localparam [2:0] KIND_EBREAK = 3'd5;
+    localparam [2:0] KIND_RESULT = `UQU_WB_RESULT;
+    localparam [2:0] KIND_CSR = `UQU_WB_CSR;
+    localparam [2:0] KIND_MRET = `UQU_WB_MRET;
+    localparam [2:0] KIND_XIF = `UQU_WB_XIF;
+    localparam [2:0] KIND_DRET = `UQU_WB_DRET;
+    localparam [2:0] KIND_EBREAK = `UQU_WB_EBREAK;
     localparam [4:0] CAUSE_ILLEGAL_INSTRUCTION = 5'd2;
 
     wire debug_mode = (DEBUG == 1) && debug_mode_i;

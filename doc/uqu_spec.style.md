@@ -62,6 +62,16 @@ shall be valid in synthesizable RTL. See the
 The [shared-configuration specification](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets)
 defines the canonical selector definition and mapping requirements.
 
+**Architectural and execution constants:** Use the guarded Verilog-2005
+headers `src/uquintus/uqu_isa.vh` and `src/uquintus/uqu_ctrl.vh` as the canonical
+architectural encodings and shared internal control codes, respectively.
+Use their width-qualified UQU_ macros in instruction recognition and execution
+consumers instead of duplicating numeric opcodes/operation selectors. These
+static RTL constants are separate from generated configuration selectors.
+Bit positions, padding, booleans and inactive payload zeros may remain literals.
+Declare include paths in Bender; do not compile headers as standalone sources.
+Verification reference models retain independent expected ISA values.
+
 **Parameter casing:** Agreed. All `parameter` and `localparam` names shall use
 `UPPER_SNAKE_CASE`. The ISA configuration parameters include `ISA_E`, `ISA_M`, `ISA_C`, `ISA_ZFINX`, `ISA_F`,
 `ISA_UMODE`, `ISA_ZIFENCEI`, and `ISA_PMP`.
@@ -105,8 +115,8 @@ named module connections above.
 
 **Module and file naming:** Agreed. Prefix project RTL module names with
 `uqu_`. Each synthesizable module shall reside in its own `.v` file whose
-base name matches the module name, such as `uqu_decode` in
-`uqu_decode.v`. Other conventions in the table remain proposed unless
+base name matches the module name, such as `uqu_decoder` in
+`uqu_decoder.v`. Other conventions in the table remain proposed unless
 explicitly agreed above or elsewhere in this guide or the processor specification.
 
 | Category | Convention | Examples |
