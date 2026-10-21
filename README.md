@@ -62,8 +62,10 @@ settings live in `config/sim/<component>.yml`; examples are
 [pmp.yml](config/sim/pmp.yml), [csregfile.yml](config/sim/csregfile.yml),
 [mem.yml](config/sim/mem.yml), [mem_pipeline.yml](config/sim/mem_pipeline.yml),
 [wb.yml](config/sim/wb.yml), and [wb_pipeline.yml](config/sim/wb_pipeline.yml).
-The CSR component supports optional U/C/PMP/Zfinx CSR state; debug CSR support
-remains deferred and `DEBUG=1` fails elaboration. To test enabled PMP matching, use a complete
+The CSR component supports optional U/C/PMP/Zfinx/debug state. WB supports
+standard CV-X-IF commit/results, paired writes and debug execution endpoints.
+Use [rv32i_xif_debug.yml](config/rv32i_xif_debug.yml) to exercise both optional WB
+features (`make test COMPONENT=wb CONFIG=rv32i_xif_debug`). To test enabled PMP matching, use a complete
 hardware configuration with `ISA_PMP: 1`; `rv32i` tests its disabled bypass.
 Use `make test-runner` to
 check the shared tooling without running an HDL simulator.

@@ -22,7 +22,7 @@ class WBTest(uvm_test):
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
         self.cycles = self.retired = self.faulted = 0
 
-    async def cycle(self, item=None, **controls):
+    async def cycle(self, item=None, comb_result=False, **controls):
         item = item or token()
         g = dict(GLOBALS, **controls)
         for field in FIELDS:
@@ -30,6 +30,15 @@ class WBTest(uvm_test):
         for field, value in g.items():
             getattr(self.dut, 'rst_ni' if field == 'rst_n' else field + '_i').value = value
         await Timer(1, units='ns')
+        if comb_result:
+            # A completed coprocessor may expose its result combinationally
+            # upon seeing permission, without waiting for a clock edge.
+            assert not g['xif_result_valid']
+            assert int(self.dut.xif_result_ready_o.value) == 1
+            assert not int(self.dut.we0_o.value)
+            g['xif_result_valid'] = int(self.dut.xif_commit_valid_o.value) and not int(self.dut.xif_commit_kill_o.value)
+            self.dut.xif_result_valid_i.value = g['xif_result_valid']
+            await Timer(1, units='ns')
         result, _ = self.model.evaluate(item, g)
         for name, value in result.items():
             if value is not None:
@@ -51,6 +60,7 @@ class WBTest(uvm_test):
         expected = dict(mstatus=c.words[0x300], mie=c.words[0x304], mtvec=c.words[0x305],
                         mepc=c.words[0x341], frm=c.words[2], fflags=c.words[1],
                         mip=(g['irq_software'] << 3) | (g['irq_timer'] << 7) | (g['irq_external'] << 11),
+                        dcsr=c.words[0x7B0], dpc=c.words[0x7B1],
                         pmpcfg=sum(cfg << (8*i) for i, cfg in enumerate(c.configs)))
         for field, value in expected.items():
             actual = int(getattr(self.dut, field + '_o').value)
@@ -86,7 +96,7 @@ class DirectedTest(WBTest):
             for enabled in (0, 1):
                 r = await self.cycle(token(rd=rd, rd_we=enabled, result=0x12340000+rd))
                 assert r['we0'] == bool(enabled and rd and (not self.params['ISA_E'] or rd < 16))
-        for kind in range(4):
+        for kind in (0, 1, 2, 6 if self.params["XIF"] else 3):
             for rd in (0, 1, 15, 16, 31):
                 for privileged in (0, 1):
                     await self.cycle(token(kind=kind, rd=rd, rd_we=0), priv_m=privileged)
@@ -99,7 +109,7 @@ class DirectedTest(WBTest):
                         await self.csr(addr, source, op=op, zero=zero, rd=rd)
         # Existing exception must win over CSR/control checks and never update
         # ordinary destinations, even if all would otherwise be malformed.
-        for kind in range(4):
+        for kind in (0, 1, 2, 6 if self.params["XIF"] else 3):
             r = await self.cycle(token(kind=kind, rd=31, fflags_valid=1,
                                       exception_valid=1, exception_cause=7, exception_tval=0xBAD,
                                       pc=0x8002, csr_addr=0xFFF, csr_op=0))
@@ -198,7 +208,7 @@ class RandomizedTest(WBTest):
                      0x342, 0x343, 0x344, 0xB00, 0xB80, 0xB02, 0xB82,
                      0xC00, 0xC02, 0xF14, 0xC01, 1, 2, 3, 0x3A0, 0x3B0)
         for _ in range(2048):
-            item = token(kind=self.rng.randrange(4), result=self.rng.getrandbits(32),
+            item = token(kind=self.rng.choice((0, 1, 2, 6 if self.params["XIF"] else 3)), result=self.rng.getrandbits(32),
                          rd_we=self.rng.randrange(2), rd=self.rng.randrange(32),
                          pc=self.rng.getrandbits(32), instr=self.rng.getrandbits(32),
                          csr_addr=self.rng.choice(addresses), csr_op=self.rng.randrange(8),
@@ -236,3 +246,165 @@ async def control(_dut):
 @cocotb.test(timeout_time=1000, timeout_unit='us')
 async def randomized(_dut):
     await uvm_root().run_test(RandomizedTest)
+
+
+class XIFTest(WBTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.initialize()
+        if not self.params['XIF']:
+            r = await self.cycle(token(kind=3), xif_result_valid=1, xif_result_we=1,
+                                 xif_result_data=0xBAD, xif_kill_valid=1)
+            assert r['exception_fire'] and not r['xif_commit_valid'] and not r['xif_result_ready']
+        else:
+            for n in range(96):
+                rd = self.rng.randrange(16 if self.params['ISA_E'] else 32)
+                pair = bool(self.params['XIF_DUALWRITE'] and n % 3 == 0)
+                if pair:
+                    rd &= ~1
+                item = token(kind=3, xif_id=n % 8, rd=rd, rd_we=0)
+                # Permission does not depend on controller/result readiness.
+                r = await self.cycle(item, ready=0, xif_kill_valid=1, xif_kill_id=(n+1) % 8)
+                assert r['xif_commit_valid'] and not r['xif_commit_kill'] and not r['valid']
+                assert not r['xif_kill_ready']
+                # One pending younger kill can pass while this WB waits.
+                r = await self.cycle(item, ready=0, xif_kill_valid=1, xif_kill_id=(n+1) % 8)
+                assert r['xif_kill_ready'] and r['xif_commit_kill']
+                packet = dict(xif_result_valid=1, xif_result_id=n % 8,
+                              xif_result_hartid=GLOBALS['hart_id'], xif_result_rd=rd,
+                              xif_result_we=3 if pair else n % 2,
+                              xif_result_data=self.rng.getrandbits(64 if self.params['XIF_DUALWRITE'] else 32))
+                for _ in range(self.rng.randrange(1, 6)):
+                    assert not (await self.cycle(item))['xif_commit_valid']
+                # Neither a foreign hart nor a younger ID can complete WB.
+                for bad in (dict(xif_result_id=(n+1) % 8), dict(xif_result_hartid=0)):
+                    r = await self.cycle(item, **dict(packet, **bad))
+                    assert not r['valid'] and r['xif_result_ready'] and not r['we0']
+                for _ in range(self.rng.randrange(1, 5)):
+                    r = await self.cycle(item, ready=0, **packet)
+                    assert r['valid'] and not r['retire'] and not r['we0'] and not r['we1']
+                before = self.model.csr.instret
+                r = await self.cycle(item, **packet)
+                assert r['retire'] and r['xif_result_ready'] and not r['xif_commit_valid']
+                assert self.model.csr.instret == before + 1
+                assert bool(r['we1']) == bool(pair and rd)
+                assert r['result_valid'] == bool(packet['xif_result_we'] & 1 and rd)
+            # First-cycle completion is legal with simultaneous permission.
+            r = await self.cycle(token(kind=3, rd=2, xif_id=7), comb_result=True,
+                                 xif_result_id=7, xif_result_rd=2, xif_result_we=1,
+                                 xif_result_data=0xDEADBEEF)
+            assert r['retire'] and r['xif_commit_valid'] and r['we0']
+            # A pre-permission owning flush kills without waiting for a result.
+            r = await self.cycle(token(kind=3, xif_id=1), flush=1)
+            assert r['xif_commit_valid'] and r['xif_commit_kill'] and not r['retire']
+            # Existing core exception sends kill instead of commit permission.
+            r = await self.cycle(token(kind=3, xif_id=2, exception_valid=1, exception_cause=2))
+            assert r['exception_fire'] and r['xif_commit_kill'] and not r['xif_result_ready']
+            # Malformed destinations must never silently modify core state.
+            malformed = [dict(rd=2, xif_result_rd=3, xif_result_we=1)]
+            if self.params['ISA_E']:
+                malformed.append(dict(rd=16, xif_result_rd=16, xif_result_we=1))
+            if self.params['XIF_DUALWRITE']:
+                malformed.extend((dict(rd=3, xif_result_rd=3, xif_result_we=3),
+                                  dict(rd=2, xif_result_rd=2, xif_result_we=2)))
+            for packet in malformed:
+                rd = packet.pop('rd')
+                r = await self.cycle(token(kind=3, rd=rd), xif_result_valid=1, **packet)
+                assert r['xif_commit_valid'] and not r['valid'] and not r['exception_valid']
+                assert r['xif_result_ready'] and not r['we0'] and not r['we1']
+                # A violated external protocol is recovered by coordinated reset,
+                # not by turning the packet into a coprocessor execution trap.
+                await self.cycle(rst_n=0, valid=0)
+            # Reset wins over all standard-channel activity.
+            r = await self.cycle(token(kind=3), rst_n=0, xif_result_valid=1, xif_kill_valid=1)
+            assert not r['xif_commit_valid'] and not r['xif_result_ready']
+        self.report('XIF')
+        self.drop_objection()
+
+
+class DebugTest(WBTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.initialize()
+        # Debug CSRs are inaccessible outside Debug Mode, even in M.
+        for a in range(0x7B0, 0x7B4):
+            assert (await self.csr(a, op=2, zero=1))['exception_fire']
+        if not self.params['DEBUG']:
+            assert not (await self.cycle(valid=0, debug_enter=1, debug_pc=0x1000))['debug_enter']
+            assert (await self.cycle(token(kind=4), debug_mode=1))['exception_fire']
+        else:
+            await self.csr(0x340, 0x12345678, rd=0)
+            saved = {a: self.model.csr.words[a] for a in (0x300, 0x341, 0x342, 0x343)}
+            # Already-arbitrated external entry wins over a defensive IRQ collision.
+            r = await self.cycle(valid=0, flush=1, debug_enter=1, debug_pc=0x12346,
+                                 debug_cause=3, trap=1, trap_pc=0xBAD, priv_m=0 if self.params['ISA_UMODE'] else 1)
+            assert r['debug_enter'] and not r['retire']
+            assert saved == {a: self.model.csr.words[a] for a in saved}
+            assert self.model.csr.words[0x7B0] >> 6 & 7 == 3
+            debug = dict(debug_mode=1)
+            before = self.model.csr.cycle, self.model.csr.instret
+            for _ in range(8):
+                await self.cycle(**debug)
+            assert before == (self.model.csr.cycle, self.model.csr.instret)
+            # WARL constants/cause survive all-ones writes, then restore controls.
+            await self.csr(0x7B0, 0xFFFFFFFF, **debug)
+            value = self.model.csr.words[0x7B0]
+            assert value & 0x40000410 == 0x40000410 and not value & (1 << 11)
+            assert value >> 6 & 7 == 3 and not value & (1 << 9)
+            await self.csr(0x7B1, 0xABCDEF03, **debug)
+            assert self.model.csr.words[0x7B1] == (0xABCDEF02 if self.params['ISA_C'] else 0xABCDEF00)
+            await self.csr(0x7B2, 0xDEADBEEF, **debug)
+            assert (await self.csr(0x7B2, op=2, zero=1, **debug))['wdata0'] == 0xDEADBEEF
+            assert (await self.csr(0x7B3, **debug))['debug_exception']
+            # Explicit counter writes remain usable while implicit counts stop.
+            await self.csr(0xB00, 100, **debug)
+            await self.csr(0xB02, 200, **debug)
+            assert (await self.csr(0xB00, op=2, zero=1, **debug))['wdata0'] == 100
+            assert self.model.csr.instret == 200
+            # Debug exceptions and EBREAK terminate debug code without trap CSR writes.
+            saved = {a: self.model.csr.words[a] for a in (0x300, 0x341, 0x342, 0x343, 0x7B0, 0x7B1)}
+            r = await self.cycle(token(exception_valid=1, exception_cause=5, exception_tval=0xBAD), **debug)
+            assert r['debug_exception'] and not r['exception_fire'] and not r['retire']
+            r = await self.cycle(token(kind=5), **debug)
+            assert r['debug_ebreak'] and not r['debug_enter'] and not r['retire']
+            assert saved == {a: self.model.csr.words[a] for a in saved}
+            # Resume with step set, returning to U when implemented. DRET clears MPRV.
+            await self.csr(0x300, 1 << 17, **debug)
+            await self.csr(0x7B0, 0x9004 if self.params['ISA_UMODE'] else 0x8007, **debug)
+            r = await self.cycle(token(kind=4), **debug)
+            assert r['dret'] and not r['mret'] and not r['we0']
+            assert not self.model.csr.words[0x300] & (1 << 17)
+            before = self.model.csr.instret
+            await self.cycle(token(result=42, rd=3))
+            assert self.model.csr.instret == before + 1
+            # Parent supplies actual next PC, including branch/trap targets, on step reentry.
+            await self.cycle(valid=0, debug_enter=1, debug_pc=0x9000, debug_cause=4)
+            assert self.model.csr.words[0x7B1] == 0x9000
+            # Enable ebreak M/U and return. Accepted breakpoint entry itself freezes counters.
+            await self.csr(0x7B0, 0x9003, **debug)
+            await self.cycle(token(kind=4), **debug)
+            for priv in ((1, 0) if self.params['ISA_UMODE'] else (1,)):
+                before = self.model.csr.cycle, self.model.csr.instret
+                r = await self.cycle(token(kind=5, pc=0x8002), priv_m=priv)
+                assert r['debug_enter'] and not r['exception_fire'] and not r['retire']
+                assert before == (self.model.csr.cycle, self.model.csr.instret)
+                assert self.model.csr.words[0x7B0] >> 6 & 7 == 1
+                await self.cycle(token(kind=4), **debug)
+            # With ebreak controls clear, the same instruction is a normal breakpoint trap.
+            await self.cycle(valid=0, debug_enter=1, debug_pc=0xA000)
+            await self.csr(0x7B0, 3, **debug)
+            await self.cycle(token(kind=4), **debug)
+            r = await self.cycle(token(kind=5, pc=0x5000))
+            assert r['exception_fire'] and r['exception_cause'] == 3 and not r['debug_enter']
+        self.report('Debug')
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=1000, timeout_unit='us')
+async def xif(_dut):
+    await uvm_root().run_test(XIFTest)
+
+
+@cocotb.test(timeout_time=1000, timeout_unit='us')
+async def debug(_dut):
+    await uvm_root().run_test(DebugTest)

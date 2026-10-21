@@ -769,6 +769,11 @@ Future shared-memory or execution-trap support shall require an explicit
 compatible interface/profile decision under the pinned-specification policy.
 The current standard-only constraint shall remain in force.
 
+The implemented WB endpoint and core-internal kill arbitration are documented
+in the [WB guide](../verif/sim/wb/README.md). They use only standard flattened
+commit/result fields at the coprocessor boundary; DE issue/identifier tracking
+remains core-parent integration work.
+
 ### 5.2. RTL and interrupt-completion contracts
 
 The synthesizable interface shall follow the
@@ -971,10 +976,17 @@ When `DEBUG = 1`, hart debug behavior and the external-DM integration contract
 shall conform to the applicable requirements of the ratified
 [RISC-V Debug Specification 1.0](https://docs.riscv.org/reference/debug/v1.0/).
 External-halt draining shall follow the policy above. Remaining debug-event
-arbitration, required debug CSR behavior, disabled-port behavior, and
+arbitration, full-core debug CSR integration, disabled core-port behavior, and
 verification coverage remain TBD. Optional enhancements beyond the minimal
 profile are deferred. Project-owned synthesizable debug RTL shall remain plain
 Verilog under the language rules in the style guide.
+
+The implemented WB/CSR debug endpoint uses DCSR/DPC plus one dscratch0, with
+stepie=0, stopcount=1, stoptime=0 and mprven=1. See the
+[WB guide](../verif/sim/wb/README.md) for accepted entry/DRET/EBREAK bindings.
+The future core controller still owns drain/step sequencing, Debug Mode and
+external-DM address routing; this component support is not complete hart/DM
+integration.
 
 ## 7. Native OBI core and protocol variants
 

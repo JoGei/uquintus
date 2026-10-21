@@ -2,123 +2,225 @@
 
 [uqu_stage_wb.v](../../../src/uquintus/uqu_stage_wb.v) owns one
 [uqu_csregfile](../csregfile/README.md), result selection and commitment logic.
-It adds no local state or pipeline payload registers. Its core parent owns
-MEM/WB, the GPR file, current privilege, serialization, trap/interrupt/debug
-arbitration, redirects, and the core-wide PMP block. Tracing/RVFI remain
-verification-side observers.
+The core parent owns MEM/WB, the GPR file, current privilege and Debug Mode,
+serialization, global event arbitration, redirects and core-wide PMP. WB owns
+no pipeline payload/valid registers. With XIF enabled it retains one bit to
+remember commit permission for the current parent-held token.
 
 ## Input slot and commitment
 
 | Ports | Meaning |
 | --- | --- |
-| `clk_i`, `rst_ni`, `flush_i` | Single clock, active-low synchronous reset, and cancellation of the owning WB instruction. |
-| `valid_i`, `ready_o` | Parent-held MEM/WB token and permission to fill/replace the slot. Empty slots may fill while commitment is blocked. |
-| `valid_o`, `ready_i` | Live WB candidate and controller authorization to finalize it. Acceptance is `valid_o && ready_i` at the active edge. |
-| `kind_i[1:0]` | 0=ordinary MEM result/token, 1=CSR, 2=MRET, 3=unsupported XIF control (illegal instruction). |
-| `result_i[31:0]`, `rd_we_i`, `rd_i[4:0]` | Ordinary result and decoded GPR destination intent. CSR destination intent is implicit in its instruction class; MRET has none. x0 never writes. |
-| `pc_i[31:0]`, `instr_i[31:0]` | Original instruction identity for precise fault capture and illegal-instruction trap value. |
-| `csr_addr_i[11:0]`, `csr_op_i[2:0]`, `csr_src_i[31:0]`, `csr_src_zero_i` | Decoded CSR address/funct3, resolved register/immediate operand, and register-source-is-x0 encoding. Immediate operands use bits 4:0. Destination-is-x0 is derived from `rd_i`. |
-| `fflags_valid_i`, `fflags_i[4:0]` | Per-instruction FP status from a normal Zfinx result. |
-| `exception_valid_i`, `exception_cause_i[4:0]`, `exception_tval_i[31:0]` | Existing synchronous exception, with priority over local checks and no CSR query. |
-| `priv_m_i` | Current core execution privilege, valid even when MEM/WB is empty. The parent owns mode transitions; this is not an uninitialized payload bit. |
-| `hart_id_i[31:0]`, `irq_software_i`, `irq_timer_i`, `irq_external_i` | Existing integration identity and synchronous interrupt levels, passed to CSR state. |
+| `clk_i`, `rst_ni`, `flush_i` | Single clock, active-low synchronous reset, cancellation of the owning uncommitted token. |
+| `valid_i`, `ready_o` | Parent-held MEM/WB token and permission to fill/replace it. An empty slot may fill while retirement is blocked. |
+| `valid_o`, `ready_i` | Completed WB candidate and controller authorization to finalize it. Acceptance is `valid_o && ready_i`. |
+| `kind_i[2:0]` | 0=ordinary result/nonwriter, 1=CSR, 2=MRET, 3=XIF, 4=DRET, 5=EBREAK; 6/7 illegal. Decode validates encodings and serializes control instructions. |
+| `result_i[31:0]`, `rd_we_i`, `rd_i[4:0]` | Ordinary result/destination intent; CSR destination intent is implicit. For XIF, rd identifies the issue instruction's destination; standard result.we supplies write intent. |
+| `pc_i[31:0]`, `instr_i[31:0]` | Original instruction identity for precise faults and EBREAK entry. |
+| `csr_addr_i[11:0]`, `csr_op_i[2:0]`, `csr_src_i[31:0]`, `csr_src_zero_i` | Decoded CSR address/funct3, resolved operand, and register-source-is-x0 encoding. Immediate operands use bits 4:0. |
+| `fflags_valid_i`, `fflags_i[4:0]` | Per-instruction FP status for normal Zfinx results. |
+| `exception_valid_i`, `exception_cause_i[4:0]`, `exception_tval_i[31:0]` | Existing synchronous exception, with priority over local legality checks. |
+| `priv_m_i` | Parent-owned current privilege, valid even with no WB token. Debug entry saves this privilege; debug execution uses machine CSR permissions. |
+| `hart_id_i[31:0]`, `irq_software_i`, `irq_timer_i`, `irq_external_i` | Integration identity and synchronous interrupt levels. |
 
-The parent retains the input token until acceptance or owning cancellation and
-must consume it on each acceptance. No stage-issued bit is needed: there is no
-early native-unit issue, and all token side effects occur together on acceptance.
-Holding `ready_i=0` suppresses ordinary CSR/GPR/flag updates and retirement,
-while mcycle follows its usual inhibit rules. Once accepted, an identical next
-instruction may commit on the next cycle. One ordinary token per cycle is supported.
+Retain the token until acceptance or permitted cancellation and consume it once
+on acceptance. Normal results may retire on consecutive cycles. A held native
+instruction does not repeat CSR/GPR/FP effects. CSR queries have no side effects
+until commit. Fence/serialization readiness comes from the controller. All
+ordinary destination writes, CSR updates and committed flags belong to the same
+retirement edge. x0 never writes; actual E destinations x16..x31 fault without
+aliasing; unused rd fields do not fault.
 
-`ready_i` must authorize normal retirement or synchronous fault entry according
-to the reported exception. It also incorporates external requirements for
-fences and serialized operations; WB does not decode instructions or implement
-fence request/acknowledgement sequencing. Decode still validates instruction
-encodings, register sources, WFI permissions, and operation classification.
-
-## Architectural outputs and faults
+## Results and exceptions
 
 | Ports | Meaning |
 | --- | --- |
-| `retire_o` | Accepted, nonfaulting instruction. Feeds the owned CSR counter input once, including CSR instructions and legal MRET. |
-| `exception_valid_o`, `exception_cause_o[4:0]`, `exception_tval_o[31:0]`, `exception_pc_o[31:0]` | Live synchronous fault report, independent of readiness and accepted external trap input. Zero metadata without a report. |
-| `exception_fire_o` | Controller accepted this WB fault. Captures synchronous trap state in CSR once; no normal retirement/GPR/FP update. |
-| `mret_o` | Accepted legal MRET; CSR state restoration and normal retirement occur at this edge. Parent restores mode and redirects using pre-edge MPP/mepc. |
-| `we0_o`, `waddr0_o[4:0]`, `wdata0_o[31:0]` | Primary GPR write pulse and data, qualified by successful retirement and nonzero implemented destination. Address/data zero when not writing. |
-| `we1_o`, `waddr1_o[4:0]`, `wdata1_o[31:0]` | Constant zero until the deferred XIF paired-write implementation. |
-| `result_valid_o`, `result_o[31:0]` | Available primary destination value for parent forwarding logic. Ordinary results may be available while held; CSR results only on successful retirement. No value for x0, stores/nonwriters, MRET, or faults. |
+| `retire_o` | Successful accepted instruction; feeds minstret once, subject to inhibit/debug counter rules. EBREAK entry/end and faults do not retire. |
+| `exception_valid_o`, `exception_cause_o[4:0]`, `exception_tval_o[31:0]`, `exception_pc_o[31:0]` | Live synchronous fault report, independent of readiness and accepted external events. |
+| `exception_fire_o` | Accepted normal-mode fault; captures machine trap CSRs, without ordinary writes/retirement. |
+| `mret_o` | Accepted legal MRET; parent samples pre-edge MPP/mepc to restore privilege/PC. |
+| `we0_o`, `waddr0_o[4:0]`, `wdata0_o[31:0]` | Retirement-qualified primary GPR write. |
+| `we1_o`, `waddr1_o[4:0]`, `wdata1_o[31:0]` | Simultaneous secondary paired-XIF write; otherwise zero. |
+| `result_valid_o`, `result_o[31:0]` | Primary destination available for parent forwarding. Ordinary/matching XIF data may be advertised while held; CSR data only on successful retirement. |
 
-An enabled E configuration rejects actual GPR destinations x16..x31; unused
-rd fields do not fault. Unsupported XIF class, illegal user MRET, and invalid
-FP-status/class/configuration combinations report illegal instruction with
-original bits as tval. CSR failures use the CSR module's report. Existing
-exceptions take priority over all of these checks.
+Address/data outputs are zero when their write enable is zero. CSR results are
+architectural pre-update read values. Held counter queries may change, so CSR
+results are not forwardable before commitment. Existing exceptions win over
+malformed controls and CSR checks. Disabled XIF, DRET outside Debug Mode,
+U-mode MRET, reserved classes, invalid FP-status controls and E destination
+violations report illegal instruction with original instruction bits. MRET in
+Debug Mode also uses this exception path (its architectural behavior is
+unspecified). EBREAK with debug entry disabled is a breakpoint exception with
+its PC in tval. Decode emits the EBREAK class without a preexisting exception
+when applying the debug-break controls.
 
-CSR reads observe the pre-update state at their actual commitment edge. A held
-counter query can change as mcycle advances, so it is not advertised as a
-forwardable value until commitment. All normal GPR writes, CSR writes, committed
-FP flags, and retirement are qualified by the same acceptance. The separate
-hazard/forwarding block must still apply destination matching, youngest-writer
-selection and configured-path policy. CSR serialization prevents younger
-consumers from proceeding before the CSR instruction completes.
+The parent forwarding/hazard block still performs matching and youngest-writer
+selection and applies configured bypass paths. It must retain secondary paired
+destination hazards until register-file visibility; no secondary forwarding
+output is provided.
 
-## Accepted traps and parent responsibilities
+## CV-X-IF commit and results
+
+`XIF=1` implements the WB endpoint of the
+[CV-X-IF v1.0.0 profile](../../../doc/uqu_spec.interfaces.md#5-cv-x-if-custom-extension-interface).
+Only standard commit/result signals and packet fields reach the coprocessor.
+The timing rules are defined in the standard's
+[commit interface](https://docs.openhwgroup.org/projects/openhw-group-core-v-xif/en/v1.0.0/x_ext.html#commit-interface)
+and [signal dependencies](https://docs.openhwgroup.org/projects/openhw-group-core-v-xif/en/v1.0.0/x_ext.html#signal-dependencies):
+
+| Ports | Standard mapping |
+| --- | --- |
+| `xif_commit_valid_o` | commit_valid (implicit always ready). |
+| `xif_commit_hartid_o[31:0]`, `xif_commit_id_o[2:0]`, `xif_commit_kill_o` | commit.hartid/id/commit_kill. |
+| `xif_result_valid_i`, `xif_result_ready_o` | result_valid/result_ready. |
+| `xif_result_hartid_i[31:0]`, `xif_result_id_i[2:0]` | result.hartid/id. |
+| `xif_result_data_i[32*(1+XIF_DUALWRITE)-1:0]`, `xif_result_rd_i[4:0]`, `xif_result_we_i[XIF_DUALWRITE:0]` | result.data/rd/we. |
+
+The core-side `xif_id_i[2:0]` travels in the parent MEM/WB token. Issue/operand
+channels, up to four live pipeline offloads, ID allocation/reuse and dependency
+tracking remain in the core parent/DE integration; WB adds no issue/result queue.
+The hart-ID field is 32 bits, consistently using hart_id_i.
+
+For a surviving XIF token WB sends exactly one commit notification with kill=0,
+independently of result validity or ready_i. This avoids deadlock with a
+coprocessor that waits for permission before returning a result. WB then holds
+its parent slot until the matching hart/ID packet is available and ready_i
+permits retirement. Permission and result acceptance may share an edge. The
+coprocessor may compute before permission and expose its prepared result
+combinationally from commit_valid/commit_kill. GPR writes still occur on the
+active clock edge; combinational completion adds no mandatory clock cycle. Result
+acceptance, GPR writes and retirement always share an edge; no early result
+acceptance/buffer is needed. Result data remains in the coprocessor under
+backpressure. result_ready is generated from WB capacity/authorization and
+commit permission, independently of result_valid and all result packet fields,
+following CV-X-IF's signal-dependency rule. The parent must also supply ready_i
+independently of incoming XIF result signals. Zero-write results still complete
+and retire once. The coprocessor
+must present surviving results in accepted issue order and keep a stalled
+packet stable.
+
+With XIF_DUALWRITE=1, we=3 writes the lower/upper 32-bit words to even rd and
+rd+1 simultaneously. we=1 writes a single register (including odd rd); we=0
+writes none. A pair at rd=0 is ignored in its entirety. Only primary data is
+forwarded. Mismatched hart/ID, mismatched writing rd, E-register violations,
+odd paired rd, and we=2 do not retire or write GPRs. Since result_ready cannot
+depend on packet fields, an invalid packet may handshake and be discarded while
+WB continues waiting. These are integration/protocol violations requiring
+integration-level diagnosis/recovery, not coprocessor-generated CPU exceptions; no execution trap sideband
+is introduced. Issue must validate register legality and record write hazards
+before permission. As permitted by CV-X-IF, WB does not recheck issue-response
+writeback flags against result.we.
+
+Core-internal `xif_kill_valid_i`, `xif_kill_id_i[2:0]`,
+`xif_kill_ready_o` arbitrate younger speculative kills onto the same standard
+commit output. Hold the internal kill request until ready; a WB notification
+has priority. This is a parent-to-WB connection, **not** a coprocessor sideband.
+An owning flush of an unpermitted WB XIF token sends its kill on that edge;
+the parent then clears the slot. An acknowledged existing core fault likewise
+sends kill instead of permission. Once allowed to commit, an XIF token must
+finish: the parent must neither flush/replace it nor assert interrupt/debug
+entry before its result completes. Younger DE kills remain independently
+serviceable while WB waits. Standard commit permission also covers older IDs;
+a standard kill covers the named ID and all newer offloads of that hart. The
+parent must discard all affected pipeline/tracking entries, avoid killing an
+already-permitted WB instruction, and block new surviving issue on the kill
+edge (its issue transaction may start no earlier than the following cycle).
+Rejected issue transactions also require a standard final commit/kill notice,
+supplied through parent tracking rather than a WB result token. Reset requires
+coordinated coprocessor reset.
+
+With XIF=0 all core-driven XIF outputs are zero and result/kill inputs are
+ignored. An XIF-class token faults. Disabled paired-write logic has no storage
+or active secondary write path.
+
+## Minimal debug endpoint
+
+`DEBUG=1` enables WB/CSR support for
+[Debug 1.0 Sdext](https://docs.riscv.org/reference/debug/v1.0/Sdext.html).
+The core controller owns Debug Mode, external-halt/reset-halt/step arbitration,
+DE blocking and pipeline/bus/XIF draining. WB does not accept a raw halt request.
+
+| Ports | Meaning |
+| --- | --- |
+| `debug_mode_i` | Current parent-owned Debug Mode. |
+| `debug_enter_i`, `debug_pc_i[31:0]`, `debug_cause_i[2:0]` | Previously arbitrated entry pulse and precise resume PC/cause (halt=3, step=4, reset-halt=5). Entry saves DPC, DCSR.prv/cause and suppresses WB acceptance. |
+| `debug_enter_o` | Accepted external entry or accepted EBREAK entering debug. Parent enters Debug Mode/M privilege and redirects to debug_entry_addr_i. |
+| `dret_o` | Accepted serialized DRET; parent exits Debug Mode and restores pre-edge DPC/DCSR.prv. CSR state clears MPRV for a U return. |
+| `debug_exception_o` | Accepted fault in Debug Mode; parent redirects to debug_exception_addr_i. Machine trap CSRs remain unchanged. |
+| `debug_ebreak_o` | Accepted EBREAK already in Debug Mode; ends program-buffer/debug execution through the DM's debug-ROM completion path, without replacing DPC/DCSR. |
+| `dcsr_o[31:0]`, `dpc_o[31:0]` | CSR-owned debug state for controller use. |
+
+DCSR/DPC/dscratch0 at 7B0/7B1/7B2 are accessible only in Debug Mode. The single
+scratch register is for a compatible minimal external-DM ROM; dscratch1 and
+hardware triggers are not implemented. DCSR implements ebreakm, step, cause,
+and optional ebreaku/prv state. Debugver=4, stopcount=1, mprven=1; stepie=0,
+stoptime=0, unsupported fields zero. Unsupported prv writes select M. With
+mprven=1 the parent retains normal MPRV memory-privilege handling; no relaxed
+PMP bypass is implied. DPC aligns like mepc. All debug fields reset synchronously.
+
+A normal-mode EBREAK with its current privilege's ebreak control set enters
+debug with cause=1 and DPC at that instruction. No trap CSR, ordinary destination
+or retirement update occurs; hart-local counters also do not increment on its
+entry edge. EBREAK with the control clear takes a normal breakpoint exception.
+Counters freeze while in Debug Mode, including debug ROM/program-buffer
+instructions, but explicit legal counter writes remain available.
+
+After DRET with DCSR.step=1, the controller masks interrupts, permits exactly
+one architectural instruction, and uses retirement/fault completion to select
+reentry with the actual next PC. A stepped fault first completes normal trap
+entry, then a later debug-entry event saves the handler PC before handler
+execution. External halt after an older draining fault follows the same
+post-trap sequencing with halt cause. These are controller responsibilities;
+WB exposes events/state without inventing an extra DM interface. The parent
+must apply Debug 1.0 cause priority before supplying an accepted event.
+
+Accepted external debug entry takes defensive priority over a simultaneous
+external trap; valid integration arbitrates first. Interrupt trap events are
+ignored in Debug Mode. With DEBUG=0 debug outputs/state are zero, debug inputs
+are ignored and debug CSR/DRET accesses fault.
+
+## Architectural events and integration
 
 `trap_i`, `trap_pc_i[31:0]`, `trap_interrupt_i`, `trap_cause_i[4:0]`, and
-`trap_tval_i[31:0]` carry a **previously arbitrated external architectural trap
-event**, normally an interrupt at a drained boundary. It is not a raw IRQ request.
-Reset dominates. An accepted external trap suppresses WB candidate acceptance
-and directly updates CSR trap state, even during cancellation of the WB token.
-It does not retire an instruction. IRQ levels alone never initiate a trap here.
+`trap_tval_i[31:0]` carry a previously arbitrated precise external trap, normally
+an interrupt after draining. Raw IRQ levels alone never enter a trap. The
+controller prioritizes older WB faults before asserting external trap/debug
+entry. Accepted external events can update owned CSR state during owning flush;
+reset dominates. A fault acknowledged by exception_fire_o already updates trap
+CSRs: do not echo it through trap_i.
 
-The controller must prioritize an older live WB fault over an interrupt *before*
-asserting `trap_i`, and ensure the event's PC/current privilege describe the
-precise boundary. The fault report deliberately does not depend on `trap_i` or
-`ready_i`, avoiding an arbitration loop. Defensive collisions give the accepted
-external event priority, but are not permission to violate core event ordering.
+Do not feed accepted fault/MRET/DRET/local-debug events combinationally back
+into WB flush_i; that would cancel the acceptance generating the event. Consume
+the token, clear younger slots and block wrong-path refill separately. The
+[parent fixture](../wb_pipeline/README.md) demonstrates this boundary.
 
-A WB fault acknowledged through `exception_fire_o` already updates trap CSR
-state. **Do not echo it back through `trap_i`.** The controller redirects using
-that accepted fault and the pre-edge mtvec state. Likewise, do not feed a WB
-instruction's own fault/MRET acceptance combinationally back to its `flush_i`;
-that would cancel the very acceptance generating the flush. Consume that token
-normally, clear/block younger parent slots separately, and prevent wrong-path
-refill. The [parent fixture](../wb_pipeline/README.md) demonstrates this boundary.
-
-State outputs `mstatus_o`, `mie_o`, `mip_o`, `mtvec_o`, `mepc_o` are architectural
-32-bit views. `pmpcfg_o[127:0]`, `pmpaddr_o[511:0]` route through the core parent
-to its one two-port PMP instance. `frm_o[2:0]` and `fflags_o[4:0]` expose optional
-FP CSR state. Current privilege, target arithmetic and global event sequencing
-remain outside WB. Ordinary owning flush does not roll back committed state or
-stop cycle counting. Reset follows the CSR contract, including unreset enabled
-PMP address payloads.
+`mstatus_o`, `mie_o`, `mip_o`, `mtvec_o`, `mepc_o` expose architectural state.
+`pmpcfg_o[127:0]` and `pmpaddr_o[511:0]` route through the parent to its PMP
+instance; `frm_o[2:0]`/`fflags_o[4:0]` expose optional FP state. Target arithmetic,
+current privilege and global sequencing remain outside WB.
 
 ## Configuration and verification
 
-Parameters are `ISA_E`, `ISA_M`, `ISA_C`, `ISA_ZFINX`, `ISA_F`, `ISA_A`,
-`ISA_UMODE`, `ISA_PMP`, `XIF`, and `DEBUG`. The selected baseline supports native
-write-back with `XIF=0`, `DEBUG=0`, `ISA_F=0`, `ISA_A=0`. Enabled unsupported
-settings fail elaboration. Zfinx CSR/commit wiring does not implement an FPU.
-The stage adds no storage beyond its CSR unit's existing configuration-dependent
-state budget: `265 + ISA_C + 5*ISA_UMODE + 8*ISA_ZFINX + 608*ISA_PMP` bits.
+Parameters: ISA_E/M/C/ZFINX/F/A/UMODE/PMP, XIF, XIF_DUALWRITE and DEBUG. Full F
+and A remain unsupported; Zfinx CSR wiring does not implement an FPU.
+CSR storage is `265 + ISA_C + 5*ISA_UMODE + 8*ISA_ZFINX + 608*ISA_PMP
++ DEBUG*(67 + ISA_C + 2*ISA_UMODE)` bits, plus exactly one local permission bit
+when XIF=1. No boundary payload storage is added.
 
 ```sh
 make test COMPONENT=wb CONFIG=rv32i
-make lint COMPONENT=wb CONFIG=rv32i
-make test COMPONENT=wb_pipeline CONFIG=rv32i
+make test COMPONENT=wb CONFIG=rv32i_xif_debug
+make test COMPONENT=wb_pipeline CONFIG=rv32i_xif_debug
+make lint COMPONENT=wb_pipeline CONFIG=rv32i_xif_debug
 ```
 
-The project cocotb/pyuvm suites share the existing CSR-word model and a
-[WB architectural model](../common/wb_model.py). `directed` checks GPR
-qualification, all CSR forms and suppression, faults, class guards, x0/E,
-flags, and counters. `control` checks held results/CSR/faults, commitment versus
-reporting, flush/reset, accepted external events, MRET and consecutive identical
-tokens. `randomized` checks 2,048 mixed tokens with independent stalls and events.
-
-Development regressions cover all sixteen U/C/Zfinx-CSR/PMP combinations with
-representative I/E/M settings. The real-parent/GPR fixture additionally runs
-with FF and latch register files. Representative Yosys checks confirm one CSR
-unit, no extra WB state/boundary storage, no GPR/PMP instance, constant secondary
-write outputs, and no latches/memories/combinational loops. This is a component
-milestone: full-core controller/serialization, XIF paired write-back, debug,
-RVFI, and architectural software/reference-model verification remain pending.
+The cocotb/pyuvm suites share architectural [CSR](../common/csregfile_model.py)
+and [WB](../common/wb_model.py) models. Native directed/control/randomized suites
+check commitment, CSR forms, faults, counters, flags, stalls/reset/flush and
+MRET. `xif` checks delayed and same-cycle results (including combinational response to permission), permission once, foreign
+IDs/harts, pending younger kills, ID wrap, paired/x0/E behavior, nonwriters and
+pre-permission cancellation. `debug` checks access restrictions, WARL state,
+counter freezing/explicit writes, DRET, EBREAK controls, step entry and debug
+exceptions. The parent fixture verifies physical GPR writes and mode changes.
+Full-core draining, DE issue tracking, external-DM operation and software/RVFI
+verification remain integration work.

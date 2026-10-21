@@ -27,6 +27,7 @@ class CSRTest(uvm_test):
                         mip=(i['irq_software'] << 3) | (i['irq_timer'] << 7) | (i['irq_external'] << 11),
                         mtvec=self.model.words[0x305], mepc=self.model.words[0x341],
                         frm=self.model.words[2], fflags=self.model.words[1],
+                        dcsr=self.model.words[0x7B0], dpc=self.model.words[0x7B1],
                         pmpcfg=sum(c << (8*n) for n, c in enumerate(self.model.configs)))
         for name, value in expected.items():
             actual = int(getattr(self.dut, name + '_o').value)
@@ -201,6 +202,16 @@ class EventsTest(CSRTest):
         assert self.model.words[0x340] == 0
         if self.params['ISA_UMODE']:
             await self.cycle(mret=1, priv_m=0)
+        if self.params['DEBUG']:
+            await self.write(0x300, 8)
+            saved = {a: self.model.words[a] for a in (0x300, 0x341, 0x342, 0x343)}
+            # An already accepted debug entry excludes both machine trap/MRET
+            # effects even under defensive event collisions and owning flush.
+            await self.cycle(debug_enter=1, debug_pc=0x1234567A, debug_cause=3,
+                             trap=1, trap_pc=0xBAD, mret=1, flush=1)
+            assert saved == {a: self.model.words[a] for a in saved}
+            assert (await self.read(0x7B0, debug_mode=1))['rdata'] >> 6 & 7 == 3
+            await self.cycle(debug_mode=1, dret=1)
         # Accrued flags, aliases, explicit-write priority and independent frm.
         for flags in (1, 2, 4, 8, 16):
             await self.cycle(fp_flags_valid=1, fp_flags=flags)

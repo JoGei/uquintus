@@ -24,7 +24,7 @@ module uqu_wb_pipeline_tb #(
     input wire in_valid_i,
     input wire commit_ready_i,
     output wire in_ready_o,
-    input wire [1:0] in_kind_i,
+    input wire [2:0] in_kind_i,
     input wire [31:0] in_result_i,
     input wire in_rd_we_i,
     input wire [4:0] in_rd_i,
@@ -39,6 +39,7 @@ module uqu_wb_pipeline_tb #(
     input wire in_exception_valid_i,
     input wire [4:0] in_exception_cause_i,
     input wire [31:0] in_exception_tval_i,
+    input wire [2:0] in_xif_id_i,
     input wire [31:0] hart_id_i,
     input wire irq_software_i,
     input wire irq_timer_i,
@@ -75,14 +76,39 @@ module uqu_wb_pipeline_tb #(
     output wire [511:0] pmpaddr_o,
     output wire [2:0] frm_o,
     output wire [4:0] fflags_o,
+    input  wire         xif_kill_valid_i,
+    input  wire [2:0]   xif_kill_id_i,
+    output wire        xif_kill_ready_o,
+    output wire        xif_commit_valid_o,
+    output wire [31:0] xif_commit_hartid_o,
+    output wire [2:0]  xif_commit_id_o,
+    output wire        xif_commit_kill_o,
+    input  wire        xif_result_valid_i,
+    output wire        xif_result_ready_o,
+    input  wire [31:0] xif_result_hartid_i,
+    input  wire [2:0]  xif_result_id_i,
+    input  wire [32*(1+XIF_DUALWRITE)-1:0] xif_result_data_i,
+    input  wire [4:0]  xif_result_rd_i,
+    input  wire [XIF_DUALWRITE:0] xif_result_we_i,
+    input  wire         debug_mode_i,
+    input  wire         debug_enter_i,
+    input  wire [31:0]  debug_pc_i,
+    input  wire [2:0]   debug_cause_i,
+    output wire         debug_enter_o,
+    output wire         debug_exception_o,
+    output wire         debug_ebreak_o,
+    output wire         dret_o,
+    output wire [31:0]  dcsr_o,
+    output wire [31:0]  dpc_o,
     input wire [4:0] raddr0_i,
     input wire [4:0] raddr1_i,
     output wire [31:0] rdata0_o,
     output wire [31:0] rdata1_o
 );
+    reg [2:0] memwb_xif_id_q;
     reg memwb_valid_q;
     reg priv_m_q;
-    reg [1:0] memwb_kind_q;
+    reg [2:0] memwb_kind_q;
     reg [31:0] memwb_result_q;
     reg memwb_rd_we_q;
     reg [4:0] memwb_rd_q;
@@ -97,7 +123,7 @@ module uqu_wb_pipeline_tb #(
     reg memwb_exception_valid_q;
     reg [4:0] memwb_exception_cause_q;
     reg [31:0] memwb_exception_tval_q;
-    wire redirect = exception_fire_o || mret_o;
+    wire redirect = exception_fire_o || mret_o || dret_o || debug_enter_o || debug_exception_o || debug_ebreak_o;
     assign priv_m_o = priv_m_q;
     assign in_ready_o = rst_ni && !flush_i && !trap_i && !redirect && wb_ready_o;
 
@@ -108,6 +134,7 @@ module uqu_wb_pipeline_tb #(
             memwb_valid_q <= in_valid_i;
             if (in_valid_i) begin
                 memwb_kind_q <= in_kind_i;
+                memwb_xif_id_q <= in_xif_id_i;
                 memwb_result_q <= in_result_i;
                 memwb_rd_we_q <= in_rd_we_i;
                 memwb_rd_q <= in_rd_i;
@@ -126,8 +153,10 @@ module uqu_wb_pipeline_tb #(
         end
         if (!rst_ni) begin
             priv_m_q <= 1'b1;
-        end else if (trap_i || exception_fire_o) begin
+        end else if (trap_i || exception_fire_o || debug_enter_o) begin
             priv_m_q <= 1'b1;
+        end else if (dret_o) begin
+            priv_m_q <= (dcsr_o[1:0] == 2'b11);
         end else if (mret_o) begin
             priv_m_q <= (mstatus_o[12:11] == 2'b11);
         end
@@ -142,7 +171,7 @@ module uqu_wb_pipeline_tb #(
         .ISA_A(ISA_A),
         .ISA_UMODE(ISA_UMODE),
         .ISA_PMP(ISA_PMP),
-        .XIF(XIF),
+        .XIF(XIF), .XIF_DUALWRITE(XIF_DUALWRITE),
         .DEBUG(DEBUG)
     ) u_wb (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
@@ -163,6 +192,31 @@ module uqu_wb_pipeline_tb #(
         .exception_valid_i(memwb_exception_valid_q),
         .exception_cause_i(memwb_exception_cause_q),
         .exception_tval_i(memwb_exception_tval_q),
+        .xif_id_i(memwb_xif_id_q),
+        .xif_kill_valid_i(xif_kill_valid_i),
+        .xif_kill_id_i(xif_kill_id_i),
+        .xif_kill_ready_o(xif_kill_ready_o),
+        .xif_commit_valid_o(xif_commit_valid_o),
+        .xif_commit_hartid_o(xif_commit_hartid_o),
+        .xif_commit_id_o(xif_commit_id_o),
+        .xif_commit_kill_o(xif_commit_kill_o),
+        .xif_result_valid_i(xif_result_valid_i),
+        .xif_result_ready_o(xif_result_ready_o),
+        .xif_result_hartid_i(xif_result_hartid_i),
+        .xif_result_id_i(xif_result_id_i),
+        .xif_result_data_i(xif_result_data_i),
+        .xif_result_rd_i(xif_result_rd_i),
+        .xif_result_we_i(xif_result_we_i),
+        .debug_mode_i(debug_mode_i),
+        .debug_enter_i(debug_enter_i),
+        .debug_pc_i(debug_pc_i),
+        .debug_cause_i(debug_cause_i),
+        .debug_enter_o(debug_enter_o),
+        .debug_exception_o(debug_exception_o),
+        .debug_ebreak_o(debug_ebreak_o),
+        .dret_o(dret_o),
+        .dcsr_o(dcsr_o),
+        .dpc_o(dpc_o),
         .hart_id_i(hart_id_i),
         .irq_software_i(irq_software_i),
         .irq_timer_i(irq_timer_i),

@@ -36,6 +36,14 @@ module uqu_csregfile #(
     input  wire [4:0]   trap_cause_i,
     input  wire [31:0]  trap_tval_i,
     input  wire         mret_i,
+    input  wire         debug_mode_i,
+    input  wire         debug_enter_i,
+    input  wire [31:0]  debug_pc_i,
+    input  wire [2:0]   debug_cause_i,
+    input  wire         debug_ebreak_i,
+    input  wire         dret_i,
+    output wire [31:0]  dcsr_o,
+    output wire [31:0]  dpc_o,
     input  wire         fp_flags_valid_i,
     input  wire [4:0]   fp_flags_i,
     output wire         csr_read_o,
@@ -82,6 +90,7 @@ module uqu_csregfile #(
     wire [31:0] mcounteren;
     wire [31:0] mcause;
     wire [31:0] fcsr;
+    wire [31:0] dscratch;
     reg [31:0] read_value;
     reg [31:0] write_value;
     reg mapped;
@@ -93,12 +102,19 @@ module uqu_csregfile #(
     wire [31:0] source_value = csr_op_i[2] ? {27'd0, csr_src_i[4:0]} : csr_src_i;
     wire read_requested = (csr_op_i[1:0] != 2'b01) || !csr_rd_zero_i;
     wire write_requested = (csr_op_i[1:0] == 2'b01) || !source_zero;
-    wire privilege_allowed = priv_m_i || ((ISA_UMODE == 1) && (csr_addr_i[9:8] == 2'b00));
+    wire debug_mode = (DEBUG == 1) && debug_mode_i;
+    wire debug_enter = (DEBUG == 1) && debug_enter_i && !debug_mode;
+    wire debug_csr = (csr_addr_i[11:4] == 8'h7b);
+    wire privilege_allowed = debug_csr ? debug_mode :
+        (debug_mode || priv_m_i || ((ISA_UMODE == 1) && (csr_addr_i[9:8] == 2'b00)));
     wire illegal = !op_valid || !mapped || !privilege_allowed || !counter_allowed ||
                    (write_requested && (csr_addr_i[11:10] == 2'b11));
     wire active = rst_ni && csr_valid_i && !flush_i;
-    wire csr_we = active && csr_commit_i && !illegal && write_requested && !trap_i && !mret_i;
-    wire mret_fire = mret_i && priv_m_i;
+    wire csr_we = active && csr_commit_i && !illegal && write_requested &&
+                  !trap_i && !mret_i && !debug_enter && !((DEBUG == 1) && dret_i);
+    wire mret_fire = mret_i && priv_m_i && !debug_mode && !debug_enter;
+    wire trap_fire = trap_i && !debug_mode && !debug_enter;
+    wire count_enabled = !debug_mode && !((DEBUG == 1) && debug_ebreak_i);
 
     assign csr_read_o = active && !illegal && read_requested;
     assign csr_write_o = active && !illegal && write_requested;
@@ -142,17 +158,20 @@ module uqu_csregfile #(
             12'h342: read_value = mcause;
             12'h343: read_value = mtval_q;
             12'h344: read_value = mip_o;
+            12'h7b0: begin read_value = dcsr_o; mapped = (DEBUG == 1); end
+            12'h7b1: begin read_value = dpc_o; mapped = (DEBUG == 1); end
+            12'h7b2: begin read_value = dscratch; mapped = (DEBUG == 1); end
             12'hb00: read_value = mcycle_q[31:0];
             12'hb80: read_value = mcycle_q[63:32];
             12'hb02: read_value = minstret_q[31:0];
             12'hb82: read_value = minstret_q[63:32];
             12'hc00, 12'hc80: begin
                 read_value = csr_addr_i[7] ? mcycle_q[63:32] : mcycle_q[31:0];
-                counter_allowed = priv_m_i || counteren[0];
+                counter_allowed = debug_mode || priv_m_i || counteren[0];
             end
             12'hc02, 12'hc82: begin
                 read_value = csr_addr_i[7] ? minstret_q[63:32] : minstret_q[31:0];
-                counter_allowed = priv_m_i || counteren[1];
+                counter_allowed = debug_mode || priv_m_i || counteren[1];
             end
             12'hf11, 12'hf12, 12'hf13, 12'hf15: read_value = 32'd0;
             12'hf14: read_value = hart_id_i;
@@ -167,7 +186,7 @@ module uqu_csregfile #(
                 if (((csr_addr_i >= 12'hc03) && (csr_addr_i <= 12'hc1f)) ||
                     ((csr_addr_i >= 12'hc83) && (csr_addr_i <= 12'hc9f))) begin
                     mapped = 1'b1;
-                    counter_allowed = priv_m_i;
+                    counter_allowed = debug_mode || priv_m_i;
                 end
                 for (index = 0; index < 4; index = index + 1) begin
                     if (csr_addr_i == (12'h3a0 + index[11:0])) begin
@@ -194,8 +213,8 @@ module uqu_csregfile #(
     always @* begin
         mcycle_d = mcycle_q;
         minstret_d = minstret_q;
-        if (!inhibit_q[0]) mcycle_d = mcycle_q + 64'd1;
-        if (!inhibit_q[1] && retire_i) minstret_d = minstret_q + 64'd1;
+        if (count_enabled && !inhibit_q[0]) mcycle_d = mcycle_q + 64'd1;
+        if (count_enabled && !inhibit_q[1] && retire_i) minstret_d = minstret_q + 64'd1;
         // A half write overrides the entire counter's implicit increment.
         if (csr_we && (csr_addr_i == 12'hb00)) mcycle_d = {mcycle_q[63:32], write_value};
         if (csr_we && (csr_addr_i == 12'hb80)) mcycle_d = {write_value, mcycle_q[31:0]};
@@ -219,7 +238,7 @@ module uqu_csregfile #(
         end else begin
             mcycle_q <= mcycle_d;
             minstret_q <= minstret_d;
-            if (trap_i) begin
+            if (trap_fire) begin
                 mstatus_mpie_q <= mstatus_mie_q;
                 mstatus_mie_q <= 1'b0;
                 mepc_q <= trap_pc_i[31:EPC_LSB];
@@ -248,6 +267,64 @@ module uqu_csregfile #(
     end
 
     generate
+        if (DEBUG == 1) begin : GEN_DEBUG
+            reg ebreakm_q;
+            reg step_q;
+            reg [2:0] cause_q;
+            reg [31:EPC_LSB] dpc_q;
+            reg [31:0] dscratch_q;
+            wire ebreaku;
+            wire prv_m;
+            // debugver=4, stopcount=1, mprven=1; stepie/stoptime=0.
+            assign dcsr_o = 32'h40000410 | ({31'd0, ebreakm_q} << 15) |
+                            ({31'd0, ebreaku} << 12) | ({29'd0, cause_q} << 6) |
+                            ({31'd0, step_q} << 2) | (prv_m ? 32'd3 : 32'd0);
+            assign dpc_o = {dpc_q, {EPC_LSB{1'b0}}};
+            assign dscratch = dscratch_q;
+            always @(posedge clk_i) begin
+                if (!rst_ni) begin
+                    ebreakm_q <= 1'b0;
+                    step_q <= 1'b0;
+                    cause_q <= 3'd0;
+                    dpc_q <= {32-EPC_LSB{1'b0}};
+                    dscratch_q <= 32'd0;
+                end else if (debug_enter) begin
+                    cause_q <= debug_cause_i;
+                    dpc_q <= debug_pc_i[31:EPC_LSB];
+                end else if (csr_we) begin
+                    case (csr_addr_i)
+                        12'h7b0: begin ebreakm_q <= write_value[15]; step_q <= write_value[2]; end
+                        12'h7b1: dpc_q <= write_value[31:EPC_LSB];
+                        12'h7b2: dscratch_q <= write_value;
+                        default: begin end
+                    endcase
+                end
+            end
+            if (ISA_UMODE == 1) begin : GEN_USER_DEBUG
+                reg ebreaku_q;
+                reg prv_m_q;
+                assign ebreaku = ebreaku_q;
+                assign prv_m = prv_m_q;
+                always @(posedge clk_i) begin
+                    if (!rst_ni) begin
+                        ebreaku_q <= 1'b0;
+                        prv_m_q <= 1'b1;
+                    end else if (debug_enter) begin
+                        prv_m_q <= priv_m_i;
+                    end else if (csr_we && (csr_addr_i == 12'h7b0)) begin
+                        ebreaku_q <= write_value[12];
+                        prv_m_q <= (write_value[1:0] != 2'b00);
+                    end
+                end
+            end else begin : GEN_MACHINE_DEBUG
+                assign ebreaku = 1'b0;
+                assign prv_m = 1'b1;
+            end
+        end else begin : GEN_NO_DEBUG
+            assign dcsr_o = 32'd0;
+            assign dpc_o = 32'd0;
+            assign dscratch = 32'd0;
+        end
         if (ISA_UMODE == 1) begin : GEN_UMODE
             reg mpp_m_q;
             reg mprv_q;
@@ -264,11 +341,13 @@ module uqu_csregfile #(
                     tw_q <= 1'b0;
                     counteren_q <= 2'd0;
                 end else begin
-                    if (trap_i) begin
+                    if (trap_fire) begin
                         mpp_m_q <= priv_m_i;
                     end else if (mret_fire) begin
                         mpp_m_q <= 1'b0;
                         if (!mpp_m_q) mprv_q <= 1'b0;
+                    end else if ((DEBUG == 1) && dret_i && debug_mode && (dcsr_o[1:0] != 2'b11)) begin
+                        mprv_q <= 1'b0;
                     end else if (csr_we && (csr_addr_i == 12'h300)) begin
                         mpp_m_q <= (write_value[12:11] != 2'b00);
                         mprv_q <= write_value[17];
@@ -356,7 +435,7 @@ module uqu_csregfile #(
         if (((ISA_E != 0) && (ISA_E != 1)) || ((ISA_M != 0) && (ISA_M != 1)) ||
             ((ISA_C != 0) && (ISA_C != 1)) || ((ISA_UMODE != 0) && (ISA_UMODE != 1)) ||
             ((ISA_PMP != 0) && (ISA_PMP != 1)) || ((ISA_ZFINX != 0) && (ISA_ZFINX != 1)) ||
-            (ISA_F != 0) || (ISA_A != 0) || (DEBUG != 0)) begin : GEN_UNSUPPORTED
+            (ISA_F != 0) || (ISA_A != 0) || ((DEBUG != 0) && (DEBUG != 1))) begin : GEN_UNSUPPORTED
             uqu_csregfile_unsupported_configuration invalid_configuration ();
         end
     endgenerate

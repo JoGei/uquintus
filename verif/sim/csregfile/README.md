@@ -12,8 +12,8 @@ commit/retirement events; the full-core parent still owns global arbitration.
 Parameters are `ISA_E`, `ISA_M`, `ISA_C`, `ISA_ZFINX`, `ISA_F`, `ISA_A`,
 `ISA_UMODE`, `ISA_PMP`, and `DEBUG`. I/E, M, C, and U determine hardwired `misa`.
 Zfinx adds only FP CSR state and does not set `misa.F` or require `mstatus.FS`.
-Full F, atomics, and debug CSR implementations remain deferred: `ISA_F=1`,
-`ISA_A=1`, and `DEBUG=1` fail elaboration. Boolean parameters reject values
+Full F and atomics remain deferred: `ISA_F=1` and `ISA_A=1` fail elaboration.
+`DEBUG=1` enables compact debug CSR state and counter control. Boolean parameters reject values
 outside zero/one. Enabling Zfinx CSR storage does not implement the FPU.
 
 ## Access interface
@@ -98,7 +98,7 @@ aliases share counter storage. Stalls/CSR flush do not stop mcycle.
 | `mhartid` F14 | Read-only integration input, no storage. |
 
 Unlisted addresses, including `time[h]`, supervisor CSRs, delegation CSRs, and
-debug CSRs, raise illegal instruction. Normal address privilege and read-only
+unimplemented debug CSRs, raise illegal instruction. Normal address privilege and read-only
 checks apply to every mapped CSR, including constants. PMP write restrictions
 are not access exceptions. Initialize each required PMP address bound before
 enabling an entry; reads of uninitialized address payloads have no guaranteed
@@ -109,6 +109,7 @@ Yosys development checks confirm the following retained state-bit budget:
 
 ```text
 265 + ISA_C + 5*ISA_UMODE + 8*ISA_ZFINX + 608*ISA_PMP
+    + DEBUG*(67 + ISA_C + 2*ISA_UMODE)
 ```
 
 The default RV32I M+U configuration retains 270 bits. M-only without optional
@@ -116,6 +117,32 @@ state retains 265; U+C+Zfinx+PMP retains 887. All are resettable except the
 512 PMP address payload bits when enabled. There are no inferred CSR memories,
 unused HPM payloads, duplicate aliases, or constant-field flops. These are state
 counts, not technology-mapped area or timing estimates.
+
+## Optional debug state/events
+
+With `DEBUG=1`, addresses 7B0/7B1/7B2 implement DCSR/DPC/dscratch0. They are
+accessible only in Debug Mode; machine privilege alone is insufficient.
+dscratch1 and all trigger CSRs remain unmapped. The external DM must use a
+one-scratch-register debug ROM profile and advertise the matching hartinfo.
+
+`debug_mode_i` is parent-owned. `debug_enter_i` is an accepted entry pulse,
+with `debug_pc_i[31:0]` and `debug_cause_i[2:0]`; it captures DPC, cause, and
+current privilege even during owning flush. The parent must arbitrate older
+faults first. `dcsr_o`/`dpc_o` expose state for serialized resume and step control.
+`dret_i` clears MPRV when resuming to U. `debug_ebreak_i` suppresses implicit
+counter increments on the EBREAK entry edge. Counters also freeze throughout
+Debug Mode while explicit legal counter writes still work. Debug Mode ignores
+machine trap-entry events and allows machine CSR access independently of the
+saved application privilege. WB prevents faulting debug instructions from
+retiring or updating ordinary state.
+
+DCSR stores ebreakm, step, cause, and (with U) ebreaku and one privilege bit.
+Debugver=4, stopcount=1, mprven=1; stepie/stoptime and other unsupported fields
+are zero. Unsupported prv encodings map to M. Debug entry updates only cause,
+prv and DPC; debugger-written step/break controls persist. DPC has the same
+alignment as mepc. All debug storage resets synchronously; disabled debug adds
+no storage and drives zero state outputs. The [WB guide](../wb/README.md)
+documents instruction/event bindings and verification.
 
 ## Component verification
 
@@ -144,9 +171,10 @@ project cocotb/pyuvm stack and an independent model of architectural words:
 Development regressions cover all sixteen combinations of U, C, Zfinx CSR state,
 PMP state (and representative I/E/M settings). Representative Yosys checks inspect
 state widths, reset coverage, absence of memories/latches, and full synthesis.
-Full-core serialization, trap arbitration, debugger support, retirement, and
+Full-core serialization, trap arbitration, external-DM integration, retirement, and
 functional floating-point execution remain integration work.
 
 Reference semantics: [Zicsr 2.0](https://docs.riscv.org/reference/isa/v20260120/unpriv/zicsr.html),
 [machine-level privileged ISA](https://docs.riscv.org/reference/isa/v20260120/priv/machine.html),
+[Debug 1.0 Sdext](https://docs.riscv.org/reference/debug/v1.0/Sdext.html),
 and [Zfinx 1.0](https://docs.riscv.org/reference/isa/v20260120/unpriv/zfinx.html).

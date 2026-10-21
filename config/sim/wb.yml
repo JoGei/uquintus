@@ -11,8 +11,11 @@ parameters:
   - ISA_UMODE
   - ISA_PMP
   - XIF
+  - XIF_DUALWRITE
   - DEBUG
 tests:
   - directed
   - control
   - randomized
+  - xif
+  - debug

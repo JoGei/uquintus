@@ -7,7 +7,8 @@ INPUTS = dict(rst_n=1, flush=0, csr_valid=0, csr_commit=0, csr_addr=0,
               csr_instr=0xC0002573, priv_m=1, hart_id=0xCAFEBABE,
               irq_software=0, irq_timer=0, irq_external=0, retire=0,
               trap=0, trap_pc=0, trap_interrupt=0, trap_cause=0, trap_tval=0,
-              mret=0, fp_flags_valid=0, fp_flags=0)
+              mret=0, debug_mode=0, debug_enter=0, debug_pc=0, debug_cause=0,
+              debug_ebreak=0, dret=0, fp_flags_valid=0, fp_flags=0)
 
 
 class CSRModel:
@@ -19,11 +20,14 @@ class CSRModel:
     def reset(self):
         self.words = {0x300: 0x1800, 0x304: 0, 0x305: 0, 0x306: 0,
                       0x320: 0, 0x340: 0, 0x341: 0, 0x342: 0, 0x343: 0,
-                      0x001: 0, 0x002: 0}
+                      0x001: 0, 0x002: 0,
+                      0x7B0: 0x40000413 if self.p["DEBUG"] else 0, 0x7B1: 0, 0x7B2: 0}
         self.cycle = self.instret = 0
         self.configs = [0] * 16
 
     def read(self, addr, i):
+        if 0x7B0 <= addr <= 0x7BF and (not self.p["DEBUG"] or not i["debug_mode"]):
+            raise KeyError(addr)
         if addr in (1, 2, 3):
             if not self.p['ISA_ZFINX']:
                 raise KeyError(addr)
@@ -63,8 +67,9 @@ class CSRModel:
             mapped = True
         except KeyError:
             value, mapped = 0, False
-        allowed = bool(i['priv_m']) or (self.p['ISA_UMODE'] and (addr >> 8) & 3 == 0)
-        if not i['priv_m'] and (0xC00 <= addr <= 0xC1F or 0xC80 <= addr <= 0xC9F):
+        debug = self.p['DEBUG'] and i['debug_mode']
+        allowed = debug or bool(i['priv_m']) or (self.p['ISA_UMODE'] and (addr >> 8) & 3 == 0)
+        if not debug and not i['priv_m'] and (0xC00 <= addr <= 0xC1F or 0xC80 <= addr <= 0xC9F):
             bit = 0 if addr & 0x7F == 0 else 2 if addr & 0x7F == 2 else None
             allowed = allowed and bit is not None and bool(self.words[0x306] & (1 << bit))
         illegal = not mapped or not allowed or op & 3 == 0 or (write and addr >> 10 == 3)
@@ -90,16 +95,20 @@ class CSRModel:
             return
         response, updated = self.query(i)
         old_status = self.words[0x300]
-        if not self.words[0x320] & 1:
+        debug = bool(self.p['DEBUG'] and i['debug_mode'])
+        enter = bool(self.p['DEBUG'] and i['debug_enter'] and not debug)
+        trap = bool(i['trap'] and not debug and not enter)
+        counting = not debug and not (self.p['DEBUG'] and i['debug_ebreak'])
+        if counting and not self.words[0x320] & 1:
             self.cycle = (self.cycle + 1) & MASK64
-        if i['retire'] and not self.words[0x320] & 4:
+        if counting and i['retire'] and not self.words[0x320] & 4:
             self.instret = (self.instret + 1) & MASK64
-        write = response['write'] and i['csr_commit'] and not i['trap'] and not i['mret']
+        write = response['write'] and i['csr_commit'] and not i['trap'] and not i['mret'] and not enter and not (self.p['DEBUG'] and i['dret'])
         # An explicit counter write suppresses that cycle's entire increment.
         if write and i['csr_addr'] in (0xB00, 0xB80, 0xB02, 0xB82):
             is_cycle = i['csr_addr'] in (0xB00, 0xB80)
             value = self.cycle if is_cycle else self.instret
-            incremented = not self.words[0x320] & (1 if is_cycle else 4) and (is_cycle or i['retire'])
+            incremented = counting and not self.words[0x320] & (1 if is_cycle else 4) and (is_cycle or i['retire'])
             if incremented:
                 value = (value - 1) & MASK64
             high = bool(i['csr_addr'] & 0x80)
@@ -110,7 +119,7 @@ class CSRModel:
                 self.instret = value
         if self.p['ISA_ZFINX'] and i['fp_flags_valid']:
             self.words[1] |= i['fp_flags']
-        if i['trap']:
+        if trap:
             status = old_status & ~((3 << 11) | (1 << 7) | (1 << 3))
             status |= ((3 if i['priv_m'] or not self.p['ISA_UMODE'] else 0) << 11)
             status |= ((old_status >> 3) & 1) << 7
@@ -118,7 +127,7 @@ class CSRModel:
             self.words[0x341] = i['trap_pc'] & (~1 if self.p['ISA_C'] else ~3)
             self.words[0x342] = (i['trap_interrupt'] << 31) | (i['trap_cause'] & 15)
             self.words[0x343] = i['trap_tval']
-        elif i['mret'] and i['priv_m']:
+        elif i['mret'] and i['priv_m'] and not debug and not enter:
             status = old_status & ~((3 << 11) | (1 << 7) | (1 << 3))
             status |= ((old_status >> 7) & 1) << 3 | (1 << 7)
             if self.p['ISA_UMODE']:
@@ -127,9 +136,24 @@ class CSRModel:
             else:
                 status |= 3 << 11
             self.words[0x300] = status
+        if self.p['DEBUG']:
+            if enter:
+                self.words[0x7B0] &= ~(0x1C0 | 3)
+                self.words[0x7B0] |= (i['debug_cause'] << 6) | (3 if i['priv_m'] or not self.p['ISA_UMODE'] else 0)
+                self.words[0x7B1] = i['debug_pc'] & (~1 if self.p['ISA_C'] else ~3)
+            if debug and i['dret'] and self.words[0x7B0] & 3 != 3:
+                self.words[0x300] &= ~(1 << 17)
         if write:
             a = i['csr_addr']
-            if a == 0x300:
+            if a == 0x7B0:
+                mask = 0x8004 | (0x1000 if self.p['ISA_UMODE'] else 0)
+                self.words[a] = (self.words[a] & ~(mask | 3)) | (updated & mask)
+                self.words[a] |= 0 if self.p['ISA_UMODE'] and updated & 3 == 0 else 3
+            elif a == 0x7B1:
+                self.words[a] = updated & (~1 if self.p['ISA_C'] else ~3)
+            elif a == 0x7B2:
+                self.words[a] = updated
+            elif a == 0x300:
                 status = updated & ((1 << 3) | (1 << 7))
                 if self.p['ISA_UMODE']:
                     status |= updated & ((1 << 17) | (1 << 21))
