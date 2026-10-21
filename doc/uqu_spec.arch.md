@@ -677,8 +677,9 @@ The placeholder supports only `ISA_ZFINX = 0`. It continuously drives
 including during reset and flush. It contains no state and never accepts or
 completes an operation. An instance with `ISA_ZFINX != 0` shall fail elaboration
 through the explicitly named `uqu_fpu_zfinx_not_implemented` diagnostic cell.
-EX may wire this disabled endpoint, while decode shall continue to reject
-unsupported Zfinx instructions. The stub shall not advertise implemented
+EX may wire this disabled endpoint. The standalone decoder may recognize
+configured Zfinx encodings, but a complete EX/core configuration shall not enable
+Zfinx execution until a real backend is provided. The stub shall not advertise implemented
 floating-point capability or provide a successful substitute result.
 
 The Bender `fpu` target selects the endpoint; `rtl` also includes it. Functional
@@ -1002,6 +1003,39 @@ Synthesis checks retain zero/one local WB state bits with XIF disabled/enabled,
 respectively, and no boundary payload storage. Full-core arbitration/draining,
 DE offload tracking, external-DM integration, RVFI and software-level verification
 remain separate integration work.
+
+
+### 3.11. Native decoder and DE ownership
+
+`src/uquintus/uqu_decoder.v` is the combinational native decoder owned by the
+future DE stage. It extracts immediate values and register-use/destination
+intent, validates encoding/configuration and E-register constraints, and emits
+normalized EX, LSU, WB, branch and system controls. Architectural encodings
+come from uqu_isa.vh; internal selectors come from uqu_ctrl.vh and are also used
+by the relevant EX/WB/ALU consumers. It owns no instruction,
+architectural state, operands or handshake. The
+[decode guide](../verif/sim/decode/README.md) defines selectors and integration.
+
+DE shall own this decoder, operand selection and branch/target computation,
+plus its XIF issue handling. GPR storage shall remain core-owned, read by DE
+and written by WB. The core shall also retain IF/DE and DE/EX registers,
+instruction identity, shared hazards/forwarding, current privilege/Debug Mode,
+and global control. A parent-register fixture is a verification environment,
+not a replacement for the production core hierarchy.
+
+Native encoding recognition shall remain distinct from E-register legality:
+a recognized native instruction using an unavailable GPR remains a native
+exception, not an extension override. Unknown instructions may still be claimed
+by XIF through parallel recognition; the decoder shall not own offload acceptance.
+Runtime privilege/WFI/rounding checks and branch alignment belong in DE/core;
+CSR address/access checks remain at WB. IF supplies expanded 32-bit instructions
+while the parent preserves original bits/length for faults and links.
+
+The decoder supports the base ISA, mandatory Zicsr and system/fence classes,
+optional M, Zfinx encoding recognition, Zifencei and debug DRET. FPU execution
+remains unimplemented. Tests cover legal and reserved fields, immediate layouts,
+actual versus ignored register fields, optional configurations and all control
+outputs; synthesis shall retain no decoder state.
 
 ## 4. Configurable operand forwarding
 
@@ -2688,3 +2722,4 @@ later decisions determine the active contract.
 | D-269 | Keep EX/MEM and MEM/WB registers in the MEM stage's parent; MEM owns one LSU and local one-shot issue tracking, exposes the parent PMP query, and blocks replacement completion/issue while killed bus work drains without stalling older WB. | Preserve precise transaction/identity association and shared PMP ownership with minimal stage-local control. | Implemented; stage and parent-register fixture in Section 3.9 |
 | D-270 | Make WB own the CSR unit and native result/commit logic while MEM/WB, GPR storage, current privilege, arbitration and redirects remain in the core parent; qualify architectural token effects with one acceptance and defer XIF/debug explicitly. | Keep native WB precise and stateless around existing CSR storage, with independent fault reporting and no repeated held-token effects. | XIF/debug deferral superseded by D-271; stage/parent fixture and event contract in Section 3.10 |
 | D-271 | Complete WB standard CV-X-IF commit/result and conditional paired-write support, plus debug-only CSR state, EBREAK/DRET and debug exception routing; retain parent-owned pipeline registers, issue tracking, privilege/Debug Mode and global control. | Complete optional WB functionality with one XIF permission bit, no result queue or proprietary coprocessor channels, and compact debug state. | Implemented; extends D-268 and D-270; exact bindings and tests in the WB component guide |
+| D-272 | Implement a stateless native decoder under DE, alongside DE-owned operand and branch/target logic; retain core-owned GPR storage, boundary registers and shared control. Separate static native recognition/register legality from XIF recognition and runtime permission checks. | Begin DE with a reusable combinational component and preserve existing stage/parent responsibilities and precise-exception handling. | Implemented decoder and component regressions; enclosing DE stage and branch/XIF logic remain pending, Section 3.11 |

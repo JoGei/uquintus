@@ -3,7 +3,10 @@
 `component_runner.py` is the GNU Make helper behind `make test`, `make sim`, and
 `make lint`. It selects a component using `config/sim/<component>.yml` and owns
 the common Bender/Verilator invocation, cocotb execution, artifact directories,
-metadata, and pass/fail checking. `hw_config.py` provides shared hardware YAML
+metadata, and pass/fail checking. It collects selected include directories from
+Bender's structured source tree, passes them to both lint and simulation, and
+records the source tree/include paths and Verilog-header hashes with run
+metadata. The generated configuration-header directory is also included. `hw_config.py` provides shared hardware YAML
 validation, parameter selection/encoding, and Verilog selector generation.
 
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the

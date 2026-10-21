@@ -1,0 +1,15 @@
+top_module: uqu_decoder
+bender_target: decode
+test_module: test_uqu_decoder
+parameters:
+  - ISA_E
+  - ISA_M
+  - ISA_ZFINX
+  - ISA_ZIFENCEI
+  - ISA_F
+  - ISA_A
+  - DEBUG
+tests:
+  - directed
+  - encodings
+  - randomized

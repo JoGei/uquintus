@@ -4,7 +4,7 @@
 
 Build/configuration contracts and project organization. A shared component
 simulation/lint flow supports the register file, ALU, arithmetic datapath, native
-multiply/divide, EX, MEM/LSU, WB, PMP checker, CSR register file, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
+multiply/divide, native decoder, EX, MEM/LSU, WB, PMP checker, CSR register file, and shared-arithmetic/parent-register fixtures; full-core and ASIC flows remain to be implemented. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -278,6 +278,13 @@ subdirectories as needed; this convention defines the project build root for
 the selected pair. Exact internal artifact filenames and ignore rules remain
 TBD.
 
+The component flow uses Bender's file list for compilation sources and its
+structured selected source tree for include directories. Both simulation and
+lint shall receive the same declared header directories. Shared RTL headers
+uqu_isa.vh/uqu_ctrl.vh live beside the core modules and are included, not
+separately compiled. Run metadata records Verilog-header hashes alongside source
+hashes so header-only changes remain identifiable.
+
 ## 7. Project directory layout proposal
 
 **Status:** Overall layout proposed; `src/uquintus/`, `src/wrap/`, `src/adapt/`,
@@ -298,7 +305,7 @@ src/
 verif/
   sim/              # Component and full-core simulation tests
     common/         # Shared Make helper, simulation utilities, and HDL wrappers
-      component_runner.py # Component simulation/lint entry point used by Make
+      component_runner.py # Make entry point; Bender sources/include paths and run metadata
       hw_config.py        # Shared configuration validation and header generation
       rv32_arithmetic.py  # Mathematical ALU and MUL/DIV reference models
       ex_model.py         # EX token and parent-pipeline scoreboard model
@@ -306,6 +313,7 @@ verif/
       mem_model.py        # MEM stage/parent fixture token and result model
       csregfile_model.py  # Architectural CSR words/events shared by CSR and WB
       wb_model.py         # WB commitment and CSR/GPR reference state
+    decode/         # Native encoding/operand/control tests and local ISA oracle
     gpregfile/      # General-purpose register-file tests
     csregfile/      # Decoded CSR state, access, counters, and event tests
     arith/          # Shared extended arithmetic tests

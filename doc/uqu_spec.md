@@ -16,6 +16,7 @@ and layouts retain their proposal status. **TBD** means an unresolved follow-up;
 it does not grant permission to change an agreed architectural contract.
 
 The repository contains specifications and standalone
+[native decoder](../verif/sim/decode/README.md),
 [register-file](../verif/sim/gpregfile/README.md),
 [CSR register-file](../verif/sim/csregfile/README.md),
 [shared arithmetic](../verif/sim/arith/README.md),
