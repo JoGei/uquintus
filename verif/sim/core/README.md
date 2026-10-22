@@ -12,11 +12,17 @@ retention, FF/latch GPR storage, compressed strategy/placement, iterative
 arithmetic configuration, frontend depth and the two existing branch policies
 are passed to their owning components. The source list is Bender target `rtl`.
 
-Zfinx/FPU, XIF issue-ID/cleanup integration and core debug sequencing remain
-unfinished. `ISA_ZFINX=1`, `ISA_F=1`, `ISA_A=1`, `XIF=1`, `DEBUG=1`, or
+The [core-owned XIF controller](../xif_ctrl/README.md) connects issue/ID/cleanup
+to the existing DE and WB endpoints, with up to four live offloads, three-bit
+IDs and in-order result/retirement handling. `config/rv32i_xif.yml` enables the
+initial uncompressed standard-channel profile. Shared LSU, execution traps and
+the standard compressed offload channel remain deferred.
+
+Zfinx/FPU and core debug sequencing remain unfinished.
+`ISA_ZFINX=1`, `ISA_F=1`, `ISA_A=1`, `DEBUG=1`, or
 `MUA_HARDENED=1` deliberately fail RTL elaboration. This guard keeps a selected
-feature from silently acting as disabled. Existing standalone XIF/debug stage
-tests and interfaces remain available for later integration.
+feature from silently acting as disabled. Standalone debug stage tests and
+interfaces remain available for later integration.
 
 ## External connections
 
@@ -32,7 +38,7 @@ tests and interfaces remain available for later integration.
 | `dmem_rvalid_i`, `dmem_rdata_i[31:0]`, `dmem_err_i` | Load/store completion, including error completion for stores. |
 | `fence_req_o`, `fence_ack_i` | Base FENCE external ordering handshake. Tie acknowledgement high if no external ordering work is required. |
 | `fencei_req_o`, `fencei_ack_i` | External instruction synchronization when Zifencei is enabled; otherwise request is inactive. |
-| `xif_*` | Standard issue/register/commit/result declarations retained with XIF disabled. All core-driven outputs are inactive and inputs are ignored. |
+| `xif_*` | Standard coupled issue/register and commit/result channels. When disabled, all outputs are inactive and inputs ignored. When enabled, DE instruction bits are visible for parallel recognition before issue qualification. |
 
 Both memory ports allow independent variable latency, with one outstanding
 transaction each. Once presented, a request persists until grant, including
@@ -80,6 +86,7 @@ make test COMPONENT=core CONFIG=rv32ic_decoder_c
 make test COMPONENT=core CONFIG=rv32i_pmp
 make test COMPONENT=core CONFIG=rv32i_retained
 make test COMPONENT=core CONFIG=rv32i_zifencei
+make test COMPONENT=core CONFIG=rv32i_xif TEST=xif
 make lint COMPONENT=core CONFIG=rv32i
 ```
 
@@ -114,12 +121,24 @@ Registers must be initialized by software before the interpreter reads them.
 | `interrupts` | External interrupt while a load is pending, pipeline drain, vectored entry, saved resume PC, handler CSR reads and MRET restart. |
 | `extensions` | Configured M operations including zero divisor/signed overflow; configured compressed instructions, cross-word assembly and original instruction identity. |
 | `reset` | Restart at a new boot address during an accepted, incomplete data transaction; no stale retirement/store after reset. |
+| `xif` | Enabled: four live offloads, standard commit/result timing, dependencies/ternary operands, paired results, malformed-result containment, rejection, late memory faults, IRQ cleanup/reissue and RV32E defenses. Disabled: inputs ignored and outputs inactive. |
 
 The interpreter now consumes RVFI retirement records and independently checks
 their consumed operands, mode, next PC, memory lanes, fault masks and handler
 markers. It retains internal controller observations for timing and precise
 fault diagnostics. Every suite also checks the saved SV trace against its
 sampled records.
+
+XIF source observations are captured at the actual coupled issue/register
+handshake and retained by ID until DE advances; they are not re-read from GPRs
+after acceptance. Standard RVFI reports the first two used operands and primary
+destination. The companion `xif.jsonl` reports all three used operand values and
+both actual write ports, correlated by RVFI epoch/order, with one record per
+custom retirement. `xif-agent.json` records protocol activity and maximum live
+offloads. The independent custom-instruction oracle uses architectural GPR
+state, while the coprocessor computes from the actual delivered operands. Spike
+checking continues to reject XIF configurations until a custom reference contract
+is selected; no custom comparison is silently skipped.
 
 Each run writes `rvfi.jsonl` beside `results.xml` and `run.json`. Records use
 unsigned JSON integers and one of three types:

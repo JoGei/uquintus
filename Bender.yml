@@ -16,10 +16,14 @@ sources:
           - verif/common/uqu_rvfi.sv
           - verif/common/uqu_rvfi_csrs.sv
           - verif/sim/core/uqu_rvfi_trace.sv
+          - verif/sim/core/uqu_xif_trace.sv
           - verif/sim/core/uqu_core_tb.sv
       - target: any(pipeline_ctrl, pipeline_ctrl_test, rtl, core_test)
         files:
           - src/uquintus/uqu_pipeline_ctrl.v
+      - target: any(xif_ctrl, rtl, core_test)
+        files:
+          - src/uquintus/uqu_xif_ctrl.v
       - target: pipeline_ctrl_test
         files:
           - verif/sim/pipeline_ctrl_parent/uqu_pipeline_ctrl_tb.v

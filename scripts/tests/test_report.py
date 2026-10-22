@@ -103,6 +103,17 @@ class ReportTests(unittest.TestCase):
         (path / 'results.xml').write_text('<testsuites><testsuite><testcase name="wrong"/></testsuite></testsuites>')
         self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
 
+    def test_xif_activity_and_companion_trace_are_reported(self):
+        path=self.run_record(component='core')
+        (path/'xif-agent.json').write_text(json.dumps(dict(max_live=4,events=[
+            dict(type='issue'),dict(type='kill'),dict(type='result') ])))
+        (path/'xif.jsonl').write_text('{}\n')
+        record=report.collect(self.build,self.root)['records'][0]
+        metrics={m['name']:m['value'] for m in record['metrics']}
+        self.assertEqual(metrics['xif_max_live_offloads'],4)
+        self.assertEqual(metrics['xif_kill'],1)
+        self.assertTrue({'xif-agent.json','xif.jsonl'} <= {a['path'] for a in record['artifacts']})
+
     def test_spike_evidence_is_preserved_and_required_for_differential_pass(self):
         path = self.run_record(component='core_elf')
         metadata = json.loads((path / 'run.json').read_text())

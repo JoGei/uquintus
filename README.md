@@ -5,8 +5,9 @@ ASIC flows. The specification is in [doc/uqu_spec.md](doc/uqu_spec.md).
 
 The [native processor core](verif/sim/core/README.md) connects all five stages
 with core-owned pipeline registers, hazards, PMP and control. Native execution
-supports the implemented E/M/C, M/U, PMP and Zifencei configurations; FPU,
-core XIF and debug adapters remain unfinished and reject enabled elaboration.
+supports the implemented E/M/C, M/U, PMP and Zifencei configurations plus the
+initial standard-channel XIF profile. FPU and core debug adapters remain
+unfinished and reject enabled elaboration.
 The core testbed includes verification-only RVFI instruction/CSR collectors and SV JSONL trace;
 see the [RVFI profile](verif/common/README.md) for coverage and remaining formal work.
 
@@ -16,6 +17,7 @@ Implemented components:
 | --- | --- | --- |
 | Native processor core | [uqu_core.v](src/uquintus/uqu_core.v) | [Core interface and programs](verif/sim/core/README.md) |
 | Core pipeline control | [uqu_pipeline_ctrl.v](src/uquintus/uqu_pipeline_ctrl.v) | [Controller interface and tests](verif/sim/pipeline_ctrl/README.md) |
+| Core XIF lifetime control | [uqu_xif_ctrl.v](src/uquintus/uqu_xif_ctrl.v) | [ID reservation, cleanup and core tests](verif/sim/xif_ctrl/README.md) |
 | Instruction-fetch stage | [uqu_stage_if.v](src/uquintus/uqu_stage_if.v) | [IF interface and tests](verif/sim/if/README.md) |
 | Instruction-word fetch engine | [uqu_ifetch.v](src/uquintus/uqu_ifetch.v) | [Ifetch interface and tests](verif/sim/ifetch/README.md) |
 | Instruction selection and alignment | [uqu_if_aligner.v](src/uquintus/uqu_if_aligner.v) | [Aligner interface and tests](verif/sim/if_aligner/README.md) |
@@ -49,6 +51,7 @@ in `verif/requirements.txt` through your environment. Then run:
 ```sh
 make test COMPONENT=core CONFIG=rv32i
 make test COMPONENT=core CONFIG=rv32im
+make test COMPONENT=core CONFIG=rv32i_xif
 make lint COMPONENT=core CONFIG=rv32i
 make sw CONFIG=rv32i RISCV_CC=clang
 make test COMPONENT=core_elf CONFIG=rv32i ELF=build/uquintus-rv32i/sw/smoke/program.elf
@@ -166,8 +169,9 @@ precise fault containment, LSU effect permission and remembered fence handshakes
 Use `make test-runner` to
 check the shared tooling without running an HDL simulator.
 
-The complete processor, architectural verification, formal checks, and ASIC
-implementation flow are not yet implemented.
+The native processor and initial XIF integration are implemented. FPU/debug
+integration, complete architectural verification, formal proofs and the ASIC
+implementation flow remain unfinished.
 
 Optional [Spike differential checking](verif/reference/README.md) is available for
 ELF runs and riscv-tests through `REFERENCE=spike`. Supply the pinned external

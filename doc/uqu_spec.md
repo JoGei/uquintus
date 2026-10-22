@@ -59,8 +59,10 @@ connects actual boundary storage, MEM/LSU and WB/CSR to the controller, testing
 effect permission, precise drains, CSR-driven IRQ re-evaluation and fences.
 The native core now connects the actual stages with parent-owned storage,
 GPRs, hazards, shared PMP and controller. Initial full-core program regressions
-check native execution under variable-latency memory. Core XIF/debug adapters,
-the FPU, Spike/formal acceptance and the ASIC build flow remain unfinished;
+check native execution under variable-latency memory. The core-owned XIF
+controller now connects standard issue/register/commit/result endpoints with
+ID tracking, cleanup and paired-write hazards. Core debug, the FPU, full
+architectural/formal acceptance and the ASIC build flow remain unfinished;
 this integration does not complete the first milestone's verification criteria.
 The [RVFI testbed](../verif/common/README.md) adds passive instruction/register/
 memory/CSR observations and SV JSONL tracing; formal core binding/proofs remain

@@ -7,6 +7,117 @@ from core_env import (CoreTest, BOOT, HANDLER, MASK, ins_i, ins_r, ins_s, ins_b,
 from rvfi_csrs import CSR_CATALOG
 
 
+def custom_word(rd=6, a=1, b=2, op=0):
+    return b << 20 | a << 15 | op << 12 | rd << 7 | 0x0b
+
+
+class XifTest(CoreTest):
+    async def run_phase(self):
+        self.raise_objection()
+        if not self.coprocessor:
+            self.put(BOOT,[ins_i(1,0,7),ins_j(0,0)])
+            await self.reset()
+            for name,value in dict(xif_issue_ready_i=1,xif_issue_accept_i=1,xif_issue_writeback_i=1,
+                    xif_issue_register_read_i=(1 << self.params['XIF_NUM_RS'])-1,xif_register_ready_i=1,
+                    xif_result_valid_i=1,xif_result_hartid_i=5,xif_result_id_i=7,
+                    xif_result_data_i=0xffffffff,xif_result_rd_i=1,xif_result_we_i=1).items():
+                getattr(self.dut,name).value=value
+            await self.finish(BOOT)
+            self.drop_objection(); return
+        agent=self.coprocessor
+        agent.delay=120
+        agent.bad_packets=3
+        agent.same_cycle=True
+        self.skip_handler()
+        program=self.setup_traps()+[ins_i(r,0,r) for r in range(1,16)]
+        rejected=BOOT+4*len(program)
+        program += [0x0000005b,ins_i(1,0,7),ins_i(2,0,11)]
+        self.expected_faults[rejected]=(2,0x5b)
+        for rd in (8,10,12,14): program.append(custom_word(rd))
+        program += [ins_r(5,8,10)]
+        if self.params['XIF_NUM_RS']==3:
+            program += [ins_i(6,0,3),custom_word(6,5,2,1),custom_word(7,0,0,5)]
+        if self.params['XIF_DUALWRITE']:
+            program += [custom_word(8,1,2,3),ins_r(4,9,8),custom_word(0,1,2,3)]
+        program += [custom_word(31,31,31,2)]  # No used registers, also legal on E.
+        end=self.put(BOOT,program)
+        self.put(end,[ins_i(7,0,123),ins_j(0,0)])
+        await self.reset(); await self.finish(end)
+        assert agent.max_live==4,('offloads serialized',agent.max_live,agent.history)
+        assert sum(r['type']=='invalid_result' for r in agent.history)==3
+        assert any(r['type']=='kill' and r['pc']==rejected for r in agent.history)
+        assert not agent.live
+
+        # A late memory fault flushes accepted offloads in EX and DE. They are
+        # killed, then reissued after the handler skips the faulting load.
+        self.code.clear(); self.expected_faults.clear(); self.retired.clear()
+        self.skip_handler(); agent.delay=3
+        program=self.setup_traps()+[ins_i(r,0,r) for r in range(1,16)]+[0x000040b7]
+        load=BOOT+4*len(program)
+        program += [ins_i(4,1,0,2,3),custom_word(6,2,3),custom_word(8,2,3)]
+        end=self.put(BOOT,program); self.put(end,[ins_i(7,0,124),ins_j(0,0)])
+        self.data(0x4000,0x12345678); self.errors['dmem'].add(0x4000)
+        self.expected_faults[load]=(5,0x4000)
+        before=len(agent.history)
+        await self.reset()
+        await self.until(lambda o:len(agent.live)>=2,respond={'dmem':0})
+        await self.finish(end)
+        killed=[r for r in agent.history[before:] if r['type']=='kill']
+        assert {r['pc'] for r in killed}=={load+4,load+8},killed
+        assert not agent.live
+
+        # An interrupt evicts only speculative DE; EX/MEM/WB must complete.
+        self.code.clear(); self.expected_faults.clear(); self.retired.clear(); self.errors['dmem'].clear()
+        self.put(HANDLER,[csr(0x342,rd=11,f=2),csr(0x341,rd=12,f=2),0x30200073])
+        program=self.setup_traps()+[ins_i(r,0,r) for r in range(1,16)]
+        program += [csr(0x304,rs=8,f=5),csr(0x300,rs=8,f=6)]
+        first=BOOT+4*len(program)
+        program += [custom_word(rd,2,3) for rd in (4,6,8,10)]
+        end=self.put(BOOT,program); self.put(end,[ins_i(7,0,125),ins_j(0,0)])
+        agent.hold_result=True
+        before=len(agent.history)
+        await self.reset()
+        await self.until(lambda o:sum(r['accepted'] for r in agent.live)==4)
+        for _ in range(5): await self.cycle(irq=8)
+        assert not self.traps
+        assert any(r['type']=='kill' and r['pc']==first+12 for r in agent.history[before:])
+        agent.hold_result=False
+        await self.until(lambda o:o['trap_valid'],irq=8)
+        assert self.traps[-1]==(first+12,3),self.traps
+        await self.finish(end)
+        assert not agent.live
+        # Shared reset discards unfinished coprocessor work and every pipeline
+        # token, then restarts fresh issue without a stale completion/write.
+        self.code.clear(); self.expected_faults.clear(); self.retired.clear()
+        end=self.put(BOOT,[ins_i(1,0,9),ins_i(2,0,5),custom_word(6),ins_j(0,0)])
+        agent.hold_result=True
+        await self.reset()
+        await self.until(lambda o:agent.live and o['wb_valid_q'] and self.signal('wb_kind_q')==3)
+        assert agent.live and not any(r['pc']==BOOT+8 for r in agent.trace if r['epoch']==agent.epoch)
+        self.code.clear(); self.retired.clear()
+        end=self.put(BOOT,[ins_i(1,0,9),ins_i(2,0,5),custom_word(6)])
+        self.put(end,[ins_i(7,0,127),ins_j(0,0)])
+        await self.reset(); agent.hold_result=False
+        await self.finish(end)
+        assert self.regs[6]==14 and not agent.live
+        if self.params['ISA_E']:
+            # Contain an integration violation: RV32E-unaware acceptance of a
+            # destination outside x0..x15 must be killed before illegal trapping.
+            self.code.clear(); self.expected_faults.clear(); self.retired.clear()
+            self.skip_handler()
+            program=self.setup_traps()+[ins_i(1,0,7)]
+            bad_pc=BOOT+4*len(program); bad=custom_word(16,1,0)
+            program += [bad]
+            end=self.put(BOOT,program); self.put(end,[ins_i(7,0,126),ins_j(0,0)])
+            self.expected_faults[bad_pc]=(2,bad)
+            agent.force_bad_accept=True
+            before=len(agent.history)
+            await self.reset(); await self.finish(end)
+            assert any(r['type']=='kill' and r['pc']==bad_pc for r in agent.history[before:])
+            assert not agent.live
+        self.drop_objection()
+
+
 class IntegerTest(CoreTest):
     async def run_phase(self):
         self.raise_objection()
@@ -334,3 +445,7 @@ async def extensions(dut):
 @cocotb.test(timeout_time=2000,timeout_unit='us')
 async def reset(dut):
     await uvm_root().run_test('ResetTest')
+
+@cocotb.test(timeout_time=2000,timeout_unit='us')
+async def xif(dut):
+    await uvm_root().run_test('XifTest')

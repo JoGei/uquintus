@@ -502,8 +502,9 @@ without bounds on operation completion and external-memory response times.
 The input names and drain/exception arbitration rules above are agreed.
 Native controller sequencing is implemented in
 [architecture, Section 3.2.1](uqu_spec.arch.md#321-core-owned-pipeline-control-implementation).
-Full-core source/state wiring and optional XIF/debug cleanup remain integration
-work; required architectural priorities shall follow the pinned privileged ISA.
+Full-core source/state wiring and initial XIF cleanup are implemented. Core
+debug cleanup remains integration work; required architectural priorities shall
+follow the pinned privileged ISA.
 
 ## 5. CV-X-IF custom extension interface
 
@@ -657,8 +658,9 @@ architectural writeback, and retirement shall occur exactly once.
 
 Holding pipeline state shall not stop coprocessor execution, result delivery,
 or the handling of accepted memory transactions needed to complete the waiting
-instruction. Exact result handshaking and any buffering for backpressure remain
-TBD.
+instruction. The initial implementation shall apply backpressure directly from
+WB, without a result buffer; matching results may finish in the commit-permission
+cycle or later under D-301.
 
 The coprocessor shall deliver results in accepted issue order, excluding killed
 instructions. Rejected and killed instructions shall not produce result
@@ -706,8 +708,8 @@ appropriate WB instruction under the agreed in-order result profile. These
 identifiers shall not require a result-reordering structure or additional
 per-instruction sequence tags for pipeline visibility. See the
 [CV-X-IF identification rules](https://docs.openhwgroup.org/projects/openhw-group-core-v-xif/en/v1.0.0/x_ext.html#identification).
-Exact result buffering and detailed identifier-state implementation remain
-implementation work.
+The initial implementation uses the live/pending-kill bitmaps and direct WB
+backpressure documented under D-301.
 
 For a surviving accepted offload, the core shall grant CV-X-IF commit permission
 when the instruction reaches WB and all older instructions have completed.
@@ -782,9 +784,29 @@ compatible interface/profile decision under the pinned-specification policy.
 The current standard-only constraint shall remain in force.
 
 The implemented WB endpoint and core-internal kill arbitration are documented
-in the [WB guide](../verif/sim/wb/README.md). They use only standard flattened
-commit/result fields at the coprocessor boundary; DE issue/identifier tracking
-remains core-parent integration work.
+in the [WB guide](../verif/sim/wb/README.md). The
+[core-owned XIF controller](../verif/sim/xif_ctrl/README.md) now connects them to
+DE issue/identifier tracking, using only standard flattened channels at the
+coprocessor boundary. Its sequential three-bit allocator reserves at first
+presentation. A live bitmap blocks reuse and wrap past the oldest ID; a pending
+kill bitmap retains notifications after pipeline flushes. WB permission has
+priority over targeted kills, and IDs remain live until result retirement,
+notification of kill/rejection, or unhandshaken retraction.
+
+Pipeline metadata carries both destination addresses and pending bits. EX/MEM
+never forward an unfinished offload's placeholder. WB may forward the primary
+result; the secondary destination waits for register-file visibility. Both
+paired writes occur on the same edge. Result readiness is independent of result
+fields; wrong ID/hart/destination or unadvertised write enables do not retire or
+modify GPRs and remain integration protocol violations, without CPU trap or new
+sideband reporting. Matching results may complete in the permission cycle.
+
+During interrupt drain, the controller retracts or kills speculative DE work,
+finishes EX/MEM/WB offloads, and delays entry until all interface IDs are released.
+The DE PC is retained for reissue after return. Shared reset discards pre-reset
+coprocessor work together with core transaction tracking. The initial enabled
+core profile supports uncompressed offloads; native compressed instructions may
+coexist, but the standard compressed offload channel remains deferred.
 
 ### 5.2. RTL and interrupt-completion contracts
 
@@ -1238,15 +1260,15 @@ later decisions determine the active contract.
 | D-075 | Make CV-X-IF an optional feature selected through the `XIF` elaboration parameter. | Allow configurations without extension logic or dependence on an attached coprocessor. | Agreed; disabled default selected in D-076 |
 | D-076 | Default `XIF` to `0` (disabled). | Enable coprocessor integration explicitly when needed. | Agreed |
 | D-077 | Retain XIF port declarations when disabled; tie core-driven outputs to deterministic inactive values and ignore inputs. | Keep module connections consistent across configurations; wrappers may hide unused ports. | Agreed |
-| D-078 | Support multiple CV-X-IF offloaded instructions in flight, retaining single issue and in-order retirement. | Allow overlap through a pipelined coprocessor without an artificial one-offload limit. | Agreed; capacity and identifier profile defined by D-231; buffering details TBD; result order defined in D-079 |
+| D-078 | Support multiple CV-X-IF offloaded instructions in flight, retaining single issue and in-order retirement. | Allow overlap through a pipelined coprocessor without an artificial one-offload limit. | Agreed; capacity and identifier profile defined by D-231; direct WB backpressure under D-301; result order defined in D-079 |
 | D-079 | Require coprocessor results in accepted issue order, excluding killed instructions, with architectural retirement in program order across native and offloaded instructions. | Keep result ordering outside the core while preserving pipelined offload issue. | Agreed |
-| D-080 | Retain offloaded instructions in normal pipeline slots through WB; hold WB for a late result and propagate backpressure without a separate retirement queue. | Preserve the five-stage in-order pipeline while allowing overlapping offloads within available slots. | Agreed; detailed result handshaking TBD |
+| D-080 | Retain offloaded instructions in normal pipeline slots through WB; hold WB for a late result and propagate backpressure without a separate retirement queue. | Preserve the five-stage in-order pipeline while allowing overlapping offloads within available slots. | Implemented initial standard-channel handshaking under D-301 |
 | D-081 | Grant CV-X-IF commit permission once at WB after all older instructions complete, independently of result availability; retire only after completion. | Preserve precise execution and avoid waiting for a result that requires commit permission first. | Agreed |
 | D-082 | Perform CV-X-IF issue and operand delivery together in DE using `X_ISSUE_REGISTER_SPLIT = 0`. | Use the decode-stage operand path and coupled interface handshakes without a separate operand-delivery stage. | Agreed |
 | D-083 | Support three XIF source operands with `XIF_NUM_RS = 3`; custom ternary instructions read the old destination value through the shared `rd`/third-source field, alongside `rs1` and `rs2`. | Support `rd <- fn(old_rd, rs1, rs2)` without a separate custom third-source encoding field. | Agreed; conditional third read port defined in D-084 |
 | D-084 | Allow `XIF_NUM_RS` to select two or three sources; implement the third integer read port and its XIF-specific dependency/forwarding logic only when `XIF = 1` and `XIF_NUM_RS = 3`. | Read three operands together in DE only in configurations that need them. | Updated by D-236: the third port is also required by Zfinx |
 | D-085 | Default `XIF_NUM_RS` to `3`. | Provide three-source capability when XIF is enabled without adding the third read port when XIF is disabled. | Agreed; third-port presence now also depends on Zfinx under D-236 |
-| D-086 | Make paired-register XIF writeback configurable through `XIF_DUALWRITE`, defaulting to `0`; include dual-write logic only when both XIF and dual writeback are enabled. | Allow custom instructions to return a register pair while keeping the default single-destination writeback path. | Agreed; two write ports selected in D-087; verification mapping TBD |
+| D-086 | Make paired-register XIF writeback configurable through `XIF_DUALWRITE`, defaulting to `0`; include dual-write logic only when both XIF and dual writeback are enabled. | Allow custom instructions to return a register pair while keeping the default single-destination writeback path. | Agreed; two write ports selected in D-087; companion custom retirement trace under D-301 |
 | D-087 | Provide two integer register-file write ports only when `XIF = 1` and `XIF_DUALWRITE = 1`; update both destinations of a paired result in one WB cycle. | Preserve throughput and simultaneous paired updates while retaining one retiring instruction per cycle. | Agreed |
 | D-088 | Fix each XIF source operand at 32 bits with `X_RFR_WIDTH = 32` and `X_DUALREAD = 0`; do not support paired-register source reads. | Keep source accesses at the core's native register width while retaining optional paired-register result writes. | Agreed |
 | D-089 | Allow custom memory requests before WB commit permission on either the shared LSU or a separate memory path, preserving precise-trap and kill contracts. | Permit memory activity to overlap pipeline execution rather than universally waiting until WB. | Memory integration deferred outside the initial profile under D-234; standard speculative kill safety retained |
@@ -1282,7 +1304,7 @@ later decisions determine the active contract.
 | D-228 | With XIF disabled, stop new DE-to-EX transfers when interrupt draining begins, complete native instructions already in EX/MEM/WB, and use the first unexecuted instruction's PC as interrupt mepc. | Define a precise drain boundary while leaving a waiting DE instruction for execution after interrupt return. | Agreed; extended to XIF by the DE-only eviction rule in D-229 |
 | D-229 | On interrupt draining, kill an accepted speculative XIF offload still held in DE before interrupt entry, preserve its PC for reissue, and leave EX/MEM/WB offloads subject to completion before entry; preserve no-side-effect kill semantics and accepted-memory completion tracking. | Apply the EX-entry drain boundary to XIF without waiting for speculative DE computation or canceling committed operations. | Agreed; detailed notification/recovery sequencing and custom-memory enforcement remain implementation/interface work |
 | D-230 | Forward a matching valid XIF result at WB through enabled WB-to-DE/WB-to-EX paths before register-file write visibility; for paired results, forward only primary even `rd` from the lower 32 bits and retain hazard tracking for the secondary odd destination until it is readable from storage. | Reuse the existing single-destination forwarding network while preserving simultaneous paired writeback and correct secondary-destination dependencies. | Agreed |
-| D-231 | Support up to four accepted live XIF offloads in DE/EX/MEM/WB with fixed `X_ID_WIDTH = 3`; use sequential identifiers reserved at issue presentation, carried with pipeline instructions, and reused only under the protocol's completion/kill and wraparound rules, stalling issue when necessary. | Identify related offload transactions and targeted kills while retaining simple in-order tracking without a separate offload queue or result-reordering structure. | Agreed; detailed identifier-state and result-buffer implementation remains open |
+| D-231 | Support up to four accepted live XIF offloads in DE/EX/MEM/WB with fixed `X_ID_WIDTH = 3`; use sequential identifiers reserved at issue presentation, carried with pipeline instructions, and reused only under the protocol's completion/kill and wraparound rules, stalling issue when necessary. | Identify related offload transactions and targeted kills while retaining simple in-order tracking without a separate offload queue or result-reordering structure. | Implemented initial profile under D-301; direct WB result backpressure |
 | D-232 | Permit documented partial memory/device effects when a later access of the same live multi-access custom instruction faults, with explicit recovery/retry semantics and no core rollback; retain normal register-write suppression, WB trap ordering, and no-effect guarantees for speculative kills and younger instructions. | Support custom multi-access operations without requiring all-or-nothing memory effects, while making partial completion visible in the instruction's software contract. | Deferred outside the initial profile by D-234; no all-or-nothing memory engine selected in its place |
 | D-233 | Permit only standard CV-X-IF v1.0.0 signals and packet fields on the core/coprocessor connection; prohibit additional memory, completion, fault, or progress sidebands and reopen prior memory/fault plans that require them. | Preserve an unmodified standard coprocessor interface rather than introduce uquintus-specific channels. | Agreed; initial scope fixed by D-234 |
 | D-234 | Retain unmodified ratified CV-X-IF v1.0.0 and initially defer shared-LSU access and coprocessor-generated execution traps; use the standard result transaction as offload completion, with no extra memory/fault/completion sidebands. | Keep the standard coprocessor connection simple without adopting legacy interfaces or requiring a custom fault protocol. | Agreed; earlier multi-access and partial-effects-on-trap plans remain deferred design intent |
@@ -1295,4 +1317,5 @@ later decisions determine the active contract.
 | D-248 | Prioritize minimal debug hardware size and implementation effort over performance; accept slow serialized debug access, reuse existing datapath/CSR/memory resources, and omit optional enhancements or choose the simplest compliant fixed behavior. | Provide a functionally useful debugger without making debug a project focus or adding performance-oriented hardware. | Agreed; remaining details resolved with the selected DM under existing contracts and Debug 1.0 |
 | D-249 | Finalize baseline native imem/dmem port names and widths in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories), with read-only imem, dmem write controls and byte enables, grant and response-valid handshakes, 32-bit addresses/data, and one response error input per port. | Make the existing memory-interface behavior concrete for core RTL and wrappers without introducing response backpressure or future optional bus fields. | Agreed; full OBI instruction-side write controls are supplied as constants by the wrapper |
 | D-250 | Name the three one-bit core interrupt inputs irq_software_i, irq_timer_i, and irq_external_i; retain the agreed active-high, level-sensitive, core-clock-synchronous behavior. | Finalize interrupt integration names consistently with the signal naming convention and existing mip mapping. | Agreed; baseline functional interface collected in [interfaces, Section 10](uqu_spec.interfaces.md#10-baseline-functional-interface-index) |
-| D-281 | Require an RV32E-aware coprocessor to reject encodings using unavailable GPRs according to actual read/write requirements; defensively kill and fault any invalid accepted response through standard cleanup. | Preserve RV32E legality and standard signal-dependency rules without response-to-request combinational gating or rejecting unused high fields. | Agreed; clarifies RV32E XIF integration in Section 5; DE checks/cleanup under D-280; complete core arbitration remains pending |
+| D-281 | Require an RV32E-aware coprocessor to reject encodings using unavailable GPRs according to actual read/write requirements; defensively kill and fault any invalid accepted response through standard cleanup. | Preserve RV32E legality and standard signal-dependency rules without response-to-request combinational gating or rejecting unused high fields. | Agreed; clarifies RV32E XIF integration in Section 5; DE checks/cleanup under D-280; core arbitration implemented under D-301 |
+| D-301 | Implement core-owned uqu_xif_ctrl with sequential ID reservations, live/pending-kill bitmaps, existing WB commit arbitration, normal pipeline metadata and paired-write hazards; retain direct WB result backpressure and DE cleanup before IRQ entry. | Connect the agreed standard-channel offload profile without a separate instruction queue, result reordering or proprietary coprocessor signals. | Implemented initial uncompressed profile; core/component regressions and auxiliary custom retirement trace; compressed offload, shared LSU and execution traps remain deferred |

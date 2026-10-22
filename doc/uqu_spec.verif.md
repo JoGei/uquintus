@@ -377,8 +377,29 @@ trap PC/cause/value. Programs shall exercise integer dependencies, branches,
 subword accesses, serialization, synchronous faults, M/U transitions, IRQ drain
 and vectored restart, configured M/C/PMP/fences, and reset during pending data
 access. Configurations shall distinguish disabled behavior from enabled-feature
-coverage. FPU and core XIF/debug adapters shall reject enabled elaboration
+coverage. FPU and core debug adapters shall reject enabled elaboration
 until implemented.
+
+The initial XIF core regression shall use only standard coupled issue/register
+and commit/result fields, with a behavioral coprocessor and an independent
+custom-instruction retirement oracle. Exercise four accepted live offloads,
+stable ID/operand presentation, sequential ID wrap/exhaustion, rejection and
+cleanup, same-cycle and delayed results, third-source dependencies, no-write
+completion, paired writes/ignored x0-x1, secondary destination hazards, malformed
+result containment, late memory-fault flushes, precise IRQ eviction/reissue and
+reset with unfinished work. Cover RV32E-aware rejection and defensive kill of
+noncompliant acceptance, two-source operation, forwarding disabled and operand
+retention. Disabled XIF shall ignore noisy inputs and produce inactive outputs.
+
+Capture custom sources at actual issue handshakes. Standard RVFI shall report
+the first two sources and primary write. A companion `xif.jsonl` shall retain all
+three used operand values and both actual architectural writes, correlated with
+the same RVFI epoch/order and one custom retirement. This diagnostic shall not
+be presented as a standard formal RVFI multi-destination extension or custom
+instruction proof. Retain protocol observations in `xif-agent.json`; software
+fixtures and their behavioral model shall not advertise a new core ISA extension.
+Spike custom comparison remains unsupported until an explicit reference contract
+is selected; no custom event shall be silently excluded from a claimed comparison.
 
 The interpreter consumes the RVFI testbed's retirement records and independently
 checks operands, memory lanes, fault reporting and instruction sequence. It is

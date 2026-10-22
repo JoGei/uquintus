@@ -137,8 +137,8 @@ class DEModel:
         issued = bool(self.p['XIF'] and i['rst_n'] and i['valid'] and self.issued)
         o.update(xif_issued=int(issued), xif_accepted=int(issued and self.accepted),
                  xif_cleanup_valid=int(cleanup), xif_cleanup_id=i['xif_id'] if cleanup else 0,
-                 xif_issue_valid=int(request), xif_issue_instr=i['instr'] if request else 0,
-                 xif_issue_hartid=i['hart_id'] if request else 0, xif_issue_id=i['xif_id'] if request else 0,
+                 xif_issue_valid=int(request), xif_issue_instr=i['instr'] if self.p['XIF'] and active else 0,
+                 xif_issue_hartid=i['hart_id'] if self.p['XIF'] and active else 0, xif_issue_id=i['xif_id'] if request else 0,
                  xif_register_valid=int(request), xif_register_hartid=i['hart_id'] if request else 0,
                  xif_register_id=i['xif_id'] if request else 0, xif_register_rs=packed,
                  xif_register_rs_valid=mask)

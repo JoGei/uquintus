@@ -205,6 +205,8 @@ class XIFTest(DETest):
             self.report()
             self.drop_objection()
             return
+        r = await self.check(instr=word(), permit=0, xif_id_valid=0)
+        assert r['xif_issue_instr']==word() and not r['xif_issue_valid'], 'parallel recognition gated by issue'
         # Backpressure with partial operands, then producer departure. Already
         # presented rs_valid/data must remain stable in continuous hazard mode.
         i = inputs(instr=custom, ready=0, rs_ready=1)

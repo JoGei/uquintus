@@ -74,8 +74,16 @@ Feature-disabled illegal accesses remain zero-masked. Disabled PMP CSRs stay
 legal and report their hardwired zero state. Unreset PMP address payload is not
 assumed to have a defined reset value.
 
-RVFI_BUS, FPU/custom/paired
-results, debug, rollback, alternative arithmetic, Spike comparison, formal core
+For native-core XIF simulation, the wrapper captures actual issue operands by
+ID. Standard RVFI contains the first two used sources and primary destination;
+`verif/sim/core/uqu_xif_trace.sv` additionally records all three operands and both
+actual GPR write ports in `xif.jsonl`, correlated with the same epoch/order.
+This companion diagnostic is not a standard RVFI multi-destination extension and
+does not imply formal custom-instruction proofs. The custom retirement oracle
+checks the extra effects, including atomic paired update and ignored x0/x1.
+
+RVFI_BUS, FPU, standard formal modeling of custom/paired
+results, debug, rollback, alternative arithmetic, formal core
 signal binding, environment assumptions and actual instruction proofs remain
 follow-ups. Yosys parsing/structural checks of the collector establish tool
 compatibility only, not proof of architectural correctness.

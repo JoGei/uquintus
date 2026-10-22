@@ -17,6 +17,7 @@ from rvfi_csrs import CSR_CATALOG, CSRObservation
 from csregfile_model import INPUTS
 from interrupts import check_interrupt_cycle
 from timing import counter_state, check_counters
+from xif_model import Coprocessor, custom, result as custom_result
 
 MASK = 0xffffffff
 BOOT = 0x1000
@@ -90,6 +91,7 @@ class CoreTest(uvm_test):
         self.csr_records = []
         self.timing = dict(schema_version=1, status='running', reset_cycle=None,
                            checked_cycles=0, events=[])
+        self.coprocessor = Coprocessor(self) if self.params['XIF'] else None
 
     def put(self, addr, values):
         for entry in values:
@@ -139,7 +141,27 @@ class CoreTest(uvm_test):
         imm = sext(instr >> 20, 12)
         result = None
         next_pc = (pc+size)&MASK
-        if opcode == 0x37:
+        if opcode == 0x0b and self.coprocessor:
+            desc=custom(instr,self.params)
+            assert desc is not None, 'unsupported custom instruction retired'
+            operands=[self.value(a) if desc['used'] >> i & 1 else 0
+                      for i,a in enumerate(desc['addresses'])]
+            low,high=custom_result(desc,operands)
+            result=low if desc['writes'] & 1 else None
+            paired=desc['writes']==3
+            if paired and rd==0: result=None
+            secondary=bool(paired and rd)
+            observed=self.edge_o
+            assert (observed['wb_we1'],observed['wb_waddr1'],observed['wb_wdata1']) == (
+                int(secondary),rd+1 if secondary else 0,high if secondary else 0)
+            if secondary: self.regs[rd+1]=high
+            transaction=self.coprocessor.retiring
+            assert transaction is not None and transaction['pc']==pc
+            self.coprocessor.trace.append(dict(epoch=self.coprocessor.epoch,order=self.rvfi_order-1,pc=pc,id=transaction['id'],
+                instr=original,used=desc['used'],rs=operands,
+                rd=[rd if result is not None and rd else 0,rd+1 if secondary else 0],
+                data=[low if result is not None and rd else 0,high if secondary else 0]))
+        elif opcode == 0x37:
             result = instr & 0xfffff000
         elif opcode == 0x17:
             result = (pc+(instr & 0xfffff000))&MASK
@@ -257,6 +279,10 @@ class CoreTest(uvm_test):
             a,b,rd = instr >> 15 & 31, instr >> 20 & 31, instr >> 7 & 31
             uses_a = opcode in (0x13,0x33,3,0x23,0x63,0x67) or (opcode==0x73 and f in (1,2,3))
             uses_b = opcode in (0x33,0x23,0x63)
+            if self.coprocessor and opcode==0x0b and not r['trap']:
+                desc=custom(instr,self.params)
+                assert desc is not None
+                uses_a,uses_b=bool(desc['used'] & 1),bool(desc['used'] & 2)
             illegal_e = self.params['ISA_E'] and ((uses_a and a>=16) or (uses_b and b>=16) or (opcode in (0x13,0x33,3,0x67) and rd>=16))
             unknown = fetch_fault or illegal_e or (opcode==0x33 and instr >> 25==1 and not self.params['ISA_M'])
             for n,addr,used in ((1,a,uses_a),(2,b,uses_b)):
@@ -307,6 +333,7 @@ class CoreTest(uvm_test):
         assert faults==self.faults, 'trace trap diagnostics differ from expected faults'
         saved=[r['csrs'] for r in records if r['type'] in ('instruction','interrupt')]
         assert saved[-len(self.csr_records):]==self.csr_records, 'saved CSR observations differ from sampled channels'
+        if self.coprocessor: self.coprocessor.finish(instructions[-len(self.rvfi_records):])
 
     async def cycle(self, rst=1, grant=None, respond=None, irq=0, fence_ack=None):
         d = self.dut
@@ -332,7 +359,8 @@ class CoreTest(uvm_test):
                 assert req and payload == self.held[bus], f'{bus} request changed before grant'
             take = rst and req and (self.rng.randrange(3)!=0 if grant is None and self.random_wait else (1 if grant is None else grant))
             pending = self.pending[bus]
-            returning = rst and pending is not None and (pending[0] == 0 if respond is None else respond)
+            response_enable=respond.get(bus) if isinstance(respond,dict) else respond
+            returning = rst and pending is not None and (pending[0] == 0 if response_enable is None else response_enable)
             grants[bus] = (take, payload)
             returns[bus] = returning
             getattr(d, bus+'_gnt_i').value = int(take)
@@ -341,18 +369,22 @@ class CoreTest(uvm_test):
                 getattr(d, bus+'_rdata_i').value = pending[1]
                 getattr(d, bus+'_err_i').value = pending[2]
             self.held[bus] = payload if rst and req and not take else None
+        if self.coprocessor: self.coprocessor.drive(rst)
         await Timer(1, units='ns')
         o = {n:self.signal(n) for n in ('wb_retire','wb_exception_fire','wb_pc_q','wb_original_q',
                 'wb_we0','wb_waddr0','wb_wdata0','wb_cause','wb_tval','trap_valid','trap_pc','trap_cause',
                 'redirect_valid','redirect_addr','de_valid_q','ex_valid_q','mem_valid_q','wb_valid_q',
-                'priv_m_q','mstatus','mie','mip','mtvec','mepc','de_pc_q','mem_pc_q')}
+                'priv_m_q','mstatus','mie','mip','mtvec','mepc','de_pc_q','mem_pc_q',
+                'wb_we1','wb_waddr1','wb_wdata1')}
+        self.edge_o=o
         if rst:
             assert o['priv_m_q']==self.priv and o['mstatus']==self.csrs[0x300] and o['mie']==self.csrs[0x304], ('IRQ pre-state',o,self.csrs)
             assert o['mip']==irq, ('external IRQ pins/mip',o['mip'],irq)
             # Include the independent bus agent's outstanding/held/granted work;
             # a bad RTL busy flag must not make an unsafe entry appear valid.
             data_busy = (self.signal('lsu_busy') or self.pending['dmem'] is not None or
-                         self.held['dmem'] is not None or grants['dmem'][0])
+                         self.held['dmem'] is not None or grants['dmem'][0] or
+                         self.coprocessor is not None and self.coprocessor.pre_busy)
             check_interrupt_cycle(o,priv_m=self.priv,mstatus=self.csrs[0x300],mie=self.csrs[0x304],
                 lines=irq,lsu_busy=data_busy,de_fire=self.signal('de_fire'))
         ci = dict(INPUTS, rst_n=rst, priv_m=self.priv, hart_id=5,
@@ -407,7 +439,9 @@ class CoreTest(uvm_test):
             for name in ('fence','fencei'):
                 if self.signal(name+'_req_o') and ack:
                     self.fences.append(name)
-            assert not any(self.signal(n) for n in ('xif_issue_valid_o','xif_register_valid_o','xif_commit_valid_o','xif_result_ready_o'))
+            if self.coprocessor: self.coprocessor.sample(rst)
+            else:
+                assert not any(self.signal(n) for n in ('xif_issue_valid_o','xif_register_valid_o','xif_commit_valid_o','xif_result_ready_o'))
         else:
             self.pending = dict(imem=None,dmem=None)
         d.clk_i.value = 1

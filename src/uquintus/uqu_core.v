@@ -60,8 +60,7 @@ module uqu_core #(
     input wire fence_ack_i,
     output wire fencei_req_o,
     input wire fencei_ack_i,
-    // Retained standard issue/register/commit/result declarations. Native
-    // bring-up requires XIF=0; the stages provide deterministic inactive pins.
+    // Standard CV-X-IF issue/register/commit/result channels, inactive at XIF=0.
     output wire xif_issue_valid_o,
     input wire xif_issue_ready_i,
     output wire [31:0] xif_issue_instr_o,
@@ -98,6 +97,8 @@ module uqu_core #(
     reg [31:0] ex_pc_q, ex_original_q, ex_next_pc_q, ex_tval_q;
     reg ex_compressed_q, ex_priv_m_q, ex_exception_q, ex_serialize_q;
     reg [4:0] ex_cause_q, ex_rd_q;
+    reg [4:0] ex_rd1_q, mem_rd1_q, wb_rd1_q;
+    reg [2:0] ex_xif_id_q, mem_xif_id_q, wb_xif_id_q;
     reg ex_rd_we_q, ex_lsu_q, ex_mem_we_q, ex_csr_zero_q;
     reg [1:0] ex_pending_q, ex_fu_q, ex_a_sel_q, ex_b_sel_q;
     reg [4:0] ex_op_q;
@@ -162,7 +163,7 @@ module uqu_core #(
     wire [31:0] ex_rs [0:2];
     wire [2:0] de_used, de_need_now, de_ex_used, de_captured, de_rs_ready, de_guaranteed, ex_rs_ready;
     wire [1:0] de_fu, de_a_sel, de_b_sel, de_pending;
-    wire [4:0] de_op, de_rd;
+    wire [4:0] de_op, de_rd, de_rd1;
     wire [31:0] de_imm, de_pass, de_csr_src, de_next_pc, de_target;
     wire [11:0] de_csr_addr;
     wire [2:0] de_kind, de_system, de_mem_op, de_csr_op, de_rm;
@@ -185,6 +186,12 @@ module uqu_core #(
     wire [4:0] wb_cause;
     wire [31:0] wb_tval, wb_result;
     wire wb_result_valid, wb_we0, wb_we1;
+    wire xif_id_valid, xif_issued, xif_accepted, xif_cleanup_valid, xif_cleanup_ready;
+    wire xif_de_cancel, xif_kill_valid, xif_kill_ready, xif_drain_ready, draining;
+    wire [2:0] xif_de_id, xif_cleanup_id, xif_kill_id;
+    wire [1:0] xif_allowed_writes = {wb_rd1_q != 5'd0, wb_rd_we_q};
+    wire [1:0] xif_result_writes = {{(1-XIF_DUALWRITE){1'b0}}, xif_result_we_i};
+    wire xif_result_allowed = ((xif_result_writes & ~xif_allowed_writes) == 2'd0);
     wire [4:0] wb_waddr0, wb_waddr1;
     wire [31:0] wb_wdata0, wb_wdata1;
     wire wb_redirect = wb_exception_fire || wb_mret;
@@ -204,7 +211,7 @@ module uqu_core #(
         .wb_redirect_valid_i(wb_redirect), .wb_redirect_addr_i(wb_target), .wb_next_pc_i(wb_next_pc_q),
         .de_pc_i(de_pc_q), .resume_pc_i(resume_pc_q), .priv_m_i(priv_m_q),
         .mstatus_i(mstatus), .mie_i(mie), .mip_i(mip), .mtvec_i(mtvec), .irq_mask_i(1'b0),
-        .drain_req_i(1'b0), .drain_target_i(32'd0), .drain_ready_i(!lsu_busy), .data_idle_i(!lsu_busy),
+        .drain_req_i(1'b0), .drain_target_i(32'd0), .drain_ready_i(!lsu_busy && xif_drain_ready), .data_idle_i(!lsu_busy),
         .fence_ack_i(fence_ack_i), .fencei_ack_i(fencei_ack_i),
         .if_permit_o(if_permit), .fetch_enable_o(fetch_enable), .if_ready_o(if_ready),
         .de_permit_o(de_permit), .de_ready_o(de_ready), .ex_ready_o(ex_ready), .mem_ready_o(mem_ready), .wb_ready_o(wb_ready),
@@ -212,10 +219,21 @@ module uqu_core #(
         .de_enable_o(de_enable), .ex_enable_o(ex_enable), .mem_enable_o(mem_enable), .wb_enable_o(wb_enable),
         .de_valid_next_o(de_next_valid), .ex_valid_next_o(ex_next_valid), .mem_valid_next_o(mem_next_valid), .wb_valid_next_o(wb_next_valid),
         .if_flush_o(if_flush), .de_flush_o(de_flush), .ex_flush_o(ex_flush), .mem_flush_o(mem_flush),
-        .mem_request_permit_o(mem_request_permit), .irq_eligible_o(), .draining_o(),
+        .mem_request_permit_o(mem_request_permit), .irq_eligible_o(), .draining_o(draining),
         .trap_valid_o(trap_valid), .trap_pc_o(trap_pc), .trap_interrupt_o(trap_interrupt), .trap_cause_o(trap_cause), .trap_tval_o(trap_tval),
         .drain_accept_o(), .drain_pc_o(), .redirect_valid_o(redirect_valid), .redirect_addr_o(redirect_addr),
         .fence_req_o(fence_req_o), .fencei_req_o(fencei_req_o)
+    );
+    uqu_xif_ctrl #(.XIF(XIF)) u_xif_ctrl (
+        .clk_i(clk_i), .rst_ni(rst_ni), .draining_i(draining), .de_valid_i(de_valid_q),
+        .de_fire_i(de_fire), .de_flush_i(de_flush), .de_issued_i(xif_issued), .issue_valid_i(xif_issue_valid_o),
+        .de_cleanup_valid_i(xif_cleanup_valid), .de_cleanup_id_i(xif_cleanup_id), .de_cleanup_ready_o(xif_cleanup_ready),
+        .de_id_valid_o(xif_id_valid), .de_id_o(xif_de_id), .de_cancel_o(xif_de_cancel),
+        .ex_valid_i(ex_valid_q), .ex_xif_i(ex_kind_q == `UQU_WB_XIF), .ex_id_i(ex_xif_id_q), .ex_flush_i(ex_flush),
+        .mem_valid_i(mem_valid_q), .mem_xif_i(mem_kind_q == `UQU_WB_XIF), .mem_id_i(mem_xif_id_q), .mem_flush_i(mem_flush),
+        .wb_retire_i(wb_retire), .wb_xif_i(wb_kind_q == `UQU_WB_XIF), .wb_id_i(wb_xif_id_q),
+        .commit_valid_i(xif_commit_valid_o), .commit_id_i(xif_commit_id_o), .commit_kill_i(xif_commit_kill_o),
+        .kill_valid_o(xif_kill_valid), .kill_id_o(xif_kill_id), .kill_ready_i(xif_kill_ready), .drain_ready_o(xif_drain_ready)
     );
     uqu_stage_if #(
         .ISA_C(ISA_C), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
@@ -245,7 +263,7 @@ module uqu_core #(
         .MUA_FORWARD_MEM_TO_DE(MUA_FORWARD_MEM_TO_DE), .MUA_FORWARD_MEM_TO_EX(MUA_FORWARD_MEM_TO_EX),
         .MUA_FORWARD_WB_TO_EX(MUA_FORWARD_WB_TO_EX), .MUA_DE_OPERAND_RETENTION(MUA_DE_OPERAND_RETENTION)
     ) u_hazard (
-        .clk_i(clk_i), .rst_ni(rst_ni), .de_valid_i(de_valid_q), .de_clear_i(de_flush || de_fire),
+        .clk_i(clk_i), .rst_ni(rst_ni), .de_valid_i(de_valid_q), .de_clear_i(de_flush || de_fire || xif_de_cancel),
         .de_rs0_addr_i(de_rs_addr[0]), .de_rs1_addr_i(de_rs_addr[1]), .de_rs2_addr_i(de_rs_addr[2]),
         .de_rs0_i(gpr_data[0]), .de_rs1_i(gpr_data[1]), .de_rs2_i(gpr_data[2]),
         .de_rs_used_i(de_used), .de_rs_need_now_i(de_need_now),
@@ -254,11 +272,11 @@ module uqu_core #(
         .ex_rs0_i(ex_rs_data_q[0]), .ex_rs1_i(ex_rs_data_q[1]), .ex_rs2_i(ex_rs_data_q[2]),
         .ex_rs_used_i(ex_used_q), .ex_rs_captured_i(ex_captured_q),
         .ex_rs0_o(ex_rs[0]), .ex_rs1_o(ex_rs[1]), .ex_rs2_o(ex_rs[2]), .ex_rs_ready_o(ex_rs_ready),
-        .ex_pending_i(ex_pending_q), .ex_rd0_i(ex_rd_q), .ex_rd1_i(5'd0),
+        .ex_pending_i(ex_pending_q), .ex_rd0_i(ex_rd_q), .ex_rd1_i(ex_rd1_q),
         .ex_result_available_i(ex_forwardable), .ex_result_forwardable_i(ex_forwardable), .ex_result_i(ex_result), .ex_advance_i(ex_fire),
-        .mem_valid_i(mem_valid_q), .mem_pending_i(mem_pending_q), .mem_rd0_i(mem_rd_q), .mem_rd1_i(5'd0),
+        .mem_valid_i(mem_valid_q), .mem_pending_i(mem_pending_q), .mem_rd0_i(mem_rd_q), .mem_rd1_i(mem_rd1_q),
         .mem_result_available_i(mem_forwardable), .mem_result_forwardable_i(mem_forwardable), .mem_result_i(mem_result), .mem_advance_i(mem_fire),
-        .wb_valid_i(wb_valid_q), .wb_pending_i(wb_pending_q), .wb_rd0_i(wb_rd_q), .wb_rd1_i(5'd0),
+        .wb_valid_i(wb_valid_q), .wb_pending_i(wb_pending_q), .wb_rd0_i(wb_rd_q), .wb_rd1_i(wb_rd1_q),
         .wb_result_available_i(wb_result_valid), .wb_result_forwardable_i(wb_result_valid), .wb_result_i(wb_result), .wb_advance_i(wb_fire)
     );
     uqu_stage_de #(
@@ -266,7 +284,7 @@ module uqu_core #(
         .ISA_F(ISA_F), .ISA_A(ISA_A), .ISA_UMODE(ISA_UMODE), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .XIF(XIF), .XIF_NUM_RS(XIF_NUM_RS), .XIF_DUALWRITE(XIF_DUALWRITE), .DEBUG(DEBUG)
     ) u_de (
-        .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(de_flush), .valid_i(de_valid_q), .ready_o(), .valid_o(de_complete), .ready_i(de_ready), .permit_i(de_permit),
+        .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(de_flush || xif_de_cancel), .valid_i(de_valid_q), .ready_o(), .valid_o(de_complete), .ready_i(de_ready), .permit_i(de_permit),
         .pc_i(de_pc_q), .instr_i(de_instr_q), .original_instr_i(de_original_q), .compressed_i(de_compressed_q),
         .priv_m_i(de_priv_m_q), .debug_mode_i(1'b0), .tw_i(mstatus[21]), .frm_i(frm),
         .exception_valid_i(de_exception_q), .exception_cause_i(de_cause_q), .exception_tval_i(de_tval_q),
@@ -275,13 +293,13 @@ module uqu_core #(
         .rs_used_o(de_used), .rs_need_now_o(de_need_now), .rs_ex_used_o(de_ex_used), .rs_captured_o(de_captured),
         .native_o(), .fu_o(de_fu), .op_o(de_op), .a_sel_o(de_a_sel), .b_sel_o(de_b_sel), .imm_o(de_imm),
         .a_o(), .b_o(), .c_o(), .rm_o(de_rm), .pass_data_o(de_pass), .store_data_o(),
-        .rd_we_o(de_rd_we), .rd_o(de_rd), .rd1_o(), .rd_pending_o(de_pending), .lsu_o(de_lsu), .mem_we_o(de_mem_we), .mem_op_o(de_mem_op),
+        .rd_we_o(de_rd_we), .rd_o(de_rd), .rd1_o(de_rd1), .rd_pending_o(de_pending), .lsu_o(de_lsu), .mem_we_o(de_mem_we), .mem_op_o(de_mem_op),
         .wb_kind_o(de_kind), .system_o(de_system), .serialize_o(de_serialize), .csr_addr_o(de_csr_addr), .csr_op_o(de_csr_op),
         .csr_src_o(de_csr_src), .csr_src_zero_o(de_csr_zero), .control_flow_o(de_control_flow), .branch_resolve_o(),
         .branch_taken_o(de_branch_taken), .branch_target_o(de_target), .next_pc_o(de_next_pc),
         .exception_valid_o(de_exception), .exception_cause_o(de_cause), .exception_tval_o(de_tval),
-        .xif_force_i(1'b0), .xif_id_valid_i(1'b0), .xif_id_i(3'd0), .hart_id_i(hart_id_i),
-        .xif_issued_o(), .xif_accepted_o(), .xif_cleanup_valid_o(), .xif_cleanup_id_o(), .xif_cleanup_ready_i(1'b0),
+        .xif_force_i(1'b0), .xif_id_valid_i(xif_id_valid), .xif_id_i(xif_de_id), .hart_id_i(hart_id_i),
+        .xif_issued_o(xif_issued), .xif_accepted_o(xif_accepted), .xif_cleanup_valid_o(xif_cleanup_valid), .xif_cleanup_id_o(xif_cleanup_id), .xif_cleanup_ready_i(xif_cleanup_ready),
         .xif_issue_valid_o(xif_issue_valid_o), .xif_issue_ready_i(xif_issue_ready_i), .xif_issue_instr_o(xif_issue_instr_o),
         .xif_issue_hartid_o(xif_issue_hartid_o), .xif_issue_id_o(xif_issue_id_o), .xif_issue_accept_i(xif_issue_accept_i),
         .xif_issue_writeback_i(xif_issue_writeback_i), .xif_issue_register_read_i(xif_issue_register_read_i),
@@ -321,9 +339,9 @@ module uqu_core #(
         .exception_cause_i(wb_cause_q), .exception_tval_i(wb_tval_q), .priv_m_i(wb_valid_q ? wb_priv_m_q : priv_m_q),
         .hart_id_i(hart_id_i), .irq_software_i(irq_software_i), .irq_timer_i(irq_timer_i), .irq_external_i(irq_external_i),
         .trap_i(trap_valid), .trap_pc_i(trap_pc), .trap_interrupt_i(trap_interrupt), .trap_cause_i(trap_cause), .trap_tval_i(trap_tval),
-        .xif_id_i(3'd0), .xif_kill_valid_i(1'b0), .xif_kill_id_i(3'd0), .xif_kill_ready_o(),
+        .xif_id_i(wb_xif_id_q), .xif_kill_valid_i(xif_kill_valid), .xif_kill_id_i(xif_kill_id), .xif_kill_ready_o(xif_kill_ready),
         .xif_commit_valid_o(xif_commit_valid_o), .xif_commit_hartid_o(xif_commit_hartid_o), .xif_commit_id_o(xif_commit_id_o), .xif_commit_kill_o(xif_commit_kill_o),
-        .xif_result_valid_i(xif_result_valid_i), .xif_result_ready_o(xif_result_ready_o), .xif_result_hartid_i(xif_result_hartid_i),
+        .xif_result_valid_i(xif_result_valid_i && xif_result_allowed), .xif_result_ready_o(xif_result_ready_o), .xif_result_hartid_i(xif_result_hartid_i),
         .xif_result_id_i(xif_result_id_i), .xif_result_data_i(xif_result_data_i), .xif_result_rd_i(xif_result_rd_i), .xif_result_we_i(xif_result_we_i),
         .debug_mode_i(1'b0), .debug_enter_i(1'b0), .debug_pc_i(32'd0), .debug_cause_i(3'd0),
         .debug_enter_o(), .debug_exception_o(), .debug_ebreak_o(), .dret_o(), .dcsr_o(), .dpc_o(),
@@ -386,6 +404,8 @@ module uqu_core #(
             ex_system_q <= de_system;
             ex_kind_q <= de_kind;
             ex_rd_q <= de_rd;
+            ex_rd1_q <= de_rd1;
+            ex_xif_id_q <= xif_de_id;
             ex_rd_we_q <= de_rd_we;
             ex_pending_q <= de_pending;
             ex_fu_q <= de_fu;
@@ -417,6 +437,8 @@ module uqu_core #(
             mem_system_q <= ex_system_q;
             mem_kind_q <= ex_kind_q;
             mem_rd_q <= ex_rd_q;
+            mem_rd1_q <= ex_rd1_q;
+            mem_xif_id_q <= ex_xif_id_q;
             mem_rd_we_q <= ex_rd_we_q;
             mem_pending_q <= ex_pending_q;
             mem_data_q <= ex_result;
@@ -444,6 +466,8 @@ module uqu_core #(
             wb_system_q <= mem_system_q;
             wb_kind_q <= mem_kind_q;
             wb_rd_q <= mem_rd_q;
+            wb_rd1_q <= mem_rd1_q;
+            wb_xif_id_q <= mem_xif_id_q;
             wb_rd_we_q <= mem_rd_we_q;
             wb_pending_q <= mem_pending_q;
             wb_data_q <= mem_result;
@@ -473,10 +497,9 @@ module uqu_core #(
                 end
             end
         end
-        // Native execution is wired; these need an FPU or core-owned adapters.
-        // Keep the parameter names and inactive XIF declarations for integration.
+        // Reserved features still require their backend or core integration.
         if ((ISA_ZFINX != 0) || (ISA_F != 0) || (ISA_A != 0) ||
-            (XIF != 0) || (DEBUG != 0) || (MUA_HARDENED != 0)) begin : gen_unsupported
+            (DEBUG != 0) || (MUA_HARDENED != 0)) begin : gen_unsupported
             uqu_core_unsupported_feature invalid_configuration ();
         end
     endgenerate

@@ -3466,13 +3466,13 @@ be resolved when their implementation milestone is undertaken:
 
 | Area | Remaining work |
 | --- | --- |
-| Execution/control | IF/DE/EX/MEM/WB stages, native pipeline controller, shared hazards and parent-register/GPR fixtures implemented; connect full uqu_core pipeline/control, XIF issue/ID/kill and debug adapters, and evaluate timing of enabled forwarding paths. |
-| Memory access | MEM/LSU, registered load readiness, IF PMP query and parent-owned PMP routing verified at component/fixture level; connect CSR-owned PMP state, both stages, precise-effect permission control, and fences in the full core. |
-| Integer arithmetic | ALU, MUL/DIV, shared arithmetic, EX control, and parent-register fixtures are implemented; full processor pipeline integration remains pending. Preserve fixed execution latencies and physical sharing during integration. |
+| Execution/control | Full uqu_core pipeline/control, shared hazards and initial standard-channel XIF issue/ID/kill integration are implemented; core debug sequencing and physical timing evaluation remain. |
+| Memory access | IF/MEM, CSR-owned PMP state, the shared checker, precise-effect permissions and fences are connected in the core. Broader system integration and physical validation remain; XIF shared-LSU access stays deferred. |
+| Integer arithmetic | ALU, MUL/DIV, shared arithmetic and EX control are integrated in the core. Preserve fixed execution latencies and physical sharing during synthesis/timing validation. |
 | Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
-| ISA/CSR/PMP | WB owns decoded CSR state/access checks, optional PMP/FP state, counters and accepted trap/MRET updates; integrate with the full-core controller and two-port PMP checker, preserve instruction-age/retirement rules, and connect XIF issue/tracking and the core debug controller to implemented WB endpoints. |
-| Frontend | IF owns selected expansion placement, prefetch/fault association, redirect tracking and none/static_not_taken behavior; integrate full-core event arbitration, future dynamic predictors and the deferred standard XIF compressed channel. |
+| ISA/CSR/PMP | WB CSR state/access checks, counters, trap/MRET updates, core control/PMP and initial XIF tracking are integrated. Broader architectural verification and core debug integration remain; FPU state awaits its backend. |
+| Frontend | Full-core event arbitration, expansion placement, prefetch/fault association, redirects and none/static_not_taken behavior are connected. Dynamic predictors and the standard XIF compressed channel remain future work. |
 | Milestones | Implementation order and acceptance criteria for optional ISA features, PMP, XIF, latch storage, and non-default configurations after the baseline milestone. |
 
 Full F and its separate register file are deferred in favor of Zfinx. `ISA_A`

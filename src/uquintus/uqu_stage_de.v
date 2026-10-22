@@ -270,8 +270,10 @@ module uqu_stage_de #(
             assign xif_issued_o = rst_ni && valid_i && done_q;
             assign xif_accepted_o = xif_issued_o && accept_q;
             assign xif_issue_valid_o = request_valid;
-            assign xif_issue_instr_o = request_valid ? instr_i : 32'd0;
-            assign xif_issue_hartid_o = request_valid ? hart_id_i : 32'd0;
+            // Allow parallel extension recognition before issue qualification.
+            // These fields carry no transaction while issue_valid is low.
+            assign xif_issue_instr_o = active ? instr_i : 32'd0;
+            assign xif_issue_hartid_o = active ? hart_id_i : 32'd0;
             assign xif_issue_id_o = request_valid ? xif_id_i : 3'd0;
             assign xif_register_valid_o = request_valid;
             assign xif_register_hartid_o = request_valid ? hart_id_i : 32'd0;

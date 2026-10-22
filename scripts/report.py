@@ -43,7 +43,8 @@ FILES = ('run.json', 'build.json', 'report.json', 'results.xml', 'execution.json
          'config.yml', 'component.yml', 'selectors.json', 'lint.log',
          'simulation.log', 'build.log', 'program.map', 'software-build.json',
          'spike.json', 'spike.log', 'spike-process.log', 'spike-debug.cmd',
-         'interrupts.json', 'timing.json', 'spike-inputs.txt', 'spike-irq-build.json', 'spike-irq-build.log')
+         'interrupts.json', 'timing.json', 'spike-inputs.txt', 'spike-irq-build.json', 'spike-irq-build.log',
+         'xif.jsonl', 'xif-agent.json')
 
 
 def digest(value):
@@ -253,6 +254,16 @@ def normalize(path, build, root, hashes):
         if state == 'passed' and detail.get('status') != 'passed':
             record['status'] = 'error'
             record['notes'].append('Passed metadata conflicts with execution status.')
+    offload = path.parent / 'xif-agent.json'
+    if offload.is_file():
+        evidence = read_json(offload)
+        maximum = evidence.get('max_live')
+        events = evidence.get('events')
+        if type(maximum) is int and isinstance(events,list):
+            record['metrics'].append({'name':'xif_max_live_offloads','value':maximum,'unit':'offloads'})
+            for kind in ('issue','commit','kill','result','retract','invalid_result'):
+                record['metrics'].append({'name':'xif_'+kind,'value':sum(
+                    isinstance(e,dict) and e.get('type')==kind for e in events),'unit':'transactions'})
     differential = path.parent / 'spike.json'
     if differential.is_file():
         evidence = read_json(differential)

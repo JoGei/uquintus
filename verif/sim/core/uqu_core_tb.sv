@@ -1,5 +1,6 @@
 `default_nettype none
 `include "uqu_config.vh"
+`include "uqu_ctrl.vh"
 `include "uqu_rvfi_csrs.vh"
 
 // Verification-only wrapper; hierarchical observation is confined here.
@@ -222,15 +223,29 @@ module uqu_core_tb #(
         .xif_result_we_i(xif_result_we_i)
     );
 
+    wire [1:0] xif_de_used;
+    wire [4:0] xif_de_rs1_addr, xif_de_rs2_addr;
+    wire [31:0] xif_de_rs1_data, xif_de_rs2_data;
+    wire xif_de = (XIF == 1) && (u_core.de_kind == `UQU_WB_XIF);
+    uqu_xif_trace #(.XIF(XIF), .XIF_NUM_RS(XIF_NUM_RS)) u_xif_trace (
+        .clk_i(clk_i), .rst_ni(rst_ni), .issue_valid_i(xif_issue_valid_o), .issue_ready_i(xif_issue_ready_i),
+        .issue_accept_i(xif_issue_accept_i), .issue_id_i(xif_issue_id_o), .issue_pc_i(u_core.de_pc_q),
+        .issue_instr_i(xif_issue_instr_o), .register_read_i(xif_issue_register_read_i), .register_rs_i(xif_register_rs_o),
+        .de_id_i(u_core.xif_de_id), .de_used_o(xif_de_used), .de_rs1_addr_o(xif_de_rs1_addr), .de_rs2_addr_o(xif_de_rs2_addr),
+        .de_rs1_data_o(xif_de_rs1_data), .de_rs2_data_o(xif_de_rs2_data),
+        .retire_i(u_core.wb_retire && (u_core.wb_kind_q == `UQU_WB_XIF)), .wb_id_i(u_core.wb_xif_id_q),
+        .order_i(raw_rvfi_order), .we0_i(u_core.wb_we0), .rd0_i(u_core.wb_waddr0), .data0_i(u_core.wb_wdata0),
+        .we1_i(u_core.wb_we1), .rd1_i(u_core.wb_waddr1), .data1_i(u_core.wb_wdata1)
+    );
     uqu_rvfi u_rvfi (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
         .de_fire_i(u_core.de_fire),
-        .de_used_i(u_core.de_used[1:0]),
-        .de_rs1_addr_i(u_core.de_rs_addr[0]),
-        .de_rs2_addr_i(u_core.de_rs_addr[1]),
-        .de_rs1_rdata_i(u_core.de_rs[0]),
-        .de_rs2_rdata_i(u_core.de_rs[1]),
+        .de_used_i(xif_de ? xif_de_used : u_core.de_used[1:0]),
+        .de_rs1_addr_i(xif_de ? xif_de_rs1_addr : u_core.de_rs_addr[0]),
+        .de_rs2_addr_i(xif_de ? xif_de_rs2_addr : u_core.de_rs_addr[1]),
+        .de_rs1_rdata_i(xif_de ? xif_de_rs1_data : u_core.de_rs[0]),
+        .de_rs2_rdata_i(xif_de ? xif_de_rs2_data : u_core.de_rs[1]),
         .ex_fire_i(u_core.ex_fire),
         .ex_used_i(u_core.ex_used_q[1:0]),
         .ex_rs1_rdata_i(u_core.ex_rs[0]),
