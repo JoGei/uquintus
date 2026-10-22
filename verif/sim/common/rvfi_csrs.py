@@ -59,6 +59,19 @@ class CSRObservation:
             if inputs['mret']:
                 if name in ('mstatus','mepc'): read=0xffffffff
                 if name=='mstatus': write=0xffffffff
+            if inputs['fp_flags_valid'] and name in ('fflags','fcsr'):
+                read |= 31
+            if inputs.get('fp_rm_read'):
+                if name == 'frm': read |= 7
+                if name == 'fcsr': read |= 0xe0
+            alias_write = query['write'] and inputs['csr_commit']
+            if name == 'fflags' and (inputs['fp_flags_valid'] or (alias_write and inputs['csr_addr'] == 3)):
+                write |= 31
+            if name == 'frm' and alias_write and inputs['csr_addr'] == 3:
+                write |= 7
+            if name == 'fcsr':
+                if inputs['fp_flags_valid'] or (alias_write and inputs['csr_addr'] == 1): write |= 31
+                if alias_write and inputs['csr_addr'] == 2: write |= 0xe0
             if read or write:
                 result[name] = dict(rmask=read,wmask=write,rdata=before[name] if read else 0,
                     wdata=self.value(name,row,inputs) if write else before[name])

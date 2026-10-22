@@ -18,8 +18,10 @@ IDs and in-order result/retirement handling. `config/rv32i_xif.yml` enables the
 initial uncompressed standard-channel profile. Shared LSU, execution traps and
 the standard compressed offload channel remain deferred.
 
-Zfinx/FPU and core debug sequencing remain unfinished.
-`ISA_ZFINX=1`, `ISA_F=1`, `ISA_A=1`, `DEBUG=1`, or
+Native Zfinx executes through CVFPU with the `rv32i_zfinx` preset. The
+[FPU tests](../fpu/README.md) cover arithmetic, lifecycle and core retirement;
+RVFI includes `fflags`, `frm` and `fcsr` state. Core debug sequencing remains
+unfinished. `ISA_F=1`, `ISA_A=1`, `DEBUG=1`, or
 `MUA_HARDENED=1` deliberately fail RTL elaboration. This guard keeps a selected
 feature from silently acting as disabled. Standalone debug stage tests and
 interfaces remain available for later integration.

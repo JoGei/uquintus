@@ -11,6 +11,7 @@ from pyuvm import uvm_test
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from compressed_model import compressed
+from fpu_model import decode_instruction as decode_fp, result as fp_result
 from rv32_arithmetic import alu_result, muldiv_result, signed
 from rvfi_trace import read_trace
 from rvfi_csrs import CSR_CATALOG, CSRObservation
@@ -81,7 +82,7 @@ class CoreTest(uvm_test):
         self.pc = BOOT
         self.priv = 1
         self.csrs = {0x300: 0x1800, 0x304: 0, 0x305: 0, 0x340: 0,
-                     0x341: 0, 0x342: 0, 0x343: 0, 0xf14: 5}
+                     0x341: 0, 0x342: 0, 0x343: 0, 0xf14: 5, 1: 0, 2: 0, 3: 0}
         self.cycles = 0
         self.random_wait = True
         self.rvfi_order = 0
@@ -161,6 +162,16 @@ class CoreTest(uvm_test):
                 instr=original,used=desc['used'],rs=operands,
                 rd=[rd if result is not None and rd else 0,rd+1 if secondary else 0],
                 data=[low if result is not None and rd else 0,high if secondary else 0]))
+        elif opcode in (0x53, 0x43, 0x47, 0x4b, 0x4f):
+            assert self.params['ISA_ZFINX']
+            op, used, rounding = decode_fp(instr)
+            rounding = self.csrs[2] if rounding == 7 else rounding
+            a = self.value(rs1)
+            b = self.value(rs2) if used & 2 else 0
+            c = self.value(instr >> 27) if used & 4 else 0
+            result, flags = fp_result(op, a, b, c, rounding)
+            self.csrs[1] |= flags
+            self.csrs[3] = (self.csrs[2] << 5) | self.csrs[1]
         elif opcode == 0x37:
             result = instr & 0xfffff000
         elif opcode == 0x17:
@@ -225,7 +236,12 @@ class CoreTest(uvm_test):
                         new = new & ~3 | int((new & 3) == 1)
                     if not self.params['ISA_PMP'] and (0x3a0 <= addr <= 0x3a3 or 0x3b0 <= addr <= 0x3bf):
                         new = 0
-                    self.csrs[addr] = new & MASK
+                    if addr in (1, 2, 3) and self.params['ISA_ZFINX']:
+                        if addr in (1, 3): self.csrs[1] = new & 31
+                        if addr in (2, 3): self.csrs[2] = (new >> (5 if addr == 3 else 0)) & 7
+                        self.csrs[3] = (self.csrs[2] << 5) | self.csrs[1]
+                    else:
+                        self.csrs[addr] = new & MASK
             elif instr == 0x30200073:
                 status = self.csrs[0x300]
                 self.priv = int(not self.params['ISA_UMODE'] or (status & 0x1800) == 0x1800)
@@ -279,6 +295,15 @@ class CoreTest(uvm_test):
             a,b,rd = instr >> 15 & 31, instr >> 20 & 31, instr >> 7 & 31
             uses_a = opcode in (0x13,0x33,3,0x23,0x63,0x67) or (opcode==0x73 and f in (1,2,3))
             uses_b = opcode in (0x33,0x23,0x63)
+            if self.params['ISA_ZFINX'] and opcode in (0x53,0x43,0x47,0x4b,0x4f):
+                try:
+                    _, used, _ = decode_fp(instr)
+                    uses_a, uses_b = bool(used & 1), bool(used & 2)
+                    # Illegal FP rounding is rejected before operand capture.
+                    if r['trap'] and o['wb_cause'] == 2:
+                        uses_a = uses_b = False
+                except ValueError:
+                    pass
             if self.coprocessor and opcode==0x0b and not r['trap']:
                 desc=custom(instr,self.params)
                 assert desc is not None
@@ -402,6 +427,13 @@ class CoreTest(uvm_test):
             ci.update(csr_valid=1, csr_commit=o['wb_retire'],csr_addr=instr >> 20,
                 csr_op=op,csr_src=rs if op & 4 else self.value(rs),
                 csr_src_zero=int(rs==0),csr_rd_zero=int((instr >> 7)&31==0),csr_instr=instr)
+        if o['wb_retire'] and instr & 127 in (0x53,0x43,0x47,0x4b,0x4f):
+            op, used, rounding = decode_fp(instr)
+            rounding = self.csrs[2] if rounding == 7 else rounding
+            _, flags = fp_result(op, self.value(instr >> 15 & 31),
+                self.value(instr >> 20 & 31) if used & 2 else 0,
+                self.value(instr >> 27) if used & 4 else 0, rounding)
+            ci.update(fp_flags_valid=1, fp_flags=flags, fp_rm_read=int((instr >> 12 & 7) == 7))
         event = bool(o['wb_retire'] or o['wb_exception_fire'] or o['trap_valid'])
         counter_before = counter_state(self.csr_observer.model)
         def actual_counters():
@@ -501,7 +533,7 @@ class CoreTest(uvm_test):
         self.pc = boot
         self.priv = 1
         self.csrs.update({0x300: 0x1800,
-                         0x304:0, 0x305:0, 0x341:0, 0x342:0, 0x343:0, 0x340:0})
+                         0x304:0, 0x305:0, 0x341:0, 0x342:0, 0x343:0, 0x340:0, 1:0, 2:0, 3:0})
         self.accesses.clear()
         await self.cycle(rst=0)
         await self.cycle(rst=0)

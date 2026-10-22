@@ -65,14 +65,16 @@ To add a component:
    snapshots it and records its hash/entry/segments and `MAX_CYCLES` watchdog.
    Tests receive `UQU_ELF` and `UQU_MAX_CYCLES` alongside resolved parameters.
    Native manifests default to Bender `--no-deps`; use boolean
-   `bender_dependencies: true` when the DUT instantiates imported HDL. Source
+   `bender_dependencies: true` when the DUT always instantiates imported HDL,
+   or `bender_dependencies_if: ISA_ZFINX` for a declared boolean DUT parameter.
+   Integer-only runs then retain `--no-deps`. Source
    ordering and include directories still come from Bender, and `.vh`/`.svh`
    hashes are recorded. Imported-IP runs also snapshot/hash `Bender.lock`.
    The runner adds the simulator target; optional `bender_targets: [...]` adds
    package-specific source selections. Verilator `.vlt` controls are read first,
    preserving the relative order of HDL files. The CVFPU profile selects
    `tech_cells_generic_exclude_deprecated` and `cvfpu_verilator` for compatible
-   dependency sources and file-scoped package lint controls.
+   dependency sources and scoped imported-IP/language-boundary controls.
    See the [CVFPU dependency contract](../../../doc/uqu_spec.build.md#13-pinned-cvfpu-dependency-without-git-submodules)
    for the Git/lockfile cache and disabled upstream submodule checkout.
 4. Run `make test COMPONENT=<component> CONFIG=<hardware-config>`.

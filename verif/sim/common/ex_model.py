@@ -1,5 +1,6 @@
 """External EX contract model shared by stage and parent-pipeline scoreboards."""
 
+from fpu_model import result as fpu_result
 from rv32_arithmetic import ALU_OPS, alu_result, muldiv_result
 
 FU_ALU, FU_MULDIV, FU_FPU, FU_PASS = range(4)
@@ -20,9 +21,13 @@ def outcome(payload, params):
         cause, tval = payload['exception_cause'], payload['exception_tval']
     elif ((fu == FU_ALU and op not in ALU_OPS.values()) or
           (fu == FU_MULDIV and (not params['ISA_M'] or op not in range(8))) or
-          fu == FU_FPU):  # The current FPU is explicitly unimplemented.
+          (fu == FU_FPU and (not params['ISA_ZFINX'] or op not in range(22) or
+              ((op <= 8 or op >= 18) and payload['rm'] > 4)))):
         cause, tval = 2, payload['instr']
     else:
+        if fu == FU_FPU:
+            value, flags = fpu_result(op, payload['a'], payload['b'], payload['c'], payload['rm'] if payload['rm'] < 5 else 0)
+            return (value, payload['store_data'], 1, flags, 0, 0, 0)
         value = (alu_result(op, payload['a'], payload['b']) if fu == FU_ALU else
                  muldiv_result(op, payload['a'], payload['b']) if fu == FU_MULDIV else
                  payload['pass_data'])
@@ -31,6 +36,8 @@ def outcome(payload, params):
 
 
 def cycles(payload, params):
+    if payload['fu'] == FU_FPU and not outcome(payload, params)[4]:
+        return None  # Backend handshake defines completion, independently of operands.
     if outcome(payload, params)[4] or payload['fu'] != FU_MULDIV:
         return 1
     factor = params['MUA_MULDIV_ITERUNROLL']
@@ -41,7 +48,7 @@ def cycles(payload, params):
 
 def random_token(rng, index, params):
     fu = rng.choice([FU_ALU, FU_ALU, FU_MULDIV, FU_PASS, FU_FPU])
-    op = rng.choice(list(ALU_OPS.values())) if fu == FU_ALU else rng.randrange(8)
+    op = rng.choice(list(ALU_OPS.values())) if fu == FU_ALU else rng.randrange(22) if fu == FU_FPU else rng.randrange(8)
     return token(fu=fu, op=op, a=rng.getrandbits(32), b=rng.getrandbits(32),
                  c=rng.getrandbits(32), rm=rng.randrange(8),
                  pass_data=rng.getrandbits(32), store_data=rng.getrandbits(32),

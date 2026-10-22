@@ -98,15 +98,16 @@ FU codes are ALU=0, MULDIV=1, FPU=2, PASS=3, matching
 [EX](../ex/README.md). ALU operation codes match the
 [ALU table](../alu/README.md); bit 30 of a non-shift immediate never selects SUB.
 MULDIV operation equals funct3. FPU codes match the
-[scalar FPU table](../../../doc/uqu_spec.arch.md#331-unimplemented-fpu-interface).
+[scalar FPU table](../../../doc/uqu_spec.arch.md#331-fpu-adapter-interface).
 LUI/AUIPC and LSU addresses use ALU ADD; branches/jumps and system/CSR tokens
 use FU_PASS. Nonwriters never acquire an accidental rd from immediate bits.
 
 With ISA_ZFINX=1 all 22 scalar computation/compare/classify/conversion encodings
 are recognized, including the four three-source fused forms. FLW/FSW and both
 FMV transfer encodings are excluded. Static rounding codes 5/6 and non-FP32
-formats are rejected. Decoder support does not implement an FPU: the existing
-EX endpoint still refuses enabled Zfinx elaboration until a backend is supplied.
+formats are rejected. Native execution is provided by the
+[CVFPU adapter](../fpu/README.md); the decoder supplies normalized controls
+without exposing backend encodings.
 
 ## Work remaining in DE/core
 

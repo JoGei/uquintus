@@ -151,9 +151,12 @@ before offline runs. It manages Git downloads and ordered source/include lists,
 not compiler installation or an RTL build of the dependency.
 
 The shared runner defaults to `--no-deps` for existing native component manifests.
-A component that actually instantiates imported IP shall set boolean
-`bender_dependencies: true`; both the flat source list and structured include
-tree then include dependencies. HDL header provenance covers `.vh` and `.svh`;
+A component that always instantiates imported IP shall set boolean
+`bender_dependencies: true`. A conditional dependency shall instead declare
+`bender_dependencies_if: <boolean hardware parameter>`, which must name one of
+its DUT parameters. EX, its parent fixture, core and ELF manifests select
+`ISA_ZFINX`; integer-only configurations retain `--no-deps`. Both the flat
+source list and structured include tree use the same resolved dependency choice. HDL header provenance covers `.vh` and `.svh`;
 imported-IP runs retain a lockfile snapshot and its hash with source provenance.
 The runner also selects the simulator's Bender target (`verilator` currently).
 Optional `bender_targets` selects additional upstream/project source groups.
@@ -168,15 +171,21 @@ bender_targets:
 
 The first target excludes obsolete generic pad models with unsupported
 transistor primitives. The second selects `verif/sim/common/uqu_cvfpu.vlt`,
-which waives only the pinned package's ascending packed ranges and known
-helper-function width conversions. Controls precede HDL compilation without
-changing HDL dependency order. Project RTL diagnostics stay enabled. Do not add
+which scopes controls to the pinned imported arithmetic's packed ranges,
+width conversions, disjoint pipeline-array drivers and generated arbiter/tree
+settling under Verilator 5.020 with public cocotb visibility. A separate
+`ENUMVALUE` waiver covers only the Verilog adapter's checked two-bit backend
+parameter, because Verilog-2005 cannot spell an SV enum cast. Controls precede
+HDL compilation without changing HDL dependency order; other project RTL
+diagnostics stay enabled. These controls are not patches to upstream source. Do not add
 the generic `simulation` target for this Verilator profile: it selects upstream
 randomized SV test utilities that this simulator version does not support.
 Import parsing/lint qualification is separate from executing FPU instructions.
 
-The current FPU remains an inactive endpoint: dependency availability and the
-six propagated parameters do not yet provide floating-point execution.
+The FPU adapter now instantiates the imported backend for enabled Zfinx.
+The [FPU guide](../verif/sim/fpu/README.md) describes the real arithmetic and
+lifecycle checks, qualified TH32/THMULTI choices, rejected PULP selector and
+remaining physical-flow qualification. The `rv32i_zfinx` preset enables it.
 
 References: [Bender dependency workflow](https://pulp-platform.github.io/bender/workflow/dependencies.html),
 [project configuration](https://pulp-platform.github.io/bender/configuration.html),
@@ -664,4 +673,4 @@ later decisions determine the active contract.
 | D-138 | Generate guarded Verilog-2005 `.vh` macro headers for shared selector encodings from one canonical definition also used by YAML configuration translation. | Keep synthesis-compatible RTL constants and build-tool mappings consistent without SystemVerilog packages in the synthesizable design. | Implemented canonical JSON catalog and guarded-header generator in verif/sim/common/hw_config.py; Section 2 |
 | D-258 | Place common processor RTL directly in `src/uquintus/`, with `src/wrap/` for protocol-specific top levels and `src/adapt/` for reusable protocol adapters as sibling directories. | Keep common core files together without an extra directory level. | Agreed; replaces D-131 |
 | D-295 | Generate a shared static report under build/report with an HTML landing page, category/run pages, configuration comparison, Markdown summary and versioned JSON data; collect existing flow artifacts and accept a common per-run record for future flows. | Visualize evidence across configurations without losing failures, provenance or comparison conditions, and produce a portable artifact suitable for later website publication. | Initial aggregation implemented; Section 6.1; synthesis/formal/benchmark producers, CI retention and deployment remain follow-ups |
-| D-303 | Fetch commit-pinned CVFPU/FPnew through Bender with exact transitive revisions in Bender.lock, disable upstream Git submodule checkout in project configuration, and opt imported HDL into component builds through a manifest flag. | Reuse upstream source/dependency metadata without adding repository submodules or compiling unused IP into native tests. | Implemented dependency/configuration preparation; Section 1.3; execution adapter under architecture D-302 remains open |
+| D-303 | Fetch commit-pinned CVFPU/FPnew through Bender with exact transitive revisions in Bender.lock, disable upstream Git submodule checkout in project configuration, and opt imported HDL into component builds through a manifest flag. | Reuse upstream source/dependency metadata without adding repository submodules or compiling unused IP into native tests. | Implemented dependency/configuration preparation; Section 1.3; real execution adapter under architecture D-304; physical qualification remains open |

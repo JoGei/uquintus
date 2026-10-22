@@ -1,6 +1,10 @@
 top_module: uqu_ex_pipeline_tb
 bender_target: ex_pipeline_test
 test_module: test_uqu_ex_pipeline
+bender_dependencies_if: ISA_ZFINX
+bender_targets:
+  - tech_cells_generic_exclude_deprecated
+  - cvfpu_verilator
 parameters:
   - ISA_M
   - ISA_ZFINX

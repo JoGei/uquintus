@@ -261,8 +261,8 @@ all milestone acceptance requirements.
 
 The baseline remains the first acceptance focus. Optional E/M/C, PMP, Zifencei,
 initial XIF, latch storage and non-default forwarding configurations already
-have implementations and simulation coverage. Zfinx execution and core debug
-integration remain unfinished. Their agreed overall requirements remain in
+have implementations and simulation coverage. Native scalar Zfinx execution is
+integrated through CVFPU under D-304; core debug integration remains unfinished. Their agreed overall requirements remain in
 force; later milestone acceptance criteria and the order of remaining work
 remain open.
 Atomic-extension support (`ISA_A`) and OBI integrity under `MUA_HARDENED` are

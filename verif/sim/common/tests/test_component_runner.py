@@ -40,6 +40,8 @@ class ComponentRunnerTests(unittest.TestCase):
 
     def test_imported_sources_require_manifest_opt_in(self):
         manifest = load_component('ex')
+        manifest.pop('bender_dependencies_if')
+        manifest.pop('bender_targets')
         expected = ['-t', manifest['bender_target'], '-t', 'verilator']
         self.assertEqual(bender_source_options(manifest), expected + ['--no-deps'])
         for enabled in (False, True):
@@ -64,6 +66,18 @@ class ComponentRunnerTests(unittest.TestCase):
             (self.directory / 'imported.yml').write_text(yaml.safe_dump(manifest))
             with self.assertRaisesRegex(ValueError, 'bender_targets'):
                 load_component('imported', self.directory)
+
+    def test_imports_follow_declared_boolean_hardware_parameter(self):
+        manifest = load_component('ex')
+        self.assertIn('--no-deps', bender_source_options(manifest, parameters={'ISA_ZFINX':0}))
+        self.assertNotIn('--no-deps', bender_source_options(manifest, parameters={'ISA_ZFINX':1}))
+        with self.assertRaisesRegex(ValueError, 'missing dependency selector'):
+            bender_source_options(manifest)
+        for invalid in (True, 1, [], 'unknown', 'MUA_FPU_PIPE_REGS_FMA', 'ISA_E'):
+            manifest['bender_dependencies_if'] = invalid
+            (self.directory / 'bad.yml').write_text(yaml.safe_dump(manifest))
+            with self.assertRaisesRegex(ValueError, 'declared boolean'):
+                load_component('bad', self.directory)
 
     def test_file_controls_precede_imports_without_reordering_hdl(self):
         paths = list(map(Path, ['fpnew_pkg.sv', 'fpnew_top.sv', 'cvfpu.vlt', 'uqu_fpu.v']))
@@ -99,6 +113,24 @@ class ComponentRunnerTests(unittest.TestCase):
             path.write_text(yaml.safe_dump(dict(config, **{name:'unknown'})))
             with self.assertRaisesRegex(ValueError, 'unsupported '+name):
                 load_configuration(path, catalog)
+
+    def test_zfinx_backends_have_explicit_qualification_guards(self):
+        catalog = json.loads((ROOT / 'config/selectors.json').read_text())
+        config = load_configuration(ROOT / 'config/rv32i_zfinx.yml', catalog)
+        self.assertEqual(config['MUA_FPU_DIVSQRT'], 'th32')
+        path = self.directory / 'zfinx.yml'
+        for backend in ('th32', 'thmulti'):
+            for placement in ('before', 'after', 'inside', 'distributed'):
+                path.write_text(yaml.safe_dump(dict(config, MUA_FPU_DIVSQRT=backend,
+                                                    MUA_FPU_PIPE_CONFIG=placement)))
+                self.assertEqual(load_configuration(path, catalog)['MUA_FPU_DIVSQRT'], backend)
+        for count in (0, 2):
+            path.write_text(yaml.safe_dump(dict(config, MUA_FPU_DIVSQRT='pulp',
+                                                MUA_FPU_PIPE_REGS_DIVSQRT=count)))
+            with self.assertRaisesRegex(ValueError, 'pulp.*not qualified'):
+                load_configuration(path, catalog)
+        path.write_text(yaml.safe_dump(dict(config, ISA_ZFINX=0, MUA_FPU_DIVSQRT='pulp')))
+        self.assertEqual(load_configuration(path, catalog)['MUA_FPU_DIVSQRT'], 'pulp')
 
     def test_selector_mapping_and_generated_header_share_catalog(self):
         from hw_config import write_header

@@ -118,6 +118,96 @@ class XifTest(CoreTest):
         self.drop_objection()
 
 
+class FpuTest(CoreTest):
+    def setup_traps(self):
+        # The operation/rounding matrix extends beyond the usual small image.
+        return [0x000080b7,csr(0x305,rs=1)]
+
+    def skip_handler(self):
+        self.put(0x8000, [csr(0x342,rd=10,f=2),csr(0x343,rd=11,f=2),
+            csr(0x341,rd=12,f=2),ins_i(12,12,4),csr(0x341,rs=12),0x30200073])
+
+    async def run_phase(self):
+        from fpu_model import encode_instruction as fp
+        self.raise_objection()
+        self.skip_handler()
+        program = self.setup_traps()
+        def constant(rd, value):
+            high = ((value + 0x800) >> 12) & 0xfffff
+            return [high << 12 | rd << 7 | 0x37, ins_i(rd, rd, value & 0xfff)]
+        if self.params['ISA_ZFINX']:
+            # Read-after-write dependencies cover all three operands and the
+            # result; CSR serialization must observe only committed flags.
+            for op in range(22):
+                for rm in range(5):
+                    program += constant(1, 0x3fc00000) + constant(2, 0x40400000) + constant(3, 0xbf800000)
+                    program += [fp(op, 4, 1, 2, 3, rm), ins_r(5,4,4),
+                                csr(1,rd=6,f=2),csr(3,rd=7,f=2)]
+            for rm in range(5):
+                program += [csr(2,rs=rm,f=5),fp(3,4,1,2,rm=7),csr(3,rd=7,f=2)]
+            program += [csr(1,rs=0)] + constant(1,0x3f800000) + constant(2,0)
+            program += [fp(3,0,1,2),csr(1,rd=6,f=2)]  # x0 still accrues DZ.
+            flags_pc = BOOT + 4*(len(program)-1)
+            program += constant(1,0xbf800000) + [fp(4,4,1),csr(1,rd=8,f=2)]
+            # Reserved static and dynamic rounding modes trap before execution.
+            for bad in (fp(0,4,1,2,rm=5),):
+                self.expected_faults[BOOT+4*len(program)] = 2,bad
+                program.append(bad)
+            program += [csr(2,rs=7,f=5)]
+            bad = fp(0,4,1,2,rm=7)
+            self.expected_faults[BOOT+4*len(program)] = 2,bad
+            program += [bad,csr(2,rs=0)]
+        else:
+            bad = fp(0,4,0,0)
+            self.expected_faults[BOOT+4*len(program)] = 2,bad
+            program.append(bad)
+        end=self.put(BOOT,program)
+        self.put(end,[ins_i(7,0,127),ins_j(0,0)])
+        await self.reset()
+        await self.finish(end)
+        if self.params['ISA_ZFINX']:
+            assert self.regs[6] == 8 and self.regs[8] == 24, 'x0/accumulated FP flags'
+            assert flags_pc in self.retired
+            assert {'fflags','frm','fcsr'} <= set().union(*(set(r) for r in self.csr_records))
+            # An older fault must discard a younger FPU result and its flags.
+            self.code.clear(); self.retired.clear(); self.expected_faults.clear()
+            self.skip_handler()
+            program=self.setup_traps()+constant(1,0x3f800000)+constant(2,0)+constant(3,0x4000)
+            fault_pc=BOOT+4*len(program)
+            program += [ins_i(5,3,0,2,3),fp(3,4,1,2),csr(1,rd=6,f=2)]
+            end=self.put(BOOT,program); self.put(end,[ins_i(7,0,126),ins_j(0,0)])
+            self.errors['dmem'].add(0x4000); self.expected_faults[fault_pc]=5,0x4000
+            await self.reset()
+            await self.until(lambda o:self.pending['dmem'] is not None,respond={'dmem':0})
+            for _ in range(8): await self.cycle(respond={'dmem':0})
+            assert self.signal('ex_valid_q'), 'FPU token did not wait behind older MEM'
+            assert self.signal('wb_fflags_valid_q') == 0
+            await self.finish(end)
+            assert self.regs[6] == 8, 'reissued FPU must retire exactly once after the trap'
+            # IRQ entry drains the executing FPU and its WB flag update.
+            self.code.clear(); self.retired.clear(); self.expected_faults.clear()
+            self.errors['dmem'].clear()
+            self.put(0x8000,[csr(0x342,rd=10,f=2),csr(0x341,rd=11,f=2),
+                             csr(1,rd=6,f=2),0x30200073])
+            program=self.setup_traps()+constant(1,0x3f800000)+constant(2,0x40400000)
+            program += [csr(0x304,rs=8,f=5),csr(0x300,rs=8,f=6)]
+            operation_pc=BOOT+4*len(program)
+            program += [fp(3,4,1,2)]
+            end=self.put(BOOT,program); self.put(end,[ins_i(7,0,125),ins_j(0,0)])
+            await self.reset()
+            await self.until(lambda o:self.signal('ex_valid_q') and self.signal('ex_fu_q') == 2
+                             and not self.signal('ex_complete'))
+            entries=len(self.traps)
+            for _ in range(3):
+                await self.cycle(irq=8)
+                assert len(self.traps)==entries, 'IRQ cancelled active FPU'
+            await self.until(lambda o:o['trap_valid'],irq=8)
+            assert operation_pc in self.retired and self.traps[-1] == (end,3), self.traps
+            await self.finish(end)
+            assert self.regs[6] == 1, 'IRQ handler missed retired inexact flag'
+        self.drop_objection()
+
+
 class IntegerTest(CoreTest):
     async def run_phase(self):
         self.raise_objection()
@@ -383,6 +473,9 @@ class CsrsTest(CoreTest):
             program += [0x000020b7,csr(0x3b0,rs=1),ins_i(1,0,0x8f),csr(0x3a0,rs=1),
                         ins_i(1,0,-1),csr(0x3b0,rs=1),csr(0x3b0,rd=3,f=2),
                         csr(0x3a0,rs=0),csr(0x3a0,rd=3,f=2)]
+        if self.params['ISA_ZFINX']:
+            for addr in (1, 2, 3):
+                program += [csr(addr,rs=1),csr(addr,rd=3,f=2)]
         for addr in (0xf11,0xf12,0xf13,0xf14,0xf15):
             program += [csr(addr,rd=3,f=2)]
         for n in range(3,32):
@@ -399,6 +492,8 @@ class CsrsTest(CoreTest):
         await self.finish(end)
         assert len(self.faults)==1 and self.regs[7]==91
         expected=set(CSR_CATALOG)
+        if not self.params['ISA_ZFINX']:
+            expected -= {'fflags','frm','fcsr'}
         if not self.params['ISA_UMODE']:
             expected -= {'mcounteren','menvcfg','menvcfgh'}
         assert set().union(*(set(r) for r in self.csr_records))==expected, 'CSR suite did not exercise every available channel'
@@ -449,3 +544,8 @@ async def reset(dut):
 @cocotb.test(timeout_time=2000,timeout_unit='us')
 async def xif(dut):
     await uvm_root().run_test('XifTest')
+
+
+@cocotb.test(timeout_time=2000,timeout_unit='us')
+async def fpu(dut):
+    await uvm_root().run_test('FpuTest')

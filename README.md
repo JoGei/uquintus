@@ -188,23 +188,25 @@ destination; the secondary waits for register-file visibility. See the
 | Core-owned two-port PMP checker | [uqu_pmp.v](src/uquintus/uqu_pmp.v) | [PMP interface and tests](verif/sim/pmp/README.md) |
 | Execute stage | [uqu_stage_ex.v](src/uquintus/uqu_stage_ex.v) | [EX interface and tests](verif/sim/ex/README.md) |
 | Base integer ALU | [uqu_alu.v](src/uquintus/uqu_alu.v) | [ALU interface and tests](verif/sim/alu/README.md) |
+| Native scalar Zfinx FPU | [uqu_fpu.v](src/uquintus/uqu_fpu.v) | [FPU interface and tests](verif/sim/fpu/README.md) |
 | Native multiply/divide | [uqu_muldiv.v](src/uquintus/uqu_muldiv.v) | [MUL/DIV interface and tests](verif/sim/muldiv/README.md) |
 | Shared extended add/sub datapath | [uqu_arith.v](src/uquintus/uqu_arith.v) | [Arithmetic tests and interface](verif/sim/arith/README.md) |
 
-An [unimplemented FPU endpoint](src/uquintus/uqu_fpu.v) is also available for EX
-wiring. Its [interface contract](doc/uqu_spec.arch.md#331-unimplemented-fpu-interface)
-defines a decoded operation selector, three operands, rounding, and
-result/exception-flag ports. The endpoint
-accepts no requests, produces no results, and rejects enabled Zfinx elaboration.
-CVFPU/FPnew and its dependencies are now pinned through Bender, without repository
-submodules. Six `MUA_FPU_*` settings are propagated through core/EX to this endpoint;
-the [FPU configuration contract](doc/uqu_spec.arch.md#332-cvfpu-implementation-configuration)
-defines their counts, placement and divide/square-root choices. The execution
-adapter is the next implementation step.
+The [native Zfinx FPU adapter](src/uquintus/uqu_fpu.v) instantiates CVFPU/FPnew
+with scalar FP32 and 32-bit integer conversions. It supports all 22 decoded
+operations, five rounding modes, held results/flags and flush cancellation.
+FP state updates at WB retirement. The [interface contract](doc/uqu_spec.arch.md#331-fpu-adapter-interface)
+and [FPU tests](verif/sim/fpu/README.md) describe the integration.
+
+`config/rv32i_zfinx.yml` enables it. Six `MUA_FPU_*` settings select internal
+register counts, placement and divider backend. TH32 is the default; THMULTI is
+also tested. PULP remains blocked on known exception-flag failures. Dependencies
+are pinned through Bender without repository submodules; owned RTL remains
+Verilog-2005 and imported IP retains SystemVerilog.
 
 Run `bender checkout` to prepare the exact dependencies recorded in `Bender.lock`.
-Native component tests select owned RTL only; imported HDL is included when a
-component manifest requests it. See the
+Integer-only runs select owned RTL; the runner includes imported HDL
+automatically when a declared dependency selector such as `ISA_ZFINX` is enabled. See the
 [dependency guide](doc/uqu_spec.build.md#13-pinned-cvfpu-dependency-without-git-submodules).
 
 Provide Bender, Verilator, GNU Make, a C++ compiler, and the Python dependencies

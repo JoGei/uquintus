@@ -15,7 +15,7 @@ module uqu_stage_ex #(
     parameter MUA_FPU_PIPE_REGS_NONCOMP = 0,
     parameter MUA_FPU_PIPE_REGS_CONV = 1,
     parameter MUA_FPU_PIPE_CONFIG = `UQU_FPU_PIPE_DISTRIBUTED,
-    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_PULP
+    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_TH32
 ) (
     input  wire        clk_i,
     input  wire        rst_ni,
@@ -64,7 +64,9 @@ module uqu_stage_ex #(
                         (op_i[3:0] == `UQU_ALU_SUB) || (op_i[3:0] == `UQU_ALU_SRA));
     wire illegal_control = (alu_selected && !alu_op_valid) ||
         (muldiv_selected && ((ISA_M == 0) || (op_i[4:3] != 2'b00))) ||
-        (fpu_selected && ((ISA_ZFINX == 0) || (op_i > `UQU_FPU_FCVT_S_WU)));
+        (fpu_selected && ((ISA_ZFINX == 0) || ((op_i > `UQU_FPU_FCVT_S_WU) ||
+         (((op_i <= `UQU_FPU_FNMADD_S) || (op_i >= `UQU_FPU_FCVT_W_S)) &&
+          (rm_i > 3'd4)))));
     wire fault = exception_valid_i || illegal_control;
     wire request_valid = active && !fault && !issued_q && operands_ready_i;
     wire result_ready = active && !fault && ready_i;

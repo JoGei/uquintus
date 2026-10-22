@@ -34,7 +34,7 @@ module uqu_core_tb #(
     parameter MUA_FPU_PIPE_REGS_NONCOMP = 0,
     parameter MUA_FPU_PIPE_REGS_CONV = 1,
     parameter MUA_FPU_PIPE_CONFIG = `UQU_FPU_PIPE_DISTRIBUTED,
-    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_PULP,
+    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_TH32,
     parameter XIF = 0,
     parameter XIF_NUM_RS = 3,
     parameter XIF_DUALWRITE = 0,
@@ -410,6 +410,9 @@ module uqu_core_tb #(
     assign csr_values[96*64 +: 64] = {32'd0, 32'd0};
     assign csr_values[97*64 +: 64] = 64'd0;
     assign csr_values[98*64 +: 64] = {32'd0, 32'd0};
+    assign csr_values[99*64 +: 64] = {59'd0, u_core.u_wb.u_csregfile.fflags_o};
+    assign csr_values[100*64 +: 64] = {61'd0, u_core.u_wb.u_csregfile.frm_o};
+    assign csr_values[101*64 +: 64] = {56'd0, u_core.u_wb.u_csregfile.frm_o, u_core.u_wb.u_csregfile.fflags_o};
 
     // One observation register permits read-before/write-after CSR values
     // without predicting WARL or implicit updates in the monitor.
@@ -460,7 +463,9 @@ module uqu_core_tb #(
         .csr_read_i(raw_rvfi_valid && u_core.u_wb.u_csregfile.csr_read_o),
         .csr_write_i(raw_rvfi_valid && u_core.u_wb.u_csregfile.csr_we),
         .trap_i(u_core.trap_valid || u_core.wb_exception_fire),
-        .mret_i(u_core.wb_mret), .values_i(csr_values)
+        .mret_i(u_core.wb_mret), .values_i(csr_values),
+        .fp_flags_valid_i(u_core.u_wb.u_csregfile.fp_flags_valid_i),
+        .fp_rm_read_i(u_core.u_wb.u_csregfile.fp_flags_valid_i && (u_core.wb_original_q[14:12] == 3'd7))
         `define UQU_RVFI_CSR(NAME, WIDTH, INDEX, LO, HI, ULO, UHI) `UQU_RVFI_CSR_CONNECT(NAME, WIDTH, INDEX, LO, HI, ULO, UHI)
         `include "uqu_rvfi_csr_list.vh"
         `undef UQU_RVFI_CSR

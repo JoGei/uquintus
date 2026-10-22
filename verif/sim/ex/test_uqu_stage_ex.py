@@ -81,12 +81,13 @@ class ExTest(uvm_test):
         self.dut.operands_ready_i.value = int(not expected[4])
         latency = cycles(payload, self.params)
         starts = [0, 0, 0]
-        for cycle in range(1, latency + 1):
-            self.dut.ready_i.value = int(cycle == latency and not hold)
+        for cycle in range(1, (latency or 256) + 1):
+            self.dut.ready_i.value = int((latency is None or cycle == latency) and not hold)
             await self.settle()
             valid = int(self.dut.valid_o.value)
-            assert valid == int(cycle == latency), (payload, cycle, latency)
-            assert int(self.dut.ready_o.value) == int(cycle == latency and not hold)
+            if latency is not None:
+                assert valid == int(cycle == latency), (payload, cycle, latency)
+            assert int(self.dut.ready_o.value) == int(valid and not hold)
             requests = self.requests()
             starts = [old + new for old, new in zip(starts, requests)]
             if valid:
@@ -94,7 +95,12 @@ class ExTest(uvm_test):
             await self.edge()
             # A native computation must continue even if an external operand
             # producer disappears after acceptance. Its payload stays retained.
-            self.dut.operands_ready_i.value = 0 if payload['fu'] != FU_PASS else 1
+            if any(requests) or payload['fu'] == FU_PASS:
+                self.dut.operands_ready_i.value = 0 if payload['fu'] != FU_PASS else 1
+            if valid:
+                break
+        else:
+            assert False, ('execution watchdog', payload)
         for _ in range(hold):
             await self.settle()
             assert int(self.dut.valid_o.value) and not int(self.dut.ready_o.value)
@@ -133,6 +139,11 @@ class DirectedTest(ExTest):
             for a in values[:5]:
                 for b in values[:5]:
                     await self.operation(token(fu=FU_MULDIV, op=op, a=a, b=b), hold=2)
+        if self.params['ISA_ZFINX']:
+            for op in range(22):
+                for rm in range(5):
+                    await self.operation(token(fu=FU_FPU, op=op, rm=rm, a=0x3fc00000,
+                        b=0x40400000, c=0xbf800000), wait=2, hold=3)
         for payload in (token(fu=FU_PASS, pass_data=0xDEADBEEF, store_data=0x12345678),
                         token(fu=FU_FPU, op=0, instr=0x53),
                         token(fu=FU_ALU, op=31, instr=0xBAD),
@@ -168,8 +179,10 @@ class ControlTest(ExTest):
         if self.params['ISA_M']:
             payloads += [token(fu=FU_MULDIV, op=op, a=0x81234567, b=MASK)
                          for op in (0, 4, 6)]
+        if self.params['ISA_ZFINX']:
+            payloads += [token(fu=FU_FPU, op=op, a=0x3f800001, b=0x40400000) for op in (0, 3, 4, 18)]
         for payload in payloads:
-            latency = cycles(payload, self.params)
+            latency = cycles(payload, self.params) or 80
             for reset in (False, True):
                 for cut in sorted({0, latency // 2, latency - 1, latency, latency + 2}):
                     self.drive(payload)

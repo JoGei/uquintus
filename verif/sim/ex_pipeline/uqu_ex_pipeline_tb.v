@@ -14,7 +14,7 @@ module uqu_ex_pipeline_tb #(
     parameter MUA_FPU_PIPE_REGS_NONCOMP = 0,
     parameter MUA_FPU_PIPE_REGS_CONV = 1,
     parameter MUA_FPU_PIPE_CONFIG = `UQU_FPU_PIPE_DISTRIBUTED,
-    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_PULP
+    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_TH32
 ) (
     input wire          clk_i,
     input wire          rst_ni,

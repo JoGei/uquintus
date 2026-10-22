@@ -1179,7 +1179,7 @@ behavior, timing, and integration requirements.
 These native ports are implemented by `src/uquintus/uqu_core.v`; its
 [integration guide](../verif/sim/core/README.md) records connections and current
 feature guards. The initial standard-channel XIF profile is connected under
-Section 5. Core debug integration and the FPU backend remain unfinished.
+Section 5. The FPU backend is integrated under architecture D-304; core debug integration remains unfinished.
 
 | Function | Port(s) | Direction | Width | Definition |
 | --- | --- | --- | --- | --- |

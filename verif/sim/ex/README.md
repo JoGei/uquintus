@@ -1,7 +1,7 @@
 # Execute stage
 
 [uqu_stage_ex.v](../../../src/uquintus/uqu_stage_ex.v) connects the integer ALU, MUL/DIV,
-and inactive FPU endpoint. EX owns their shared first `uqu_arith` instance and
+and configured CVFPU adapter. EX owns their shared first `uqu_arith` instance and
 its mux. **Its parent owns both DE/EX and EX/MEM registers.** EX stores no
 pipeline instruction payload, PC, destination, or boundary-valid bit.
 
@@ -96,7 +96,7 @@ redirect side effects. Their metadata follows the parent's normal pipeline path.
 | --- | --- |
 | `result_o[31:0]` | Selected compute result or pass-through value; zero when invalid/faulting. |
 | `store_data_o[31:0]` | Resolved store value for EX/MEM capture; zero when invalid/faulting. |
-| `fflags_valid_o`, `fflags_o[4:0]` | Per-instruction FPU flags for later retirement-qualified accrual. Inactive with the current stub. |
+| `fflags_valid_o`, `fflags_o[4:0]` | Per-instruction FPU flags for later retirement-qualified accrual. Valid with a native Zfinx result, including zero-valued flags. |
 | `exception_valid_o`, `exception_cause_o[4:0]`, `exception_tval_o[31:0]` | Exception metadata accompanying the output token. |
 
 `valid_o` means the EX slot is ready to advance. It does not imply a
@@ -107,7 +107,7 @@ destination identity, and fault status. EX does not commit architectural state.
 
 An incoming exception bypasses operand waits and issues no functional-unit
 request. Its cause/tval take priority over a normalized-control fault. A disabled
-M or FPU selection, or invalid normalized ALU/MUL/DIV operation code, produces
+M or FPU selection, or an invalid normalized operation/rounding code, produces
 illegal-instruction cause 2 with `instr_i` as tval. Decode still owns instruction
 legality; this guard prevents unsupported routing from hanging an EX slot.
 Trap entry and architectural side effects remain controlled at WB.
@@ -120,7 +120,10 @@ invalid. A younger-only redirect must not be routed as an older EX flush.
 
 Parameters are `ISA_M`, `ISA_ZFINX`, `MUA_MUL`, `MUA_DIV`, and
 `MUA_MULDIV_ITERUNROLL`, using the existing complete hardware profiles.
-`ISA_ZFINX = 1` still fails elaboration through the unimplemented FPU endpoint.
+`ISA_ZFINX = 1` instantiates the real CVFPU backend. The six `MUA_FPU_*`
+parameters propagate to it; see the [FPU guide](../fpu/README.md). The shared
+runner includes Bender dependencies conditionally for enabled Zfinx. FPU
+completion follows handshaking; integer MUL/DIV timing remains fixed.
 No new hardware configuration parameters are introduced.
 
 ```sh

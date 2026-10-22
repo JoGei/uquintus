@@ -1,6 +1,10 @@
 top_module: uqu_core_tb
 bender_target: core_test
 test_module: test_uqu_core
+bender_dependencies_if: ISA_ZFINX
+bender_targets:
+  - tech_cells_generic_exclude_deprecated
+  - cvfpu_verilator
 parameters:
   - ISA_E
   - ISA_M
@@ -48,3 +52,4 @@ tests:
   - extensions
   - reset
   - xif
+  - fpu

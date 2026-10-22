@@ -34,12 +34,13 @@ and value, and asynchronous entry PC/cause/target, are diagnostic fields in the
 simulation file; they are not new standard RVFI signals or core output ports.
 
 Per-CSR state is observed by `uqu_rvfi_csrs.sv`. The canonical unguarded
-`uqu_rvfi_csr_list.vh` supplies 99 channel names, widths, slots and address
+`uqu_rvfi_csr_list.vh` supplies 102 channel names, widths, slots and address
 aliases; `uqu_rvfi_csrs.vh` supplies the declaration/connection helpers. Python
 verification reads this same catalog through `verif/sim/common/rvfi_csrs.py`.
 The native channels cover machine identity/setup/trap CSRs, optional U-mode
 configuration, all sixteen PMP entries, counters and constant-zero HPM CSRs.
-FPU/debug-only state is excluded while those core configurations are unsupported.
+Optional Zfinx adds `fflags`, `frm` and `fcsr` views of actual committed state.
+Debug-only state remains excluded while core debug is unsupported.
 
 Each channel exposes `rvfi_csr_<name>_{rmask,wmask,rdata,wdata}`. Masks qualify
 meaningful bits; inactive channels are zero-masked. Explicit CSR access uses
@@ -82,7 +83,14 @@ This companion diagnostic is not a standard RVFI multi-destination extension and
 does not imply formal custom-instruction proofs. The custom retirement oracle
 checks the extra effects, including atomic paired update and ignored x0/x1.
 
-RVFI_BUS, FPU, standard formal modeling of custom/paired
+FP flag accrual reads and writes the low five bits of `fflags` and `fcsr`; dynamic
+rounding observes the `frm` field. Explicit alias writes also mark affected
+fields in the other views. These observations use actual WB CSR state and are
+checked against an independent retirement oracle; disabled FP views are masked.
+Standard RVFI contains the first two FP source operands. Three-source FMA is
+checked by the core retirement oracle; no nonstandard source port is added.
+
+RVFI_BUS, formal FPU instruction modeling, standard formal modeling of custom/paired
 results, debug, rollback, alternative arithmetic, formal core
 signal binding, environment assumptions and actual instruction proofs remain
 follow-ups. Yosys parsing/structural checks of the collector establish tool

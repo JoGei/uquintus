@@ -104,9 +104,11 @@ The verification harness shall expose `rvfi_csr_<name>_rmask`, `_wmask`,
 `_rdata` and `_wdata` for native implemented CSR state. The
 [CSR channel profile](../verif/common/README.md) and canonical
 `verif/common/uqu_rvfi_csr_list.vh` shall define channel names, widths and aliases.
-The current catalog has 99 channels, covering machine identity/control/trap
+The current catalog has 102 channels, covering machine identity/control/trap
 state, optional U-mode configuration, PMP, counters and hardwired-zero HPM state.
-FPU/debug state remains outside the native core profile.
+Optional Zfinx includes `fflags`, `frm` and `fcsr` channels for explicit CSR
+accesses, alias writes, dynamic rounding reads and retirement-qualified flag
+read/modify/write accrual. Debug state remains outside the native core profile.
 
 CSR observations shall use successful explicit access qualification and actual
 architectural pre-/post-state. The adapter shall not predict WARL legalization,
@@ -386,8 +388,9 @@ trap PC/cause/value. Programs shall exercise integer dependencies, branches,
 subword accesses, serialization, synchronous faults, M/U transitions, IRQ drain
 and vectored restart, configured M/C/PMP/fences, and reset during pending data
 access. Configurations shall distinguish disabled behavior from enabled-feature
-coverage. FPU and core debug adapters shall reject enabled elaboration
-until implemented.
+coverage. Native Zfinx execution and its component/core checks are implemented
+under D-304 and Section 2.9. Core debug shall reject enabled elaboration until
+its sequencing is implemented.
 
 The initial XIF core regression shall use only standard coupled issue/register
 and commit/result fields, with a behavioral coprocessor and an independent
@@ -674,6 +677,35 @@ and adapter profile so earlier and later checker versions cannot replace each
 other's outcomes. Tooling tests shall deliberately corrupt observations,
 including implicit trap/MRET state, and exercise missing/extra/reordered
 declarations, unsupported events, log formats and process timeout.
+
+### 2.9. Native Zfinx arithmetic and lifecycle regression
+
+The [FPU component guide](../verif/sim/fpu/README.md) defines the executable
+`fpu` target and the real CVFPU adapter's supported configuration scope.
+Arithmetic and per-instruction flags shall be checked against an independent
+exact-rational binary32 oracle, including fused operations and square root,
+without host floating-point rounding. The enabled suite compares 21,022
+operations across all 22 normalized operations, five rounding modes,
+special values, rounding boundaries and randomized inputs. An optional external
+Berkeley SoftFloat check cross-validates 26,000 oracle results and flags;
+HDL tests shall not require that library.
+
+The component regression shall exercise held results/flags, changes to live
+inputs after acceptance, malformed direct controls, reset, flush during
+execution or held output, recovery and disabled behavior. Configuration checks
+shall cover four placements and zero/nonzero staging. TH32 is the default and
+THMULTI has scalar simulation coverage. The pinned PULP backend remains rejected
+for enabled Zfinx after exception-flag failures; its selector does not establish
+support. No imported-source patch or approximate FP behavior is permitted.
+
+EX and parent-pipeline regressions shall preserve one start/completion per
+instruction and result/status association under backpressure. The core `fpu`
+program shall check all scalar instructions, all three FMA source dependencies,
+dynamic rounding and reserved-mode traps, FP CSR aliases, x0 flag accrual,
+older-memory-fault cancellation and interrupt drain. FP CSR observation shall
+sample actual retired state, not speculative FPU output. These are native
+simulation checks; Zfinx Spike differential support, formal FP models and
+physical-flow qualification remain open.
 
 ## 3. Supported-configuration CI coverage
 

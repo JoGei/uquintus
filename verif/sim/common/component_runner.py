@@ -17,7 +17,7 @@ import yaml
 
 from elf_image import expected_traps, load_elf
 from interrupts import interrupt_plan
-from hw_config import load_configuration, parameters_for_component, write_header
+from hw_config import BOOLEAN_PARAMS, load_configuration, parameters_for_component, write_header
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -37,12 +37,16 @@ def load_component(name, directory=None):
     component = yaml.safe_load(path.read_text())
     expected = {"top_module", "bender_target", "test_module", "parameters", "tests"}
     if (not isinstance(component, dict) or not expected <= set(component) or
-            set(component) - expected - {'requires_elf', 'bender_dependencies', 'bender_targets'}):
+            set(component) - expected - {'requires_elf', 'bender_dependencies', 'bender_dependencies_if', 'bender_targets'}):
         raise ValueError(f"component manifest must contain {sorted(expected)}; "
-                         "optional: requires_elf, bender_dependencies, bender_targets")
+                         "optional: requires_elf, bender_dependencies, bender_dependencies_if, bender_targets")
     for key in ('requires_elf', 'bender_dependencies'):
         if key in component and type(component[key]) is not bool:
             raise ValueError(f'component {key} must be a boolean')
+    if 'bender_dependencies_if' in component:
+        selector = component['bender_dependencies_if']
+        if not isinstance(selector, str) or selector not in BOOLEAN_PARAMS or selector not in component['parameters']:
+            raise ValueError('bender_dependencies_if must name a declared boolean hardware parameter')
     targets = component.get('bender_targets', [])
     if (not isinstance(targets, list) or
             any(not isinstance(value, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*', value)
@@ -82,12 +86,19 @@ def command_output(command):
     return subprocess.check_output(command, cwd=ROOT, text=True).strip()
 
 
-def bender_source_options(component, simulator='verilator'):
+def bender_dependencies_enabled(component, parameters):
+    selector = component.get('bender_dependencies_if')
+    if selector is not None and (parameters is None or selector not in parameters):
+        raise ValueError(f'missing dependency selector parameter: {selector}')
+    return component.get('bender_dependencies', False) or bool(selector and parameters[selector])
+
+
+def bender_source_options(component, simulator='verilator', parameters=None):
     """Include imported HDL only for manifests that explicitly require it."""
     options = ['-t', component['bender_target'], '-t', simulator]
     for target in component.get('bender_targets', []):
         options += ['-t', target]
-    if not component.get('bender_dependencies', False):
+    if not bender_dependencies_enabled(component, parameters):
         options.append('--no-deps')
     return options
 
@@ -205,7 +216,7 @@ def main(argv=None, shared_build=None):
     (run_dir / "config.yml").write_text(yaml.safe_dump(config, sort_keys=False))
     (run_dir / "component.yml").write_text(yaml.safe_dump(component, sort_keys=False))
     (run_dir / "selectors.json").write_text(json.dumps(catalog, indent=2) + "\n")
-    source_options = bender_source_options(component, args.sim)
+    source_options = bender_source_options(component, args.sim, parameters)
     sources_text = command_output([args.bender, "script", "flist", *source_options])
     sources = [(ROOT / line.strip()).resolve() for line in sources_text.splitlines()
                if line.strip() and not line.lstrip().startswith("//")]
@@ -234,7 +245,7 @@ def main(argv=None, shared_build=None):
                           hashlib.sha256(path.read_bytes()).hexdigest() for path in headers},
         "status": "running",
     }
-    if component.get('bender_dependencies', False):
+    if bender_dependencies_enabled(component, parameters):
         lock = ROOT / 'Bender.lock'
         shutil.copyfile(lock, run_dir / 'Bender.lock')
         metadata['bender_lock_sha256'] = hashlib.sha256(lock.read_bytes()).hexdigest()

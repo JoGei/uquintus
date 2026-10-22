@@ -34,7 +34,7 @@ module uqu_core #(
     parameter MUA_FPU_PIPE_REGS_NONCOMP = 0,
     parameter MUA_FPU_PIPE_REGS_CONV = 1,
     parameter MUA_FPU_PIPE_CONFIG = `UQU_FPU_PIPE_DISTRIBUTED,
-    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_PULP,
+    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_TH32,
     parameter XIF = 0,
     parameter XIF_NUM_RS = 3,
     parameter XIF_DUALWRITE = 0,
@@ -510,7 +510,7 @@ module uqu_core #(
             end
         end
         // Reserved features still require their backend or core integration.
-        if ((ISA_ZFINX != 0) || (ISA_F != 0) || (ISA_A != 0) ||
+        if ((ISA_F != 0) || (ISA_A != 0) ||
             (DEBUG != 0) || (MUA_HARDENED != 0)) begin : gen_unsupported
             uqu_core_unsupported_feature invalid_configuration ();
         end

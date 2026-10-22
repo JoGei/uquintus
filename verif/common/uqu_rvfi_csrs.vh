@@ -2,7 +2,7 @@
 // High/user aliases share the canonical 64-bit machine counter channel.
 `ifndef UQU_RVFI_CSRS_VH
 `define UQU_RVFI_CSRS_VH
-`define UQU_RVFI_CSR_COUNT 99
+`define UQU_RVFI_CSR_COUNT 102
 
 
 // Leading commas allow use after the ordinary RVFI port list.

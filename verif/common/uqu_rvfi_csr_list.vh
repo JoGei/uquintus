@@ -98,3 +98,6 @@
 `UQU_RVFI_CSR(mhpmevent30, 32, 96, 12'h33e, 12'hfff, 12'hfff, 12'hfff)
 `UQU_RVFI_CSR(mhpmcounter31, 64, 97, 12'hb1f, 12'hb9f, 12'hc1f, 12'hc9f)
 `UQU_RVFI_CSR(mhpmevent31, 32, 98, 12'h33f, 12'hfff, 12'hfff, 12'hfff)
+`UQU_RVFI_CSR(fflags, 32, 99, 12'h001, 12'hfff, 12'hfff, 12'hfff)
+`UQU_RVFI_CSR(frm, 32, 100, 12'h002, 12'hfff, 12'hfff, 12'hfff)
+`UQU_RVFI_CSR(fcsr, 32, 101, 12'h003, 12'hfff, 12'hfff, 12'hfff)

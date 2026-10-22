@@ -49,6 +49,10 @@ def load_configuration(path, catalog):
     for name in ("ISA_F", "ISA_A", "MUA_HARDENED"):
         if config[name]:
             raise ValueError(f"{name}=1 is reserved for future implementation")
+    # Reserved selector retained for future qualification. The pinned PULP
+    # divider fails RISC-V exception-flag cases (e.g. zero divided by infinity).
+    if config['ISA_ZFINX'] and config['MUA_FPU_DIVSQRT'] == 'pulp':
+        raise ValueError('MUA_FPU_DIVSQRT=pulp is not qualified for enabled Zfinx; use th32 or thmulti')
     return config
 
 
