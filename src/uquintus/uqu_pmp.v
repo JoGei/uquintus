@@ -1,9 +1,11 @@
 `default_nettype none
 
-// Core-owned two-port PMP. Decode CSR-owned regions once, then check IF and
-// MEM independently. Packed entry zero occupies the low configuration bits.
+// Decode CSR-owned regions once for independent IF, MEM and optional replay
+// word checks. Packed entry zero occupies the low configuration bits.
 module uqu_pmp #(
-    parameter ISA_PMP = 0
+    parameter ISA_PMP = 0,
+    parameter ISA_C = 0,
+    parameter MUA_BTB_IDATA_DEPTH = 0
 ) (
     input  wire [127:0] pmpcfg_i,
     input  wire [511:0] pmpaddr_i,
@@ -15,30 +17,54 @@ module uqu_pmp #(
     input  wire [1:0]   mem_size_i,
     input  wire [2:0]   mem_access_i,
     input  wire         mem_priv_m_i,
-    output wire         mem_allow_o
+    output wire         mem_allow_o,
+    input  wire [31:0]  replay_addr_i,
+    input  wire         replay_priv_m_i,
+    output wire [1:0]   replay_allow_o
 );
     // Size is log2(bytes): 0=byte, 1=halfword, 2=word; 3 is invalid.
     // MEM access is an R/W/X requirement mask in pmpcfg bit order. IF always
     // requires X. Callers derive each port's effective privilege separately.
+    localparam integer PORTS = 2 + ((MUA_BTB_IDATA_DEPTH > 0) ? ((ISA_C == 1) ? 2 : 1) : 0);
     generate
         if (ISA_PMP == 0) begin : GEN_DISABLED
             assign if_allow_o = 1'b1;
             assign mem_allow_o = 1'b1;
+            assign replay_allow_o = 2'b11;
         end else if (ISA_PMP == 1) begin : GEN_ENABLED
             wire [559:0] region_lower;
             wire [559:0] region_upper;
-            wire [63:0] check_addr;
-            wire [3:0] check_size;
-            wire [5:0] check_access;
-            wire [1:0] check_priv_m;
-            wire [1:0] check_allow;
+            wire [32*PORTS-1:0] check_addr;
+            wire [2*PORTS-1:0] check_size;
+            wire [3*PORTS-1:0] check_access;
+            wire [PORTS-1:0] check_priv_m;
+            wire [PORTS-1:0] check_allow;
 
-            assign check_addr = {mem_addr_i, if_addr_i};
-            assign check_size = {mem_size_i, if_size_i};
-            assign check_access = {mem_access_i, 3'b100};
-            assign check_priv_m = {mem_priv_m_i, if_priv_m_i};
+            assign check_addr[63:0] = {mem_addr_i, if_addr_i};
+            assign check_size[3:0] = {mem_size_i, if_size_i};
+            assign check_access[5:0] = {mem_access_i, 3'b100};
+            assign check_priv_m[1:0] = {mem_priv_m_i, if_priv_m_i};
             assign if_allow_o = check_allow[0];
             assign mem_allow_o = check_allow[1];
+
+            if (PORTS > 2) begin : GEN_REPLAY_FIRST
+                assign check_addr[95:64] = replay_addr_i;
+                assign check_size[5:4] = 2'd2;
+                assign check_access[8:6] = 3'b100;
+                assign check_priv_m[2] = replay_priv_m_i;
+                assign replay_allow_o[0] = check_allow[2];
+            end else begin : GEN_NO_REPLAY_FIRST
+                assign replay_allow_o[0] = 1'b1;
+            end
+            if (PORTS > 3) begin : GEN_REPLAY_SECOND
+                assign check_addr[127:96] = replay_addr_i + 32'd4;
+                assign check_size[7:6] = 2'd2;
+                assign check_access[11:9] = 3'b100;
+                assign check_priv_m[3] = replay_priv_m_i;
+                assign replay_allow_o[1] = check_allow[3];
+            end else begin : GEN_NO_REPLAY_SECOND
+                assign replay_allow_o[1] = 1'b1;
+            end
 
             // This is the only region decoder bank. Neither requester affects
             // these bounds; both comparison banks consume the same wires.
@@ -102,7 +128,7 @@ module uqu_pmp #(
             // Independent any-byte priority/permission checks: both requests
             // are evaluated concurrently without arbitration or shared state.
             genvar port_index;
-            for (port_index = 0; port_index < 2;
+            for (port_index = 0; port_index < PORTS;
                  port_index = port_index + 1) begin : GEN_CHECKS
                 wire [1:0] size;
                 wire [2:0] access;

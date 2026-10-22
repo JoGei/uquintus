@@ -14,6 +14,7 @@ module uqu_if_pipeline_tb #(
     parameter MUA_BP_ENTRIES = 16,
     parameter MUA_BTB = `UQU_BTB_NONE,
     parameter MUA_BTB_ENTRIES = 16,
+    parameter MUA_BTB_IDATA_DEPTH = 0,
     parameter MUA_IF_BUFFER_WORDS = 2
 ) (
     input wire clk_i,
@@ -93,7 +94,7 @@ module uqu_if_pipeline_tb #(
     uqu_stage_if #(
         .ISA_C(ISA_C), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
-        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_DEPTH(MUA_BTB_IDATA_DEPTH), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
     ) u_if (
         .clk_i(clk_i), .rst_ni(rst_ni), .boot_addr_i(boot_addr_i), .flush_i(flush_i),
         .redirect_valid_i(redirect), .redirect_addr_i(target), .fetch_enable_i(fetch_enable_i),
@@ -108,6 +109,7 @@ module uqu_if_pipeline_tb #(
         .exception_valid_o(if_exception), .exception_cause_o(if_cause), .exception_tval_o(if_tval),
         .misaligned_o(), .fetch_busy_o(), .priv_m_i(1'b1), .pmp_valid_o(pmp_valid_o),
         .pmp_addr_o(pmp_addr_o), .pmp_size_o(), .pmp_priv_m_o(), .pmp_allow_i(pmp_allow_i),
+        .replay_pmp_addr_o(), .replay_pmp_priv_m_o(), .replay_pmp_allow_i(2'b11),
         .imem_req_o(imem_req_o), .imem_addr_o(imem_addr_o), .imem_gnt_i(imem_gnt_i),
         .imem_rvalid_i(imem_rvalid_i), .imem_rdata_i(imem_rdata_i), .imem_err_i(imem_err_i)
     );

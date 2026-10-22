@@ -99,7 +99,8 @@ def aggregate(records):
 def bpu_section(stats):
     if not stats:
         return ''
-    labels = dict(btb_hit_rate='BTB hits / all retired instructions',
+    labels = dict(idata_replay_rate='Replayed instruction bytes / all retired instructions',
+        btb_hit_rate='BTB hits / all retired instructions',
         btb_control_flow_hit_rate='BTB hits / retired control-flow instructions',
         direction_accuracy='Raw direction accuracy / conditional branches',
         effective_direction_accuracy='Effective taken steering accuracy / conditional branches',

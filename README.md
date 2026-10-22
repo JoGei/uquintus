@@ -35,7 +35,7 @@ flowchart TB
                 FETCH["Fetch engine<br/>Word FIFO · aligner"]
                 C_IF["Optional C expansion<br/>IF placement"]
                 BP["Optional direction predictor<br/>Bimodal · 2-bit counters"]
-                BTB["Optional branch target buffer<br/>Direct mapped"]
+                BTB["Optional branch target buffer<br/>Direct mapped · optional instruction data"]
                 FETCH ~~~ C_IF ~~~ BP ~~~ BTB
             end
             IF_DE["IF / DE<br/>registers"]
@@ -72,7 +72,7 @@ flowchart TB
 
         PIPELINE ~~~ SHARED
 
-        subgraph SHARED["Core-owned shared logic — connections omitted"]
+        subgraph SHARED["Core-owned shared logic — wiring omitted"]
             direction LR
             CTRL["Pipeline control<br/>Stalls · flushes · redirects · drains"]
             GPR["GPR file · FF or latch<br/>RV32I: 32 / RV32E: 16 registers"]
@@ -126,6 +126,10 @@ selects target storage with `MUA_BTB: none | direct_mapped`.
 target capacity; both default to 16. `config/rv32i_bimodal.yml` explicitly
 enables bimodal direction prediction and a direct-mapped BTB. Prediction travels with
 the instruction through IF/DE; DE redirects only on an incorrect prediction.
+`MUA_BTB_IDATA_DEPTH` optionally retains target instruction sequences (default
+`0`); [rv32i_bimodal_idata.yml](config/rv32i_bimodal_idata.yml) selects four slots.
+IF replays original encodings with live shared-PMP checks while prefetching the
+uncached continuation.
 
 The GPR file remains core-owned while serving DE reads and WB writes. Its
 third read port is enabled for three-source XIF or Zfinx.

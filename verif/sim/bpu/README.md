@@ -18,6 +18,7 @@ MUA_BRANCH_PREDICTOR: bimodal
 MUA_BP_ENTRIES: 16
 MUA_BTB: direct_mapped
 MUA_BTB_ENTRIES: 32
+MUA_BTB_IDATA_DEPTH: 0
 ```
 
 [`uqu_bp_bimodal.v`](../../../src/uquintus/uqu_bp_bimodal.v) stores tagged two-bit
@@ -99,3 +100,38 @@ not a Pareto selection or an execution-time/area claim; new predictor timing
 and area costs remain unmeasured. Native benchmark records retain the complete
 configuration, ELF identity and validation scope under `build/` for the shared
 report. Broader workloads and prediction-event statistics remain follow-ups.
+
+## Target instruction data
+
+`MUA_BTB_IDATA_DEPTH` selects 0..1024 retained original instruction encodings
+per entry. Zero is the default and removes payload/fill/replay storage. The
+`rv32i_bimodal_idata` preset selects four. Labels add `+idata4` to the active
+BTB field. Each slot holds a C16 encoding zero-extended or an assembled C32/I32
+encoding; low prefix bits identify its length in C configurations.
+
+| Additional BPU ports | Contract |
+| --- | --- |
+| `capture_valid_i`, `capture_pc_i`, `capture_instr_i` | Successful IF-to-DE transfer, with original assembled bits. Held/faulting tokens do not capture. |
+| `stream_flush_i` | Stop the current fill stream, retaining stored prefixes; an accepted DE taken-branch update may start a new stream on the same edge. |
+| `idata_count_o`, `idata_next_pc_o`, `idata_o` | Prefix length, first uncached instruction PC and packed slots (slot zero in bits 31:0), qualified by BTB hit. Effective taken steering remains a separate decision. |
+
+Taken DE updates start collection at the actual target. Exact sequential PCs
+extend the prefix; unchanged targets preserve existing bytes. Reset/FENCE.I,
+entry replacement and changed targets invalidate entry data. IF snapshots a
+usable prefix into one shared active window and advances its read index only
+on transfer; fills may continue without rewriting replayed bytes. Live PMP
+permissions are checked again at replay, using the core-owned checker's added
+word comparison banks. Continuation prefetch keeps the ordinary IF lane.
+
+```sh
+make test COMPONENT=bpu CONFIG=rv32i_bimodal_idata
+make test COMPONENT=if CONFIG=rv32i_bimodal_idata TEST=idata
+make test COMPONENT=core CONFIG=rv32i_bimodal_idata
+```
+
+The `idata` case uses an independent retained-prefix model for allocation,
+partial extension, wraparound, flushes, capacity, replacement and randomized
+capture/update interleavings. IF tests add stable replay during replacement,
+raw compressed placement, continuation merging, current permission failures
+and code changes after invalidation. Benchmark statistics count replay source
+at retirement, excluding speculation and faults.

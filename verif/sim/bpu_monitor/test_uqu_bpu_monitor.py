@@ -22,7 +22,7 @@ class MonitorTest(uvm_test):
     async def tick(self, **changes):
         values = dict(rst_n=1, if_valid=0, if_ready=0, if_flush=0,
                       if_pc=self.pc, if_predicted_next_pc=self.pc+4,
-                      if_btb_hit=0, if_direction_taken=0, if_effective_taken=0,
+                      if_btb_hit=0, if_direction_taken=0, if_effective_taken=0, if_replay=0,
                       stage_valid=self.valid, stage_enable=0, stage_next_valid=0,
                       de_pc=self.pc, de_branch_kind=0, de_taken=0,
                       de_next_pc=self.pc+4, de_redirect=0, de_compressed=0,
@@ -40,11 +40,11 @@ class MonitorTest(uvm_test):
         assert int(self.dut.counter_count_o.value) == len(COUNTERS)
 
     async def instruction(self, *, kind=0, taken=0, prediction=None, btb=0,
-                          direction=0, effective=0, compressed=0, retire=True, squash=False):
+                          direction=0, effective=0, compressed=0, retire=True, squash=False, replayed=0):
         actual = self.pc+0x100 if taken else self.pc+4
         prediction = self.pc+4 if prediction is None else prediction
         lookup = dict(if_valid=1, if_pc=self.pc, if_predicted_next_pc=prediction,
-                      if_btb_hit=btb, if_direction_taken=direction, if_effective_taken=effective)
+                      if_btb_hit=btb, if_direction_taken=direction, if_effective_taken=effective, if_replay=replayed)
         # First presentation is held; live table outputs then change underneath it.
         await self.tick(**lookup)
         changed = dict(lookup, if_btb_hit=1-btb, if_direction_taken=1-direction,
@@ -81,13 +81,14 @@ class MonitorTest(uvm_test):
                                btb=int(active), direction=int(predicting), effective=int(active))
         await self.instruction(kind=1, taken=1, prediction=self.pc+0x104 if active else None,
                                btb=int(active), direction=int(predicting), effective=int(active), compressed=1)
-        await self.instruction(kind=2, taken=1)
+        await self.instruction(kind=2, taken=1, replayed=int(active))
         await self.instruction(kind=3, taken=1)
         await self.instruction(btb=int(active))  # Stale BTB entry on ordinary instruction.
         before = dict(self.counts)
-        await self.instruction(kind=1, taken=1, squash=True)
-        await self.instruction(kind=1, taken=1, retire=False)  # Faulting WB token.
+        await self.instruction(kind=1, taken=1, squash=True, replayed=1)
+        await self.instruction(kind=1, taken=1, retire=False, replayed=1)  # Faulting WB token.
         assert self.counts == before
+        assert self.counts['idata_replayed_instructions'] == int(active)
         assert self.counts['retired_instructions'] == 6
         assert self.counts['conditional_branches'] == 3
         assert self.counts['direct_jumps'] == self.counts['indirect_jumps'] == 1

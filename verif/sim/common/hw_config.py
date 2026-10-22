@@ -29,7 +29,7 @@ FPU_PIPE_PARAMS = {
 
 def load_configuration(path, catalog):
     config = yaml.safe_load(path.read_text())
-    expected = BOOLEAN_PARAMS | set(CHOICES) | set(catalog) | FPU_PIPE_PARAMS | {"MUA_IF_BUFFER_WORDS", "MUA_BP_ENTRIES", "MUA_BTB_ENTRIES", "HART_ID"}
+    expected = BOOLEAN_PARAMS | set(CHOICES) | set(catalog) | FPU_PIPE_PARAMS | {"MUA_IF_BUFFER_WORDS", "MUA_BP_ENTRIES", "MUA_BTB_ENTRIES", "MUA_BTB_IDATA_DEPTH", "HART_ID"}
     if not isinstance(config, dict):
         raise ValueError("hardware configuration must be a YAML mapping")
     if set(config) != expected:
@@ -49,6 +49,8 @@ def load_configuration(path, catalog):
     if (type(config["MUA_IF_BUFFER_WORDS"]) is not int or
             config["MUA_IF_BUFFER_WORDS"] < 2):
         raise ValueError("MUA_IF_BUFFER_WORDS must be an integer >= 2")
+    if type(config['MUA_BTB_IDATA_DEPTH']) is not int or not 0 <= config['MUA_BTB_IDATA_DEPTH'] <= 1024:
+        raise ValueError('MUA_BTB_IDATA_DEPTH must be an integer from 0 through 1024')
     for name in ("MUA_BP_ENTRIES", "MUA_BTB_ENTRIES"):
         entries = config[name]
         if type(entries) is not int or not 2 <= entries <= 1024 or entries & (entries - 1):
@@ -119,6 +121,8 @@ def configuration_label(config):
     btb = "none"
     if config["MUA_BRANCH_PREDICTOR"] != "none" and config["MUA_BTB"] == "direct_mapped":
         btb = f"direct+entries{config['MUA_BTB_ENTRIES']}"
+        if config['MUA_BTB_IDATA_DEPTH']:
+            btb += f"+idata{config['MUA_BTB_IDATA_DEPTH']}"
     fields += [f"mua-bp:{predictor}", f"mua-btb:{btb}", f"mua-ifbuf:{config['MUA_IF_BUFFER_WORDS']}"]
     if config["ISA_M"]:
         multiplier = {

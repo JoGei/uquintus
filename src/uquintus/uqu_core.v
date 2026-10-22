@@ -28,6 +28,7 @@ module uqu_core #(
     parameter MUA_BP_ENTRIES = 16,
     parameter MUA_BTB = `UQU_BTB_NONE,
     parameter MUA_BTB_ENTRIES = 16,
+    parameter MUA_BTB_IDATA_DEPTH = 0,
     parameter MUA_REGFILE_IMPL = `UQU_RF_FF,
     parameter MUA_IF_BUFFER_WORDS = 2,
     parameter MUA_HARDENED = 0,
@@ -97,6 +98,11 @@ module uqu_core #(
     input wire [4:0] xif_result_rd_i,
     input wire [XIF_DUALWRITE:0] xif_result_we_i
 );
+    localparam integer IDATA_DEPTH = ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) &&
+        (MUA_BTB != `UQU_BTB_NONE)) ? MUA_BTB_IDATA_DEPTH : 0;
+    wire [31:0] replay_pmp_addr;
+    wire replay_pmp_priv_m;
+    wire [1:0] replay_pmp_allow;
     reg priv_m_q;
     reg [31:0] resume_pc_q;
     reg de_valid_q, ex_valid_q, mem_valid_q, wb_valid_q;
@@ -212,8 +218,15 @@ module uqu_core #(
     wire xif_result_allowed = ((xif_result_writes & ~xif_allowed_writes) == 2'd0);
     wire [4:0] wb_waddr0, wb_waddr1;
     wire [31:0] wb_wdata0, wb_wdata1;
-    wire wb_redirect = wb_exception_fire || wb_mret;
-    wire [31:0] wb_target = wb_exception_fire ? {mtvec[31:2],2'b00} : mepc;
+    // Permission writes retire before any younger instruction uses cached bytes.
+    // Preserve the BTB payload but refetch/recheck the architectural continuation.
+    wire wb_csr_source_zero = wb_csr_op_q[2] ? (wb_csr_src_q[4:0] == 5'd0) : wb_csr_zero_q;
+    wire wb_pmp_recover = (IDATA_DEPTH > 0) && (ISA_PMP == 1) && wb_retire &&
+        (wb_kind_q == `UQU_WB_CSR) && ((wb_csr_op_q[1:0] == 2'b01) || !wb_csr_source_zero) &&
+        (((wb_csr_addr_q >= 12'h3a0) && (wb_csr_addr_q <= 12'h3af)) ||
+         ((wb_csr_addr_q >= 12'h3b0) && (wb_csr_addr_q <= 12'h3ef)));
+    wire wb_redirect = wb_exception_fire || wb_mret || wb_pmp_recover;
+    wire [31:0] wb_target = wb_exception_fire ? {mtvec[31:2],2'b00} : wb_mret ? mepc : wb_next_pc_q;
     wire ex_forwardable = ex_complete && !ex_exception && !ex_lsu_q && (ex_kind_q == `UQU_WB_RESULT);
     wire mem_forwardable = mem_complete && !mem_exception && (mem_kind_q == `UQU_WB_RESULT);
 
@@ -256,7 +269,7 @@ module uqu_core #(
     uqu_stage_if #(
         .ISA_C(ISA_C), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
-        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_DEPTH(MUA_BTB_IDATA_DEPTH), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
     ) u_if (
         .clk_i(clk_i), .rst_ni(rst_ni), .boot_addr_i(boot_addr_i), .flush_i(if_flush),
         .redirect_valid_i(redirect_valid), .redirect_addr_i(redirect_addr), .fetch_enable_i(fetch_enable),
@@ -270,6 +283,7 @@ module uqu_core #(
         .exception_valid_o(if_exception), .exception_cause_o(if_cause),
         .exception_tval_o(if_tval), .misaligned_o(), .fetch_busy_o(), .priv_m_i(priv_m_q),
         .pmp_valid_o(if_pmp_valid), .pmp_addr_o(if_pmp_addr), .pmp_size_o(if_pmp_size), .pmp_priv_m_o(if_pmp_priv_m), .pmp_allow_i(if_pmp_allow),
+        .replay_pmp_addr_o(replay_pmp_addr), .replay_pmp_priv_m_o(replay_pmp_priv_m), .replay_pmp_allow_i(replay_pmp_allow),
         .imem_req_o(imem_req_o), .imem_addr_o(imem_addr_o), .imem_gnt_i(imem_gnt_i),
         .imem_rvalid_i(imem_rvalid_i), .imem_rdata_i(imem_rdata_i), .imem_err_i(imem_err_i)
     );
@@ -381,7 +395,8 @@ module uqu_core #(
         .we0_o(wb_we0), .waddr0_o(wb_waddr0), .wdata0_o(wb_wdata0), .we1_o(wb_we1), .waddr1_o(wb_waddr1), .wdata1_o(wb_wdata1),
         .mstatus_o(mstatus), .mie_o(mie), .mip_o(mip), .mtvec_o(mtvec), .mepc_o(mepc), .pmpcfg_o(pmpcfg), .pmpaddr_o(pmpaddr), .frm_o(frm), .fflags_o()
     );
-    uqu_pmp #(.ISA_PMP(ISA_PMP)) u_pmp (
+    uqu_pmp #(.ISA_PMP(ISA_PMP), .ISA_C(ISA_C), .MUA_BTB_IDATA_DEPTH(IDATA_DEPTH)) u_pmp (
+        .replay_addr_i(replay_pmp_addr), .replay_priv_m_i(replay_pmp_priv_m), .replay_allow_o(replay_pmp_allow),
         .pmpcfg_i(pmpcfg), .pmpaddr_i(pmpaddr), .if_addr_i(if_pmp_addr), .if_size_i(if_pmp_size), .if_priv_m_i(if_pmp_priv_m), .if_allow_o(if_pmp_allow),
         .mem_addr_i(mem_pmp_addr), .mem_size_i(mem_pmp_size), .mem_access_i(mem_pmp_access), .mem_priv_m_i(mem_pmp_priv_m), .mem_allow_o(mem_pmp_allow)
     );

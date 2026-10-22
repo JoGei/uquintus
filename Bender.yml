@@ -56,6 +56,7 @@ sources:
           - verif/sim/if_prefetch/uqu_if_prefetch_tb.v
       - target: any(if, if_pipeline_test, rtl, core_test)
         files:
+          - src/uquintus/uqu_if_replay.v
           - src/uquintus/uqu_stage_if.v
       - target: any(bpu, if, if_pipeline_test, rtl, core_test)
         files:

@@ -24,19 +24,29 @@ class PredictorTest(uvm_test):
         inputs = dict(rst_n=1, invalidate=0, lookup_valid=1, lookup_pc=0x1000,
                       update_valid=0, update_pc=0x1000, update_control_flow=1,
                       update_conditional=1, update_taken=1, update_target=0x2000)
+        inputs.update(stream_flush=0, capture_valid=0, capture_pc=0, capture_instr=0)
         inputs.update(changes)
+        self.history = (getattr(self, 'history', []) + [inputs])[-12:]
         self.dut.clk_i.value = 0
         for name, value in inputs.items():
             getattr(self.dut, 'rst_ni' if name == 'rst_n' else name + '_i').value = value
         await Timer(1, units='ns')
         expected = self.model.lookup(inputs['lookup_pc'], bool(inputs['lookup_valid'] and inputs['rst_n']),
                                      inputs['invalidate'])
+        prefix = self.model.payload(inputs['lookup_pc']) if inputs['rst_n'] and not inputs['invalidate'] and inputs['lookup_valid'] else []
+        assert int(self.dut.idata_count_o.value) == len(prefix), (int(self.dut.idata_count_o.value),prefix,self.model.fill,self.model.payloads,self.history)
+        assert int(self.dut.idata_o.value) == sum(word << (32*k) for k, word in enumerate(prefix))
+        if prefix:
+            target = self.model.entries[(inputs['lookup_pc']//self.model.alignment)%self.model.capacity]['target']
+            assert int(self.dut.idata_next_pc_o.value) == (target + sum(map(self.model.length, prefix))) & 0xffffffff
         actual = {name: int(getattr(self.dut, name + '_o').value) for name in expected}
         assert actual == expected, (actual, expected, inputs)
         self.model.step(reset=not inputs['rst_n'], invalidate=inputs['invalidate'],
                         valid=inputs['update_valid'], pc=inputs['update_pc'],
                         control_flow=inputs['update_control_flow'], conditional=inputs['update_conditional'],
-                        taken=inputs['update_taken'], target=inputs['update_target'])
+                        taken=inputs['update_taken'], target=inputs['update_target'],
+                        stream_flush=inputs['stream_flush'], capture_valid=inputs['capture_valid'],
+                        capture_pc=inputs['capture_pc'], capture_instr=inputs['capture_instr'])
         self.dut.clk_i.value = 1
         await Timer(1, units='ns')
         return actual
@@ -135,3 +145,72 @@ async def lifecycle(dut):
 @cocotb.test()
 async def randomized(dut):
     await uvm_root().run_test('RandomizedTest')
+
+class IdataTest(PredictorTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.cycle(rst_n=0)
+        depth = self.params['MUA_BTB_IDATA_DEPTH']
+        if not self.model.depth:
+            await self.cycle(update_valid=1, capture_valid=1, capture_pc=0x2000, capture_instr=0x13)
+            assert int(self.dut.idata_count_o.value) == 0
+            self.drop_objection(); return
+        # Concurrent allocation/first capture; bubbles do not consume slots.
+        # C16 and crossing C32 are stored as original assembled instructions.
+        words = [1 if self.params['ISA_C'] and k%2 == 0 else 0x100093+0x100000*k
+                 for k in range(depth)]
+        pc = 0xfffffffe if self.params['ISA_C'] else 0xfffffff8
+        target = pc
+        await self.cycle(update_valid=1, update_target=target, capture_valid=1,
+                         capture_pc=pc, capture_instr=words[0])
+        pc = (pc+self.model.length(words[0])) & 0xffffffff
+        for word in words[1:]:
+            await self.cycle(capture_instr=self.rng.getrandbits(32))
+            await self.cycle(capture_valid=1,capture_pc=pc,capture_instr=word)
+            pc = (pc+self.model.length(word)) & 0xffffffff
+        await self.cycle(capture_valid=1,capture_pc=pc,capture_instr=0x13)
+        assert self.model.payload(0x1000) == words
+        # Reads, flushes and repeated updates retain a warm prefix.
+        for _ in range(3):
+            await self.cycle(stream_flush=1)
+            await self.cycle(update_valid=1, update_target=target)
+            await self.cycle(capture_valid=1,capture_pc=target,capture_instr=words[0])
+            await self.cycle()
+            assert self.model.payload(0x1000) == words
+        # Changed target, partial fill and later extension at the fixed origin.
+        await self.cycle(update_valid=1,update_target=0x4000)
+        await self.cycle(capture_valid=1,capture_pc=0x4000,capture_instr=0x13)
+        await self.cycle(stream_flush=1)
+        assert self.model.payload(0x1000) == [0x13]
+        await self.cycle(update_valid=1,update_target=0x4000)
+        for k in range(depth):
+            await self.cycle(capture_valid=1,capture_pc=0x4000+4*k,capture_instr=0x13)
+        assert self.model.payload(0x1000) == [0x13]*depth
+        # Tag miss by a non-control does not clear somebody else's payload.
+        alias = 0x1000+self.model.capacity*self.model.alignment
+        await self.cycle(update_valid=1,update_pc=alias,update_control_flow=0)
+        await self.cycle()
+        assert self.model.payload(0x1000) == [0x13]*depth
+        # Replacement, stale fill and global invalidation cannot leak bytes.
+        await self.cycle(update_valid=1,update_pc=alias,update_target=0x8000)
+        await self.cycle(capture_valid=1,capture_pc=0x4004,capture_instr=0x13)
+        await self.cycle(lookup_pc=alias)
+        await self.cycle(invalidate=1,capture_valid=1,capture_pc=0x8000,capture_instr=0x13)
+        await self.cycle(lookup_pc=alias)
+        # Random lifecycle/capture interleavings, checked against the model.
+        pcs = [0x1000+self.model.alignment*k for k in range(2*self.model.capacity)]
+        for _ in range(2048):
+            fill_pc = self.model.fill[1] if self.model.fill else 0x2000
+            await self.cycle(lookup_pc=self.rng.choice(pcs),update_valid=self.rng.random()<0.2,
+                update_pc=self.rng.choice(pcs),update_target=0x2000,
+                update_control_flow=self.rng.random()<0.8,update_taken=self.rng.randrange(2),
+                stream_flush=self.rng.random()<0.01,capture_valid=self.rng.random()<0.6,
+                capture_pc=fill_pc if self.rng.random()<0.9 else 0x4000,
+                capture_instr=1 if self.params['ISA_C'] and self.rng.random()<0.5 else 0x13,
+                invalidate=self.rng.random()<0.005)
+        self.drop_objection()
+
+
+@cocotb.test()
+async def idata(dut):
+    await uvm_root().run_test('IdataTest')

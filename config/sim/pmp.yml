@@ -3,6 +3,8 @@ bender_target: pmp
 test_module: test_uqu_pmp
 parameters:
   - ISA_PMP
+  - ISA_C
+  - MUA_BTB_IDATA_DEPTH
 tests:
   - directed
   - priority

@@ -1,4 +1,4 @@
-# Core-owned two-port PMP checker
+# Core-owned shared PMP checker
 
 `src/uquintus/uqu_pmp.v` is a combinational Verilog-2005 checker for the fixed
 sixteen-entry, G=0 PMP profile in [architecture, Section 8.1](../../../doc/uqu_spec.arch.md#81-internal-pmp-and-memory-fault-boundary).
@@ -26,7 +26,7 @@ regression checks the permission block; core tests cover its pipeline use.
 
 The module has no clock, reset, storage, bus, or transaction handshake. The core
 parent connects CSR-owned PMP state to this single block. IF and MEM do not own
-PMP instances. Sixteen generated region decoders consume only CSR inputs; two
+PMP instances. Sixteen generated region decoders consume only CSR inputs; the base IF/MEM
 generated access checkers consume the same decoded bounds plus their own
 address/control. No request arbitration, shared transaction state, or cross-port
 backpressure is required. CSR serialization must
@@ -88,3 +88,14 @@ byte independently for both ports on every sample. IF always requests execute
 permission; MEM supplies its separate requirement mask. Explicit directed expectations additionally check priority,
 partial-match rejection and unmatched-mode behavior. No CSR or bus behavior is
 claimed by these standalone tests.
+
+## Replay queries
+
+When `MUA_BTB_IDATA_DEPTH > 0`, an additional bank checks the aligned
+`replay_addr_i` as a four-byte execute access under `replay_priv_m_i`. With
+`ISA_C=1`, a second bank checks `(replay_addr_i+4) mod 2^32`. Results occupy
+`replay_allow_o[0]` and `[1]`; inactive banks are hardwired allowed. All banks
+share CSR region decoding and evaluate concurrently with IF continuation and
+MEM. The core passes effective depth zero when prediction/BTB is disabled.
+There is no checker instance inside IF. The interval-model suite checks every
+enabled replay bank alongside its original IF/MEM comparisons.

@@ -30,3 +30,11 @@ with real CSR markers and checks its retired instruction mix. Set
 `UQU_BPU_NATIVE=/absolute/path/to/obj/uqu_benchmark` to a native driver built
 for the same hardware configuration to additionally compare both timer points
 and every BPU snapshot/rate between the checked and native harnesses.
+
+The appended `IDATA_REPLAYED_INSTRUCTIONS` counter carries the IF source flag
+through the same shadow boundary state, counting only successful retirement.
+It excludes held presentations, squashes and traps. Benchmark statistics schema
+2 exposes its count and fraction of all window retirements; historical schema-1
+artifacts retain their original twenty-counter interpretation. The passive
+monitor regression includes replay-origin instructions that retire, squash and
+fault without incrementing the wrong population.

@@ -186,6 +186,7 @@ module uqu_mem_pipeline_tb #(
     // One parent-owned block; IF is unused in this MEM-only fixture. The
     // query-valid qualifier is not a handshake and does not gate the checker.
     uqu_pmp #(.ISA_PMP(ISA_PMP)) u_pmp (
+        .replay_addr_i(32'd0), .replay_priv_m_i(1'b0), .replay_allow_o(),
         .pmpcfg_i(pmpcfg_i), .pmpaddr_i(pmpaddr_i),
         .if_addr_i(32'd0), .if_size_i(2'd2), .if_priv_m_i(1'b1), .if_allow_o(),
         .mem_addr_i(pmp_addr), .mem_size_i(pmp_size), .mem_access_i(pmp_access),

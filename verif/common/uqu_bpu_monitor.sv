@@ -27,6 +27,7 @@ module uqu_bpu_monitor #(
     input wire if_btb_hit_i,
     input wire if_direction_taken_i,
     input wire if_effective_taken_i,
+    input wire if_replay_i,
     // Order: DE, EX, MEM, WB. Bit zero identifies DE.
     input wire [3:0] stage_valid_i,
     input wire [3:0] stage_enable_i,
@@ -57,6 +58,7 @@ module uqu_bpu_monitor #(
         logic wrong_target;
         logic redirected;
         logic compressed;
+        logic replayed;
     } token_t;
     token_t payload_q [0:3];
     token_t held_q;
@@ -73,6 +75,7 @@ module uqu_bpu_monitor #(
     always @* begin
         incoming = '0;
         incoming.pc = if_pc_i;
+        incoming.replayed = if_replay_i;
         incoming.predicted_next_pc = if_predicted_next_pc_i;
         incoming.btb_hit = held_valid_q ? held_q.btb_hit : if_btb_hit_i;
         incoming.direction_taken = held_valid_q ? held_q.direction_taken : if_direction_taken_i;
@@ -86,6 +89,7 @@ module uqu_bpu_monitor #(
         resolved.compressed = de_compressed_i;
 
         events = '0;
+        events[IDATA_REPLAYED_INSTRUCTIONS] = payload_q[3].replayed;
         events[RETIRED_INSTRUCTIONS] = 1'b1;
         events[CONDITIONAL_BRANCHES] = conditional;
         events[DIRECT_JUMPS] = payload_q[3].kind == `UQU_BR_JAL;

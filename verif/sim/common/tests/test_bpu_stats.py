@@ -53,7 +53,8 @@ class BpuStatsTests(unittest.TestCase):
         start, stop, params = self.fixture()
         for key, value in [('retired_instructions', 99), ('btb_hits', 101),
                            ('false_btb_hits', 0), ('direction_mispredictions', 21),
-                           ('target_mispredictions', 19), ('taken_control_flow', 21)]:
+                           ('target_mispredictions', 19), ('taken_control_flow', 21),
+                           ('idata_replayed_instructions', 101)]:
             bad = list(stop)
             bad[COUNTERS.index(key)] = start[COUNTERS.index(key)] + value
             with self.subTest(key=key), self.assertRaises(ValueError): statistics(start, bad, params, 100)
@@ -71,3 +72,18 @@ class BpuStatsTests(unittest.TestCase):
             bad[field] = value
             with self.subTest(field=field), self.assertRaises(ValueError): validate(bad, args[2], 100)
         with self.assertRaises(ValueError): validate({}, args[2], 100)
+
+    def test_replay_provenance_and_legacy_artifacts(self):
+        start, stop, params = self.fixture()
+        params['MUA_BTB_IDATA_DEPTH'] = 4
+        stop[-1] += 40
+        stats = statistics(start, stop, params, 100)
+        self.assertEqual(stats['counts']['idata_replayed_instructions'], 40)
+        self.assertEqual(stats['rates_percent']['idata_replay_rate'], 40)
+        self.assertEqual(validate(stats, params, 100), stats)
+        with self.assertRaises(ValueError):
+            statistics(start, stop, dict(params, MUA_BTB_IDATA_DEPTH=0), 100)
+        legacy = statistics(start[:20], stop[:20], params, 100)
+        self.assertEqual(legacy['schema_version'], 1)
+        self.assertNotIn('idata_replayed_instructions', legacy['counts'])
+        self.assertEqual(validate(legacy, params, 100), legacy)

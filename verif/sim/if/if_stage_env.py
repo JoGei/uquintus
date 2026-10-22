@@ -42,6 +42,7 @@ class IfStageTest(uvm_test):
         self.delivered = []
         self.faults = []
         self.predictor = BpuModel(self.params)
+        self.replay = []
         self.held_prediction = None
         self.response_latency = None
 
@@ -51,6 +52,22 @@ class IfStageTest(uvm_test):
     def token(self):
         """Expected complete token, using bytes and retained access decisions."""
         base = self.pc&~3
+        if self.replay:
+            original = self.replay[0]
+            short = self.c and original & 3 != 3
+            fault = (base in self.denied or self.deny_user and not self.current_priv or
+                     (self.c and self.pc & 2 and not short and ((base+4)&MASK) in self.denied))
+            if fault:
+                tval = self.pc if base in self.denied or self.deny_user and not self.current_priv else (self.pc+2)&MASK
+                return dict(instr=0,original_instr=0,compressed=0,next_pc=self.pc,
+                            exception_valid=1,exception_cause=1,exception_tval=tval)
+            result = compressed(original) if short and self.expand_if else None
+            illegal = short and self.expand_if and result is None
+            return dict(instr=0 if illegal else result[1] if result else original,
+                        original_instr=original,compressed=int(short),
+                        next_pc=self.pc if illegal else (self.pc+(2 if short else 4))&MASK,
+                        exception_valid=int(illegal),exception_cause=2 if illegal else 0,
+                        exception_tval=original if illegal else 0)
         if base not in self.complete:
             return None
         data,error = self.live[base]
@@ -89,6 +106,12 @@ class IfStageTest(uvm_test):
         d.clk_i.value = 0
         for name,value in i.items():
             getattr(d,'rst_ni' if name=='rst_n' else name+'_i').value = value
+        self.current_priv = i['priv_m']
+        # Replay permission can legitimately block a new continuation fetch.
+        # Set it before observing that fetch's independent ordinary PMP query.
+        replay_addr = (self.pc&~3) if self.replay else 0
+        d.replay_pmp_allow_i.value = sum(int(((replay_addr+4*k)&MASK) not in self.denied and
+            not (self.deny_user and not i['priv_m'])) << k for k in range(2))
         d.pmp_allow_i.value = 1
         d.imem_gnt_i.value = 0
         d.imem_rvalid_i.value = 0
@@ -118,7 +141,8 @@ class IfStageTest(uvm_test):
         o = {name:int(getattr(d,name+'_o').value) for name in names}
         o.update(imem_req=req,imem_addr=addr)
         assert query==(o['pmp_valid'],o['pmp_addr']),'PMP decision fed back into query'
-        invalidate = i['flush'] or i['redirect_valid']
+        recover = bool(self.predictor.depth and i['predictor_invalidate'])
+        invalidate = i['flush'] or i['redirect_valid'] or recover
         active = i['rst_n'] and not invalidate and self.running and not self.fault_hold
         misaligned = active and bool(self.pc % (2 if self.c else 4))
         assert o['misaligned']==int(bool(misaligned))
@@ -141,7 +165,9 @@ class IfStageTest(uvm_test):
         assert o['predicted_next_pc']==predicted_pc, (o,predicted_pc,prediction)
         transfer = bool(o['valid'] and i['ready'])
         prediction_redirect = transfer and not o['exception_valid'] and predicted_pc != o['next_pc']
-        pop = transfer and not o['exception_valid'] and (self.pc&~3)!=(o['next_pc']&~3)
+        prefix = self.predictor.payload(self.pc) if prediction['taken'] else []
+        replay_start = bool(prediction_redirect and prefix and prediction['target']==predicted_pc)
+        pop = transfer and not self.replay and not o['exception_valid'] and (self.pc&~3)!=(o['next_pc']&~3)
         if o['pmp_valid']:
             assert active and not misaligned and i['fetch_enable']
             assert self.params['MUA_BRANCH_PREDICTOR']!=0 or not i['branch_pending']
@@ -153,6 +179,7 @@ class IfStageTest(uvm_test):
             assert not o['pmp_addr'] and not o['pmp_size'] and not o['pmp_priv_m']
         if not i['rst_n'] or invalidate:
             self.epoch += 1
+            self.replay = []
             self.live.clear()
             self.complete.clear()
             self.credits = 0
@@ -167,6 +194,8 @@ class IfStageTest(uvm_test):
                 self.pc = i['redirect_addr']
                 self.fetch_addr = self.pc&~3
                 self.running = True
+            elif recover and not i['flush']:
+                self.fetch_addr = self.pc&~3
             else:
                 self.running = False
         else:
@@ -176,7 +205,11 @@ class IfStageTest(uvm_test):
                 self.complete.clear()
                 self.credits = 0
                 self.bus_owners = deque(list(self.bus_owners)[:1] if req else [])
-                self.fetch_addr = predicted_pc&~3
+                self.replay = prefix if replay_start else []
+                continuation = predicted_pc + (sum(map(self.predictor.length,prefix)) if replay_start else 0)
+                self.fetch_addr = (continuation&MASK)&~3
+            elif transfer and self.replay:
+                self.replay.pop(0)
             elif pop:
                 del self.live[self.pc&~3]
                 self.complete.remove(self.pc&~3)
@@ -185,6 +218,7 @@ class IfStageTest(uvm_test):
                 if o['exception_valid']:
                     self.faults.append((self.pc,o['exception_cause'],o['exception_tval']))
                     self.fault_hold = True
+                    self.replay = []
                 else:
                     self.delivered.append((self.pc,o['original_instr'],o['compressed'],o['instr']))
                     self.pc = predicted_pc
@@ -224,7 +258,9 @@ class IfStageTest(uvm_test):
         self.predictor.step(reset=not i['rst_n'], invalidate=i['predictor_invalidate'],
             valid=i['predictor_update_valid'],pc=i['predictor_update_pc'],
             control_flow=i['predictor_update_control_flow'],conditional=i['predictor_update_conditional'],
-            taken=i['predictor_update_taken'],target=i['predictor_update_target'])
+            taken=i['predictor_update_taken'],target=i['predictor_update_target'],
+            stream_flush=invalidate,capture_valid=transfer and not o['exception_valid'],
+            capture_pc=o['pc'],capture_instr=o['original_instr'])
         d.clk_i.value = 1
         await Timer(1,units='ns')
         return o

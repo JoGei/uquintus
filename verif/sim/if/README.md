@@ -18,7 +18,7 @@ make lint COMPONENT=if CONFIG=rv32ic
 
 Use `PYTHON=.venv/bin/python` for the repository environment. The
 [manifest](../../../config/sim/if.yml) uses the shared runner. Parameters are
-`ISA_C`, `MUA_C_IMPL`, `MUA_C_DECOMPRESS_STAGE`, `MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES` and
+`ISA_C`, `MUA_C_IMPL`, `MUA_C_DECOMPRESS_STAGE`, `MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES`, `MUA_BTB_IDATA_DEPTH` and
 `MUA_IF_BUFFER_WORDS`. Defaults follow the hardware configuration catalog.
 The canonical predictor encodings are `none=0` / `UQU_BP_NONE`,
 `static_not_taken=1` / `UQU_BP_STATIC_NOT_TAKEN` and `bimodal=2` /
@@ -138,3 +138,24 @@ branch feedback in all three strategies. The [core](../core/README.md) supplies
 global holds and restarts through the stage ports, including exception and
 FENCE.I arbitration. Core debug, more advanced predictors and the standard CV-X-IF
 compressed channel remain open.
+
+## Retained target sequences
+
+With an enabled BTB and nonzero `MUA_BTB_IDATA_DEPTH`, `uqu_if_replay` supplies
+assembled original encodings ahead of the optional IF decompressor. A predicted
+target hit snapshots its prefix; replay never removes stored slots. Native
+fetch starts at the aligned word containing the prefix's first uncached PC,
+and replay does not pop that continuation FIFO. A halfword boundary may reuse
+a word containing both cached and uncached bytes.
+
+`replay_pmp_addr_o[31:0]` and `replay_pmp_priv_m_o` query additional word banks
+in the parent-owned shared PMP. `replay_pmp_allow_i[1:0]` supplies execute
+permissions for that word and its successor. The second bit matters only for
+a crossing C32. A denial produces a contained cause-1 token with tval PC or
+PC+2. Tie both allows high when PMP is absent. Standalone predictor invalidation
+with replay enabled cancels frontend work and refetches the current PC.
+
+`TEST=idata` checks next-cycle warm target presentation, retained snapshots
+under stalls/table replacement, refill continuation order, first/second-word
+live denials and changed code after invalidation. The same case supports all
+compressed strategies and depth-one/non-power-of-two variants.

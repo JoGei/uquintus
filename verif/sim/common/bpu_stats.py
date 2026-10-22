@@ -7,6 +7,8 @@ COUNTERS = tuple(name.lower() for name in re.findall(
     r'^`UQU_BPU_COUNTER\(([A-Z_]+)\)$', CATALOG.read_text(), re.M))
 if not COUNTERS or len(set(COUNTERS)) != len(COUNTERS):
     raise ValueError('invalid BPU counter catalog')
+# Population semantics are unchanged; schema 2 appends replay provenance.
+LEGACY_COUNTERS = COUNTERS[:20]
 SCOPE = 'retired-window-v1'
 DEFINITION = ('Instructions retiring in (start, stop]; lookup metadata sampled on first IF presentation, '
               'outcomes on accepted DE transfer; flushed/faulting instructions excluded')
@@ -20,14 +22,15 @@ def unpack_snapshot(packed):
 
 def statistics(start, stop, parameters, retired):
     """Validate post-edge cumulative snapshots and derive the workload delta."""
+    names = LEGACY_COUNTERS if isinstance(start, (list, tuple)) and len(start) == 20 else COUNTERS
     snapshots = []
     for values in (start, stop):
-        if not isinstance(values, (list, tuple)) or len(values) != len(COUNTERS) or any(
+        if not isinstance(values, (list, tuple)) or len(values) != len(names) or any(
                 type(v) is not int or not 0 <= v < 2**64 for v in values):
             raise ValueError('invalid BPU snapshot counter values')
-        snapshots.append(dict(zip(COUNTERS, values)))
+        snapshots.append(dict(zip(names, values)))
     begin, end = snapshots
-    counts = {name:end[name]-begin[name] for name in COUNTERS}
+    counts = {name:end[name]-begin[name] for name in names}
     if any(value < 0 for value in counts.values()):
         raise ValueError('BPU counters decreased inside workload window')
     if type(retired) is not int or retired <= 0 or counts['retired_instructions'] != retired:
@@ -66,6 +69,10 @@ def statistics(start, stop, parameters, retired):
     require(counts['control_flow_predictions'] == (cf if predicting else 0), 'next-PC denominator')
     require(counts['control_flow_mispredictions'] <= counts['control_flow_predictions'], 'next-PC errors')
     require(counts['de_redirects'] <= retired and counts['compressed_control_flow'] <= cf, 'redirect/compressed count')
+    if names == COUNTERS:
+        require(counts['idata_replayed_instructions'] <= retired, 'replay retirement count')
+        require((active_btb and parameters.get('MUA_BTB_IDATA_DEPTH', 1) > 0) or
+                counts['idata_replayed_instructions'] == 0, 'replay with disabled instruction storage')
     counts.update(control_flow_instructions=cf, btb_misses=counts['btb_lookups']-counts['btb_hits'],
                   btb_control_flow_misses=counts['btb_control_flow_lookups']-counts['btb_control_flow_hits'])
     def percent(numerator, denominator):
@@ -78,7 +85,9 @@ def statistics(start, stop, parameters, retired):
         target_accuracy=percent(counts['target_predictions']-counts['target_mispredictions'], counts['target_predictions']),
         control_flow_next_pc_accuracy=percent(counts['control_flow_predictions']-counts['control_flow_mispredictions'], counts['control_flow_predictions']),
     )
-    return dict(schema_version=1, scope=SCOPE, definition=DEFINITION,
+    if names == COUNTERS:
+        rates['idata_replay_rate'] = percent(counts['idata_replayed_instructions'], retired)
+    return dict(schema_version=1 if names == LEGACY_COUNTERS else 2, scope=SCOPE, definition=DEFINITION,
                 direction_predictor=mode, btb=btb if active_btb else 'none',
                 start=begin, stop=end, counts=counts, rates_percent=rates,
                 redirects_per_1000_instructions=1000*counts['de_redirects']/retired)
@@ -88,9 +97,10 @@ def validate(record, parameters, retired):
     """Recompute derived results; reject tampered counters, rates or scope."""
     if not isinstance(record, dict):
         raise ValueError('missing BPU statistics')
+    names = LEGACY_COUNTERS if record.get('schema_version') == 1 else COUNTERS
     try:
-        result = statistics([record['start'][name] for name in COUNTERS],
-                            [record['stop'][name] for name in COUNTERS], parameters, retired)
+        result = statistics([record['start'][name] for name in names],
+                            [record['stop'][name] for name in names], parameters, retired)
     except (KeyError, TypeError) as error:
         raise ValueError('invalid BPU statistics snapshots') from error
     if result != record:

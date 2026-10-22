@@ -27,6 +27,7 @@ parameters:
   - MUA_BRANCH_PREDICTOR
   - MUA_BP_ENTRIES
   - MUA_BTB
+  - MUA_BTB_IDATA_DEPTH
   - MUA_BTB_ENTRIES
   - MUA_REGFILE_IMPL
   - MUA_IF_BUFFER_WORDS
@@ -60,3 +61,4 @@ tests:
   - fpu
   - prediction
   - bpu_statistics
+  - idata_protection

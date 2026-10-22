@@ -792,6 +792,19 @@ JALR targets, compressed branches in all three C strategies and cold lookup
 after FENCE.I. Retain architectural retirement/RVFI and precise-event checks;
 wrong-path instructions shall not acquire architectural effects.
 
+Instruction-data replay adds the `idata` BPU and IF cases. Cover disabled
+storage and effective disablement, depths one/three/four, sequential prefix
+capture/extension, concurrent allocation/first capture, retained warm prefixes,
+replacement during held replay, invalidation and word-sharing continuation, nested replay steering, live privilege changes and
+exact continuation latency at depths one through four.
+Run IF in all three compressed strategies, including C32 crossing words and
+first-/second-word live protection denials. The shared PMP interval-model suite
+checks replay comparison banks concurrently with ordinary IF/MEM. Core
+`idata_protection` warms a target then locks it non-executable through real PMP
+CSR writes; verify the access fault and suppress target execution under the new
+state. Other configurations execute a short architectural smoke path for this
+case. Keep the full retirement/RVFI/CSR/counter oracle for core regressions.
+
 CoreMark cycle comparisons shall reuse the same executable and memory context,
 validate the workload output and retain mode/validation scope. They shall not
 replace instruction-level regression or establish Pareto optimality. Broader

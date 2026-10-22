@@ -335,5 +335,23 @@ class ComponentRunnerTests(unittest.TestCase):
                     check_results(path, ["smoke"])
 
 
+
+    def test_instruction_data_depth_is_explicit_and_bounded(self):
+        catalog = json.loads((ROOT / 'config/selectors.json').read_text())
+        config = load_configuration(ROOT / 'config/rv32i.yml', catalog)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'idata.yml'
+            for value in (0, 1, 3, 1024):
+                path.write_text(yaml.safe_dump(dict(config, MUA_BTB_IDATA_DEPTH=value)))
+                self.assertEqual(load_configuration(path, catalog)['MUA_BTB_IDATA_DEPTH'], value)
+            for value in (-1, 1025, True, 1.5, '4'):
+                path.write_text(yaml.safe_dump(dict(config, MUA_BTB_IDATA_DEPTH=value)))
+                with self.assertRaisesRegex(ValueError, 'MUA_BTB_IDATA_DEPTH'):
+                    load_configuration(path, catalog)
+            del config['MUA_BTB_IDATA_DEPTH']
+            path.write_text(yaml.safe_dump(config))
+            with self.assertRaisesRegex(ValueError, 'MUA_BTB_IDATA_DEPTH'):
+                load_configuration(path, catalog)
+
 if __name__ == "__main__":
     unittest.main()

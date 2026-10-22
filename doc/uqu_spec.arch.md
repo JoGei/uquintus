@@ -208,6 +208,7 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_BP_ENTRIES` | Power-of-two direction-counter capacity from `2` through `1024`; inactive unless `MUA_BRANCH_PREDICTOR = bimodal`. | `16` |
 | `MUA_BTB` | `none` or `direct_mapped`, independently selected target storage; inactive with prediction mode `none`. | `none` |
 | `MUA_BTB_ENTRIES` | Power-of-two target-table capacity from `2` through `1024`, independent of direction capacity; inactive when the BTB is disabled. | `16` |
+| `MUA_BTB_IDATA_DEPTH` | Integer instruction slots per target entry, `0` through `1024`; zero disables payload/fill/replay state. Inactive without prediction and BTB. | `0` |
 | `MUA_REGFILE_IMPL` | `ff`: flip-flop storage; `latch`: latch storage. | `ff` |
 | `MUA_IF_BUFFER_WORDS` | Integer capacity of at least `2` in 32-bit fetch words; non-power-of-two capacities supported. | `2` |
 | `MUA_HARDENED` | `0`: no OBI parity/checksum generation/checking requirement; `1`: planned hardened implementation including OBI parity/checksum generation and checking on both ports; enabled setting unsupported until implemented. | `0` |
@@ -1076,7 +1077,7 @@ and shall issue neither LSU work nor a PMP query.
 
 MEM shall expose a combinational protection query containing original effective
 address, log2 access size, read/write requirement, and effective data privilege.
-The parent shall connect it to the MEM port of its one two-port PMP block and
+The parent shall connect it to the MEM port of its one shared PMP block and
 return permission as `pmp_allow_i`. The parent resolves MPRV/MPP; MEM shall not
 receive or store PMP configuration. LSU acceptance captures denial, independently
 of the controller's precise-effect `request_permit_i`. No denied native access
@@ -1118,7 +1119,7 @@ selection, GPR write generation, and acceptance-qualified architectural events.
 It shall own no MEM/WB payload/valid registers. With XIF enabled, one local
 bit records that commit permission has been sent for the current WB token;
 otherwise all state belongs to the CSR unit. The core parent shall own MEM/WB, the GPR file, current privilege,
-global arbitration/serialization, redirects, and the one two-port PMP block.
+global arbitration/serialization, redirects, and the one shared PMP block.
 The [WB component guide](../verif/sim/wb/README.md) defines the initial bindings.
 
 `kind_i[2:0]` selects ordinary result/token (`0`), native CSR (`1`), MRET (`2`),
@@ -2027,6 +2028,155 @@ Correct predictions shall not flush IF. The pipeline controller shall consume
 DE correction intent/address through `de_redirect_i`/`de_redirect_addr_i`,
 retaining transfer qualification and older-event priority. Modes without an
 active BTB shall retain their accepted-taken-branch redirect behavior.
+
+### 5.2. Per-entry target instruction-data sequences
+
+**Status:** Implemented in BTB, IF replay and the core-owned shared PMP;
+physical area/timing evaluation remains open
+
+The elaboration parameter `MUA_BTB_IDATA_DEPTH` is propagated through core,
+IF and BPU into the BTB. Its integer value (`0` through `1024`) shall count instruction-data slots per BTB
+entry: `0` disables storage and replay (the default), `1` holds the target
+instruction, `2` also holds its sequential successor, and depth `D` provides
+indices `0` through `D-1`. It is inactive without an enabled target predictor
+and BTB. Zero depth shall elaborate without payload arrays or fill/replay state.
+The parameter shall be explicit in hardware presets and the
+active depth included in configuration labels and artifact fingerprints.
+
+The payload is one original, assembled instruction encoding per
+32-bit slot. Compressed length is inferred rather than stored separately. A 16-bit instruction
+occupies the low half with zero in the upper half; a 32-bit instruction retains
+all original bits, including an encoding assembled across two memory words.
+Length information defines the sequential PCs: advance by two for C and
+four otherwise. For the supported 16-/32-bit encodings, compressed length may
+be derived from `ISA_C` and the original instruction's low two bits, avoiding
+a separately stored length bit. Replay joins after word alignment and before
+optional IF expansion; the storage format is independent of compressed-decode
+placement or implementation:
+
+| Compressed configuration | Processing of a replayed original encoding |
+| --- | --- |
+| `decompress/if` | Feed the IF expander; retain original bits/length alongside the expanded instruction through IF/DE. |
+| `decompress/de` | Carry original bits/length through IF/DE, then feed the DE expander and base decoder. |
+| `decode_compressed` | Carry original bits/length through IF/DE and select the parallel compressed decoder's controls for a C instruction. |
+
+This keeps original bits available for traps/RVFI. Storing expanded instructions
+would additionally require original bits/length and explicit expansion status
+to avoid processing the cached representation as a raw compressed instruction;
+aligned raw words would instead make depth count words and require normal
+alignment/stitching on replay. Original assembled encodings are the implemented payload format.
+
+Each entry shall have a fixed sequence origin: slot zero corresponds to its
+stored branch target. A valid-prefix count shall identify populated slots.
+The sequence shall be retained across hits. On each accepted predicted-taken
+hit that starts replay, reset the active replay index to zero; advance it only
+on successful instruction transfer. IF shares one active replay index
+across entries instead of storing a persistent read pointer in every entry.
+Replay shall read the existing slots without removing or rotating their data.
+An interrupted or partial replay shall leave the prefix and its origin intact
+for the next hit, subject to ordinary entry/context invalidation.
+
+Filling and replay may proceed concurrently using separate fill and replay
+indices. When revisiting a partial entry, skip already retained positions and
+append newly observed sequential instructions at the first missing slot.
+Replayed instructions shall not require writes merely to retain their data.
+Simultaneous fill/read must preserve the currently presented instruction and
+the existing pre-edge lookup semantics. The implementation tracks
+one active fill stream. A newly allocated/replaced entry or a changed target
+starts with an empty prefix; an ordinary update retaining the same branch tag
+and target must not erase a useful prefix on every loop iteration.
+
+Start collection from an accepted nonfaulting DE branch/jump with an actual
+taken outcome and its resolved target. Observe subsequent successful IF-to-DE
+transfers, including a target transfer on the same edge that starts collection.
+The first captured PC must equal the resolved target; each later PC must equal
+the previous PC plus its original instruction length. Capture each accepted
+instruction once, with no writes from held tokens or fault responses. Complete
+at depth `D`, or retain the existing prefix and stop on a stream discontinuity,
+flush, invalidation or replacement by another fill stream. Never append
+nonsequential dynamic-path instructions to the same linear sequence. Capturing
+in IF is speculative metadata collection and does not establish retirement.
+
+A predicted-taken BTB hit with a usable prefix should replay through a direct
+IF instruction source before optional decompression, starting with slot zero
+in the cycle after the branch transfers. Every replayed instruction retains
+its own PC and participates in normal direction/target lookup, DE validation,
+hazards, exceptions and retirement. A nested control transfer may terminate
+that replay and start a different sequence or ordinary fetching. Downstream
+stalls must retain the current instruction and prediction, and advance replay
+only on an accepted transfer. Replacement or target changes during a held
+replay must not mutate the presented token or skip missing instructions.
+
+Fetch the uncached continuation in parallel, starting at the PC immediately
+after the usable prefix, and merge back into normal delivery without duplicates
+or gaps. C-enabled continuation may share a containing word with the cached
+prefix, so the instruction PC and aligned fetch pointer must be tracked
+separately. Partial prefixes may be replayed. One cached 32-bit instruction
+can remove the initial target-delivery delay while leaving three refill bubbles
+under the existing ideal-memory timing; four cached instructions can cover
+that interval if replay and continuation fetching overlap without extra stages.
+Directed IF latency tests validate one remaining refill gap of three cycles
+at depth one, two at depth two and one at depth three, with no refill bubble
+at depth four, under the stated ideal timing. The uncached continuation retains
+the ordinary engine/FIFO latency.
+
+Every replayed instruction shall be checked against the core's current PMP
+configuration and execution privilege before it can transfer. Retained bytes
+shall not carry a reusable execute-permission result. Permission denial shall
+produce an ordinary instruction-access-fault token, following existing fault
+containment and precise-event arbitration; the instruction shall not execute.
+Held replay must not retain permission across a relevant protection/privilege
+change without rechecking or the normal serialized frontend recovery.
+
+Rechecking shall preserve ordinary instruction-fetch protection granularity:
+check the aligned four-byte word containing the instruction PC. A 32-bit
+instruction beginning in a word's upper half with C enabled shall additionally
+check its second containing word. If the first word fails, tval shall be the
+instruction PC; if only the second fails, tval shall identify that faulting
+portion at PC+2. Do not substitute a single unaligned four-byte range check
+across two PMP entries, which can differ from the normal split-word fetch
+outcome. Both checks shall use current execute privilege and permissions.
+
+PMP ownership and CSR region decoding remain in the existing core-owned
+checker. The ordinary IF query lane checks continuation fetches concurrently
+with MEM and added replay comparison banks: one for C-disabled instruction
+words, two with C enabled. All banks share the same decoded regions; no
+arbitration stalls continuation prefetch. IF supplies `replay_pmp_addr_o`
+(the aligned containing word), `replay_pmp_priv_m_o` and consumes two allow
+bits. The second bank checks the next aligned word with 32-bit address wrap;
+IF uses that result only for a crossing C32 instruction. Inactive/disabled
+banks return allow and elaborate without comparison logic. No PMP logic or
+privilege signals move onto OBI.
+
+`uqu_if_replay` snapshots the usable prefix on an accepted predicted redirect.
+Its single active copy costs `32*D` payload bits, independent of BTB capacity,
+plus count/index/control. This protects a held token and the remainder of its
+sequence from concurrent entry replacement or target changes without pinning
+the BTB entry. Snapshot payload, BTB instruction arrays and counts are unreset;
+valid bits establish their usability. Zero effective depth removes all these
+arrays and replay/fill state. A new predicted redirect replaces the active
+snapshot; global recovery cancels it without destroying retained table entries.
+
+A retiring permitted PMP CSR write triggers a frontend recovery at that CSR's
+architectural next PC when instruction-data replay and PMP are enabled. This
+flushes younger permission contexts and rechecks them under the new state.
+Privilege transitions already use normal core recovery. FENCE.I invalidates
+both table bytes and the active snapshot; standalone predictor invalidation
+with replay enabled refetches the current instruction PC as well.
+
+Reset, FENCE.I, replacement and changed targets shall invalidate their cached
+bytes. Live PMP rechecking removes the need to discard payloads solely because
+PMP permissions or execution privilege changed. Ordinary recovery shall cancel
+active replay/fill while otherwise preserving valid cached prefixes. A future
+address-translation extension would need its own mapping/context policy.
+
+Verification should cover depth zero equivalence, depths one/two/four and a
+non-power-of-two depth, concurrent prefix extension/replay, repeated replay
+from slot zero after partial/interrupted traversal, all compressed
+strategies, target/entry replacement during holds, nested branches, late faults,
+FENCE.I/self-modifying code and protection/privilege changes. Count cached
+instruction transfers separately from memory-fetched instructions in benchmark
+observation, retaining the existing retirement-scoped BPU measurement contract.
 
 ## 6. Resolve branches and jumps in decode
 
@@ -3105,8 +3255,9 @@ decompressor. It shall not own the IF/DE register, current privilege, PMP state
 or checker, global event arbitration, architectural trap entry or DE branch
 execution. The [stage guide](../verif/sim/if/README.md) defines exact ports and
 tests. Its parameters shall be `ISA_C`, both compressed strategy selectors,
-`MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES` and
-`MUA_IF_BUFFER_WORDS`.
+`MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES`,
+`MUA_BTB_IDATA_DEPTH` and `MUA_IF_BUFFER_WORDS`. Optional `uqu_if_replay`
+provides the protected cached instruction source defined in Section 5.2.
 
 Each active reset edge shall establish a running frontend at the aligned
 `boot_addr_i` under the core boot contract. Later boot-input changes shall not
@@ -3366,7 +3517,7 @@ These events shall include the applicable trap/interrupt entry, `MRET`, cycle
 and retirement counting, and floating-point exception/status updates. Event
 acceptance and update arbitration shall preserve the existing instruction-age,
 commitment, reset, and precise-exception rules. The central controller shall
-continue to arbitrate global events, and the core-owned two-port PMP block shall
+continue to arbitrate global events, and the core-owned shared PMP block shall
 consume the CSR module's PMP state. The module may use internal submodules while
 retaining this ownership boundary. The standalone module's initial port/event
 contract is defined in Section 18.2 and integrated with WB/core control in

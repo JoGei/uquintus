@@ -303,3 +303,139 @@ async def prediction(dut):
 @cocotb.test(timeout_time=1000,timeout_unit='us')
 async def throughput(dut):
     await uvm_root().run_test('ThroughputTest')
+
+class IdataTest(IfStageTest):
+    async def seed_prefix(self, branch, target, values):
+        expected = self.put(target, values)
+        await self.cycle(redirect_valid=1,redirect_addr=target)
+        await self.until(lambda o: bool(o['valid']),grant=1)
+        await self.cycle(ready=1,grant=1,predictor_update_valid=1,
+            predictor_update_pc=branch,predictor_update_control_flow=1,
+            predictor_update_conditional=0,predictor_update_taken=1,predictor_update_target=target)
+        before = len(self.delivered)
+        while len(self.delivered)<before+min(self.predictor.depth,len(values))-1:
+            await self.cycle(ready=1,grant=1)
+        return expected
+
+    async def visit(self, branch):
+        await self.cycle(redirect_valid=1,redirect_addr=branch,grant=1)
+        await self.until(lambda o: bool(o['valid']),grant=1)
+        o = await self.cycle(ready=1,grant=1)
+        assert o['pc'] == branch and o['predicted_next_pc'] != o['next_pc']
+        return await self.cycle(grant=1)
+
+    async def run_phase(self):
+        self.raise_objection()
+        self.response_latency = 1
+        await self.reset()
+        depth = self.predictor.depth
+        if not depth:
+            self.drop_objection(); return
+        target = 0x8002 if self.c else 0x8000
+        # Alternating C32/C16, starting with a crossing C32. Continuation ends
+        # inside a word at several depths; its other half must stay available.
+        values = [(0x100093+0x100000*k,4) if not self.c or k%2 == 0 else (0x0085,2)
+                  for k in range(depth+6)]
+        expected = await self.seed_prefix(0x1000,target,values)
+        assert len(self.predictor.payload(0x1000))==depth
+        o = await self.visit(0x1000)
+        assert o['valid'] and o['pc']==target, 'warm target must be available next cycle'
+        before=len(self.delivered)
+        accepted_before=len(self.accepted)
+        # Stalled replay must stay stable even when its BTB owner is replaced.
+        alias = 0x1000+self.predictor.capacity*self.predictor.alignment
+        for _ in range(5):
+            await self.cycle(grant=1,predictor_update_valid=1,predictor_update_pc=alias,
+                predictor_update_control_flow=1,predictor_update_taken=1,predictor_update_target=0xC000)
+        for _ in range(256):
+            await self.cycle(ready=int(self.rng.random()<0.7),grant=1)
+            if len(self.delivered)==before+len(values): break
+        else: raise AssertionError('replay/continuation did not finish')
+        assert self.delivered[before:] == expected
+        continuation = expected[depth][0]&~3
+        assert self.accepted[accepted_before-1] == continuation, self.accepted[accepted_before-1:]
+        # A new visit learns the displaced branch again. Replays themselves
+        # may refill missing slots, and an external recovery retains the prefix.
+        await self.seed_prefix(0x1000,target,values)
+        await self.visit(0x1000)
+        await self.cycle(redirect_valid=1,redirect_addr=0xD000)
+        o=await self.visit(0x1000)
+        assert o['valid'] and o['pc']==target
+        # Live denial at the first word must not use the old fill-time allow.
+        self.denied.add(target&~3)
+        o=await self.cycle(ready=1)
+        assert o['exception_valid'] and o['exception_tval']==target
+        self.denied.clear()
+        if self.c:
+            await self.visit(0x1000)
+            self.denied.add((target&~3)+4)
+            o=await self.cycle(ready=1)
+            assert o['exception_valid'] and o['exception_tval']==target+2
+            self.denied.clear()
+        # Invalidation while held drops the active snapshot. Changed code must
+        # be fetched again; no explicit redirect is required for this recovery.
+        await self.visit(0x1000)
+        new = [(0x00200113,4)]*(depth+6)
+        fresh = self.put(target,new)
+        await self.cycle(predictor_invalidate=1,grant=1)
+        await self.until(lambda o:bool(o['valid']),grant=1)
+        before=len(self.delivered)
+        await self.cycle(ready=1,grant=1)
+        assert self.delivered[before] == fresh[0]
+        assert not self.predictor.payload(0x1000)
+        # Nested target steering replaces the active window, including when
+        # the old continuation still has accepted bus work to drain.
+        a_branch, b_branch, b_target = 0x1100, 0x9004, 0xA000
+        a_values = [(0x13,4)]*(depth+6)
+        b_values = [(0x0085,2) if self.c and k%2 else (0x13,4) for k in range(depth+6)]
+        await self.seed_prefix(a_branch,b_branch,a_values)
+        await self.seed_prefix(b_branch,b_target,b_values)
+        o=await self.visit(a_branch)
+        assert o['valid'] and o['pc']==b_branch and o['predicted_next_pc']==b_target
+        await self.cycle(ready=1,grant=1)
+        o=await self.cycle(grant=1)
+        assert o['valid'] and o['pc']==b_target
+        # Privilege is live, rather than copied from the M-mode fill context.
+        self.deny_user=True
+        o=await self.cycle(ready=1,grant=1,priv_m=0)
+        assert o['exception_valid'] and o['exception_cause']==1
+        self.deny_user=False
+        await self.cycle(flush=1,predictor_invalidate=1)
+        for _ in range(12):
+            o=await self.cycle(ready=1,grant=1)
+            assert not o['valid'] and not o['pmp_valid']
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def idata(dut):
+    await uvm_root().run_test('IdataTest')
+
+
+class IdataLatencyTest(IdataTest):
+    async def run_phase(self):
+        self.raise_objection()
+        self.response_latency=1
+        await self.reset()
+        depth=self.predictor.depth
+        if not depth or self.c:
+            self.drop_objection(); return
+        values=[(0x13,4)]*(depth+8)
+        await self.seed_prefix(0x1000,0x8000,values)
+        await self.cycle(redirect_valid=1,redirect_addr=0x1000,grant=1)
+        await self.until(lambda o:bool(o['valid']),grant=1)
+        branch=await self.cycle(ready=1,grant=1)
+        assert branch['pc']==0x1000 and branch['predicted_next_pc']==0x8000
+        times=[]
+        for tick in range(1,depth+32):
+            o=await self.cycle(ready=1,grant=1)
+            if o['valid']: times.append(tick)
+            if len(times)==depth+4: break
+        assert times[:depth]==list(range(1,depth+1)), times
+        assert times[depth]==max(5,depth+1), times
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def idata_latency(dut):
+    await uvm_root().run_test('IdataLatencyTest')

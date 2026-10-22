@@ -2,7 +2,7 @@
 `include "uqu_config.vh"
 
 // Frontend control/storage, not an IF/DE pipeline register. The core supplies
-// accepted redirects, global permits and one shared PMP checker's IF result.
+// accepted redirects, global permits and shared PMP fetch/replay results.
 module uqu_stage_if #(
     parameter ISA_C = 0,
     parameter MUA_C_IMPL = `UQU_C_IMPL_DECOMPRESS,
@@ -11,6 +11,7 @@ module uqu_stage_if #(
     parameter MUA_BP_ENTRIES = 16,
     parameter MUA_BTB = `UQU_BTB_NONE,
     parameter MUA_BTB_ENTRIES = 16,
+    parameter MUA_BTB_IDATA_DEPTH = 0,
     parameter MUA_IF_BUFFER_WORDS = 2
 ) (
     input  wire        clk_i,
@@ -49,6 +50,9 @@ module uqu_stage_if #(
     output wire [1:0]  pmp_size_o,
     output wire        pmp_priv_m_o,
     input  wire        pmp_allow_i,
+    output wire [31:0] replay_pmp_addr_o,
+    output wire        replay_pmp_priv_m_o,
+    input  wire [1:0]  replay_pmp_allow_i,
     output wire        imem_req_o,
     output wire [31:0] imem_addr_o,
     input  wire        imem_gnt_i,
@@ -56,6 +60,8 @@ module uqu_stage_if #(
     input  wire [31:0] imem_rdata_i,
     input  wire        imem_err_i
 );
+    localparam integer IDATA_DEPTH = ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) &&
+        (MUA_BTB != `UQU_BTB_NONE)) ? MUA_BTB_IDATA_DEPTH : 0;
     localparam [4:0] CAUSE_ILLEGAL = 5'd2;
     reg [31:0] pc_q;
     reg [31:0] fetch_addr_q;
@@ -63,7 +69,8 @@ module uqu_stage_if #(
     reg fault_hold_q;
     reg prediction_held_q;
     reg [31:0] prediction_pc_q;
-    wire invalidate = flush_i || redirect_valid_i;
+    wire replay_recover = (IDATA_DEPTH > 0) && predictor_invalidate_i;
+    wire invalidate = flush_i || redirect_valid_i || replay_recover;
     wire active = rst_ni && !invalidate && running_q && !fault_hold_q;
     wire branch_hold = (MUA_BRANCH_PREDICTOR == `UQU_BP_NONE) && branch_pending_i;
     wire fetch_ready;
@@ -93,7 +100,35 @@ module uqu_stage_if #(
                               prediction_taken ? prediction_target : selected_next_pc;
     wire transfer = valid_o && ready_i;
     wire prediction_redirect = transfer && !candidate_fault && (predicted_pc != selected_next_pc);
-    wire pop_word = transfer && !candidate_fault && drop_word;
+    wire pop_word = transfer && !candidate_fault && !replay_active && drop_word;
+    wire fetched_valid, fetched_compressed, fetched_fault;
+    wire [31:0] fetched_instr, fetched_next_pc, fetched_tval;
+    wire [4:0] fetched_cause;
+    wire replay_active;
+    wire [31:0] replay_instr, idata_count, idata_next_pc;
+    wire [32*((IDATA_DEPTH > 0) ? IDATA_DEPTH : 1)-1:0] idata;
+    wire replay_short = (ISA_C == 1) && (replay_instr[1:0] != 2'b11);
+    wire replay_cross = (ISA_C == 1) && pc_q[1] && !replay_short;
+    wire replay_fault = !replay_pmp_allow_i[0] || (replay_cross && !replay_pmp_allow_i[1]);
+    wire replay_start = prediction_redirect && prediction_taken &&
+                        (prediction_target == predicted_pc) && (idata_count != 0);
+    assign replay_pmp_addr_o = replay_active ? {pc_q[31:2],2'b00} : 32'd0;
+    assign replay_pmp_priv_m_o = replay_active && priv_m_i;
+    assign selected_valid = replay_active ? active : fetched_valid;
+    assign selected_instr = replay_active ? (replay_fault ? 32'd0 : replay_instr) : fetched_instr;
+    assign selected_compressed = replay_active ? (!replay_fault && replay_short) : fetched_compressed;
+    assign selected_next_pc = replay_active ? pc_q + (replay_short ? 32'd2 : 32'd4) : fetched_next_pc;
+    assign access_fault = replay_active ? replay_fault : fetched_fault;
+    assign access_cause = replay_active ? 5'd1 : fetched_cause;
+    assign access_tval = replay_active ?
+        ((!replay_pmp_allow_i[0] || !replay_cross) ? pc_q : pc_q + 32'd2) : fetched_tval;
+
+    uqu_if_replay #(.MUA_BTB_IDATA_DEPTH(IDATA_DEPTH)) u_replay (
+        .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(invalidate),
+        .cancel_i(prediction_redirect || (transfer && candidate_fault)),
+        .start_i(replay_start), .start_count_i(idata_count), .start_data_i(idata),
+        .consume_i(transfer), .active_o(replay_active), .instr_o(replay_instr)
+    );
 
     assign valid_o = active && permit_i && selected_valid;
     assign pc_o = pc_q;
@@ -133,7 +168,7 @@ module uqu_stage_if #(
     );
     uqu_bpu #(
         .ISA_C(ISA_C), .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
-        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES)
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_DEPTH(IDATA_DEPTH)
     ) u_bpu (
         .clk_i(clk_i), .rst_ni(rst_ni), .invalidate_i(predictor_invalidate_i),
         .lookup_valid_i(active && selected_valid && !candidate_fault), .lookup_pc_i(pc_q),
@@ -141,16 +176,19 @@ module uqu_stage_if #(
         .update_valid_i(predictor_update_valid_i), .update_pc_i(predictor_update_pc_i),
         .update_control_flow_i(predictor_update_control_flow_i),
         .update_conditional_i(predictor_update_conditional_i),
-        .update_taken_i(predictor_update_taken_i), .update_target_i(predictor_update_target_i)
+        .update_taken_i(predictor_update_taken_i), .update_target_i(predictor_update_target_i),
+        .stream_flush_i(invalidate), .capture_valid_i(transfer && !candidate_fault),
+        .capture_pc_i(pc_q), .capture_instr_i(selected_instr),
+        .idata_count_o(idata_count), .idata_next_pc_o(idata_next_pc), .idata_o(idata)
     );
     uqu_if_aligner #(.ISA_C(ISA_C)) u_aligner (
         .valid_i(active), .pc_i(pc_q),
         .word0_valid_i(word0_valid), .word0_data_i(word0_data), .word0_error_i(word0_error),
         .word1_valid_i(word1_valid), .word1_data_i(word1_data), .word1_error_i(word1_error),
-        .valid_o(selected_valid), .instr_o(selected_instr), .compressed_o(selected_compressed),
-        .next_pc_o(selected_next_pc), .drop_word_o(drop_word), .word1_needed_o(),
-        .misaligned_o(misaligned_o), .exception_valid_o(access_fault),
-        .exception_cause_o(access_cause), .exception_tval_o(access_tval)
+        .valid_o(fetched_valid), .instr_o(fetched_instr), .compressed_o(fetched_compressed),
+        .next_pc_o(fetched_next_pc), .drop_word_o(drop_word), .word1_needed_o(),
+        .misaligned_o(misaligned_o), .exception_valid_o(fetched_fault),
+        .exception_cause_o(fetched_cause), .exception_tval_o(fetched_tval)
     );
     generate
         if ((ISA_C == 1) && (MUA_C_IMPL == `UQU_C_IMPL_DECOMPRESS) &&
@@ -193,9 +231,13 @@ module uqu_stage_if #(
             running_q <= 1'b0;
             fault_hold_q <= 1'b0;
             prediction_held_q <= 1'b0;
+        end else if (replay_recover) begin
+            fetch_addr_q <= {pc_q[31:2],2'b00};
+            fault_hold_q <= 1'b0;
+            prediction_held_q <= 1'b0;
         end else begin
             if (prediction_redirect) begin
-                fetch_addr_q <= {predicted_pc[31:2],2'b00};
+                fetch_addr_q <= replay_start ? {idata_next_pc[31:2],2'b00} : {predicted_pc[31:2],2'b00};
             end else if (fetch_fire) begin
                 fetch_addr_q <= fetch_addr_q + 32'd4;
             end

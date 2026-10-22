@@ -237,6 +237,22 @@ as “Not applicable”; omit their flat numeric metrics. Static-not-taken is an
 enabled prediction policy and shall have a direction denominator. Always
 retain predictor/BTB configuration and measurement scope with comparisons.
 
+The same observer also carries instruction-source provenance through the
+pipeline. `idata_replayed_instructions` counts successful retirements supplied
+by a target instruction-data snapshot, and `idata_replay_rate` divides this by
+all window retirements. Squashed, faulting and stalled presentations do not
+inflate it. Schema version 2 appends this counter to the previous twenty;
+validation/reporting continue accepting historical schema-1 artifacts without
+inventing replay measurements for them. The retirement-window scope is unchanged.
+
+An initial same-ELF, same-memory CoreMark performance-profile comparison on
+2026-10-22 measured 1,703,569 cycles with the 16/16 bimodal/BTB configuration
+and zero data slots, versus 1,280,224 with four slots per entry. Both CRCs passed
+and the workload retired 757,486 instructions: about 24.9% fewer cycles. These
+are fast RTL cycle measurements, with one-cycle memory responses and no claimed
+silicon frequency or Pareto optimality. Cache area/timing and broader workloads
+still need measurement.
+
 ## 4. Pareto-optimal configuration profiles
 
 **Status:** Naming and initial selection goals agreed; search and profile

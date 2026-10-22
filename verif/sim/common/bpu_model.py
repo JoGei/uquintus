@@ -8,6 +8,9 @@ class BpuModel:
         self.alignment = 2 if params['ISA_C'] else 4
         self.capacity = params['MUA_BTB_ENTRIES']
         self.direction_capacity = params['MUA_BP_ENTRIES']
+        self.depth = params.get('MUA_BTB_IDATA_DEPTH', 0) if self.enabled else 0
+        self.payloads = {}
+        self.fill = None
         self.entries = {}
         self.directions = {}
 
@@ -21,13 +24,50 @@ class BpuModel:
         taken = hit and (not entry['conditional'] or direction_taken)
         return dict(hit=int(hit), taken=int(taken), target=entry['target'] if taken else 0)
 
+    def payload(self, pc):
+        prediction = self.lookup(pc)
+        if not prediction['hit']:
+            return []
+        return list(self.payloads.get(pc, []))
+
+    def length(self, instr):
+        return 2 if self.alignment == 2 and instr & 3 != 3 else 4
+
     def step(self, *, reset=False, invalidate=False, valid=False, pc=0,
-             control_flow=False, conditional=False, taken=False, target=0):
+             control_flow=False, conditional=False, taken=False, target=0,
+             stream_flush=False, capture_valid=False, capture_pc=0, capture_instr=0):
         if reset or invalidate:
+            self.payloads.clear()
+            self.fill = None
             self.entries.clear()
             self.directions.clear()
             return
-        if not valid or pc % self.alignment:
+        update = valid and pc % self.alignment == 0
+        start = update and control_flow and taken and target % self.alignment == 0
+        if self.depth:
+            if update:
+                old = self.entries.get((pc // self.alignment) % self.capacity)
+                if old and (old['pc'] != pc or old['target'] != target or not control_flow or target % self.alignment):
+                    # A non-control tag miss leaves the aliased entry intact.
+                    if control_flow and target % self.alignment == 0 or old['pc'] == pc:
+                        self.payloads.pop(old['pc'], None)
+                        if self.fill and self.fill[0] == old['pc']:
+                            self.fill = None
+            if stream_flush:
+                self.fill = None
+            if start:
+                self.fill = (pc, target, 0)
+            if self.fill and capture_valid and not (start and capture_pc != target):
+                owner, expected, offset = self.fill
+                prefix = self.payloads.setdefault(owner, [])
+                if capture_pc != expected or (offset < len(prefix) and prefix[offset] != capture_instr):
+                    self.fill = None
+                elif offset < self.depth:
+                    if offset == len(prefix):
+                        prefix.append(capture_instr)
+                    self.fill = ((owner, (expected + self.length(capture_instr)) & 0xffffffff, offset+1)
+                                 if offset+1 < self.depth else None)
+        if not update:
             return
         admissible = control_flow and target % self.alignment == 0
         if self.enabled:

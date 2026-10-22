@@ -712,3 +712,44 @@ async def xif(dut):
 @cocotb.test(timeout_time=2000,timeout_unit='us')
 async def fpu(dut):
     await uvm_root().run_test('FpuTest')
+
+class IdataProtectionTest(CoreTest):
+    async def run_phase(self):
+        self.raise_objection()
+        active = (self.params['MUA_BRANCH_PREDICTOR'] and self.params['MUA_BTB'] and
+                  self.params['MUA_BTB_IDATA_DEPTH'] and self.params['ISA_PMP'])
+        if not active:
+            self.put(BOOT,[ins_i(9,0,99),ins_j(0,0)])
+            await self.reset()
+            await self.finish(BOOT)
+            assert self.regs[9]==99
+            self.drop_objection(); return
+        self.csrs.update({0x3a0:0,0x3b0:0})
+        # Warm an unconditional call and its target, then lock the first target
+        # word non-executable. A warm hit must fault using the new PMP state.
+        self.put(BOOT,self.setup_traps()+[ins_i(6,0,0),ins_i(7,0,0),ins_i(8,0,8),
+                                        ins_j(0,0x1200-(BOOT+24))])
+        self.put(0x1200,[ins_j(5,0x2000-0x1200),ins_i(7,7,1),ins_b(7,8,-8,4),
+                        ins_j(0,0x1400-0x120c)])
+        self.put(0x2000,[ins_i(6,6,1),ins_i(0,5,0,0,0x67)])
+        # pmpaddr0=0x800, pmpcfg0=locked NA4/no permissions. Each write
+        # serializes/rechecks the younger frontend without discarding BTB data.
+        self.put(0x1400,[0x000010b7,ins_i(1,1,-2048),csr(0x3b0,rs=1),
+                        ins_i(1,0,0x90),csr(0x3a0,rs=1),ins_j(0,0x1200-0x1414)])
+        self.put(HANDLER,[csr(0x342,rd=10,f=2),csr(0x343,rd=11,f=2),
+                          csr(0x341,rd=12,f=2),ins_i(9,0,99),ins_j(0,0)])
+        await self.reset()
+        await self.until(lambda o:self.regs[7]==8)
+        # The same PC was legal during warm-up; only the next visit must trap.
+        self.expected_faults[0x2000] = 1,0x2000
+        await self.finish(HANDLER+12)
+        assert self.regs[6]==8 and self.regs[9]==99
+        assert self.regs[10]==1 and self.regs[11]==self.regs[12]==0x2000
+        assert len(self.faults)==1
+        assert self.signal('bpu_counters_o') >> (64*COUNTERS.index('idata_replayed_instructions')) & MASK
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def idata_protection(dut):
+    await uvm_root().run_test('IdataProtectionTest')

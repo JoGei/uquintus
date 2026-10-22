@@ -6,6 +6,7 @@ uqu_bpu_monitor #(.MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BTB(MUA_BTB)
     .if_btb_hit_i(u_core.u_if.u_bpu.btb_hit),
     .if_direction_taken_i(u_core.u_if.u_bpu.direction_taken),
     .if_effective_taken_i(u_core.u_if.prediction_taken),
+    .if_replay_i(u_core.u_if.replay_active),
     .stage_valid_i({u_core.wb_valid_q, u_core.mem_valid_q, u_core.ex_valid_q, u_core.de_valid_q}),
     .stage_enable_i({u_core.wb_enable, u_core.mem_enable, u_core.ex_enable, u_core.de_enable}),
     .stage_next_valid_i({u_core.wb_next_valid, u_core.mem_next_valid, u_core.ex_next_valid, u_core.de_next_valid}),

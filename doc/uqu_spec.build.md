@@ -230,7 +230,10 @@ also explicitly set `MUA_BP_ENTRIES`, a power of two from 2 through 1024,
 defaulting to 16 and inactive outside bimodal mode. Independently select target
 storage with `MUA_BTB: none | direct_mapped` (default `none`) and explicit
 `MUA_BTB_ENTRIES` (power of two from 2 through 1024, default 16). Direction and
-target capacities may differ. Prediction mode `none` disables target steering
+target capacities may differ. `MUA_BTB_IDATA_DEPTH` explicitly selects `0` through
+`1024` original instruction slots per target entry; default zero removes the
+payload path. `rv32i_bimodal_idata` demonstrates four slots per entry.
+Prediction mode `none` disables target steering
 and makes BTB settings inactive. The `rv32i_bimodal` preset explicitly enables
 the direct-mapped BTB. These selectors use the same canonical catalog and
 generated constants. The separate integer setting
@@ -406,7 +409,7 @@ joining combined selections and `_` separating fields. The optional enabled-only
 | DE operand retention | `[_mua-opret]` | `MUA_DE_OPERAND_RETENTION`; this describes operand retention rather than an instruction buffer. |
 | Compressed handling | `[_mua-c:{decompr-if,decompr-de,decode}]` | Present only for `ISA_C=1`; `MUA_C_IMPL` and, for decompression, `MUA_C_DECOMPRESS_STAGE`. |
 | Branch prediction | `_mua-bp:{none,stnt,bimodal+entries<N>}` | `MUA_BRANCH_PREDICTOR`: `none`, `static_not_taken` or `bimodal`. Include `MUA_BP_ENTRIES` only for bimodal mode. |
-| Branch target storage | `_mua-btb:{none,direct+entries<N>}` | `MUA_BTB` and independent `MUA_BTB_ENTRIES`. Use `none` when disabled or when prediction mode is `none`; omit inactive capacity. |
+| Branch target storage | `_mua-btb:{none,direct+entries<N>[+idata<D>]}` | `MUA_BTB`, independent `MUA_BTB_ENTRIES` and `MUA_BTB_IDATA_DEPTH`; omit `+idata` at depth zero. Use `none` when disabled or when prediction mode is `none`; omit inactive capacity. |
 | Instruction buffer | `_mua-ifbuf:<words>` | `MUA_IF_BUFFER_WORDS`. |
 | Multiplier | `[_mua-mul:{iter,para,para+stages2}]` | Present only for `ISA_M=1`; `MUA_MUL`: `iterative`, `parallel`, or `parallel+stages+2`. |
 | Divider | `[_mua-div:iter]` | Present only for `ISA_M=1`; the currently supported `MUA_DIV` choice is `iterative`. |
