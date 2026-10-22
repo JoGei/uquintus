@@ -9,7 +9,13 @@ module uqu_stage_ex #(
     parameter ISA_ZFINX = 0,
     parameter MUA_MUL = `UQU_MUL_ITERATIVE,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
-    parameter MUA_MULDIV_ITERUNROLL = 8
+    parameter MUA_MULDIV_ITERUNROLL = 8,
+    parameter MUA_FPU_PIPE_REGS_FMA = 2,
+    parameter MUA_FPU_PIPE_REGS_DIVSQRT = 0,
+    parameter MUA_FPU_PIPE_REGS_NONCOMP = 0,
+    parameter MUA_FPU_PIPE_REGS_CONV = 1,
+    parameter MUA_FPU_PIPE_CONFIG = `UQU_FPU_PIPE_DISTRIBUTED,
+    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_PULP
 ) (
     input  wire        clk_i,
     input  wire        rst_ni,
@@ -144,7 +150,15 @@ module uqu_stage_ex #(
         .arith_result_i(arith_result), .arith_carry_out_i(arith_carry_out)
     );
 
-    uqu_fpu #(.ISA_ZFINX(ISA_ZFINX)) u_fpu (
+    uqu_fpu #(
+        .MUA_FPU_PIPE_REGS_FMA(MUA_FPU_PIPE_REGS_FMA),
+        .MUA_FPU_PIPE_REGS_DIVSQRT(MUA_FPU_PIPE_REGS_DIVSQRT),
+        .MUA_FPU_PIPE_REGS_NONCOMP(MUA_FPU_PIPE_REGS_NONCOMP),
+        .MUA_FPU_PIPE_REGS_CONV(MUA_FPU_PIPE_REGS_CONV),
+        .MUA_FPU_PIPE_CONFIG(MUA_FPU_PIPE_CONFIG),
+        .MUA_FPU_DIVSQRT(MUA_FPU_DIVSQRT),
+        .ISA_ZFINX(ISA_ZFINX)
+    ) u_fpu (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
         .req_valid_i(request_valid && fpu_selected), .req_ready_o(fpu_req_ready),
         .req_op_i(op_i), .req_a_i(a_i), .req_b_i(b_i), .req_c_i(c_i), .req_rm_i(rm_i),

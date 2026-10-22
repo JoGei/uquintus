@@ -2,7 +2,15 @@
 package:
   name: uquintus
 
+dependencies:
+  fpnew:
+    git: https://github.com/openhwgroup/cvfpu.git
+    rev: 77811635cb7e8649f1d9484733ee6a0bdb44a0e6
+
 sources:
+  - target: all(cvfpu_verilator, verilator)
+    files:
+      - verif/sim/common/uqu_cvfpu.vlt
   - include_dirs:
       - src/uquintus
     files:

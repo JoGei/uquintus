@@ -1,10 +1,17 @@
 `default_nettype none
+`include "uqu_config.vh"
 
 // Unimplemented scalar Zfinx endpoint for EX wiring. This stub never
-// accepts work or produces a result. Replace the implementation when selecting
-// an FPU backend; an enabled instance must not silently use this placeholder.
+// accepts work or produces a result. The configured CVFPU adapter will replace
+// this stub; an enabled instance must not silently use this placeholder.
 module uqu_fpu #(
-    parameter ISA_ZFINX = 0
+    parameter ISA_ZFINX = 0,
+    parameter MUA_FPU_PIPE_REGS_FMA = 2,
+    parameter MUA_FPU_PIPE_REGS_DIVSQRT = 0,
+    parameter MUA_FPU_PIPE_REGS_NONCOMP = 0,
+    parameter MUA_FPU_PIPE_REGS_CONV = 1,
+    parameter MUA_FPU_PIPE_CONFIG = `UQU_FPU_PIPE_DISTRIBUTED,
+    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_PULP
 ) (
     input  wire        clk_i,
     input  wire        rst_ni,
@@ -30,6 +37,19 @@ module uqu_fpu #(
     assign res_fflags_o = 5'd0;
 
     generate
+        if ((MUA_FPU_PIPE_REGS_FMA < 0) || (MUA_FPU_PIPE_REGS_FMA > 32'h7fffffff) ||
+            (MUA_FPU_PIPE_REGS_DIVSQRT < 0) || (MUA_FPU_PIPE_REGS_DIVSQRT > 32'h7fffffff) ||
+            (MUA_FPU_PIPE_REGS_NONCOMP < 0) || (MUA_FPU_PIPE_REGS_NONCOMP > 32'h7fffffff) ||
+            (MUA_FPU_PIPE_REGS_CONV < 0) || (MUA_FPU_PIPE_REGS_CONV > 32'h7fffffff) ||
+            ((MUA_FPU_PIPE_CONFIG != `UQU_FPU_PIPE_BEFORE) &&
+             (MUA_FPU_PIPE_CONFIG != `UQU_FPU_PIPE_AFTER) &&
+             (MUA_FPU_PIPE_CONFIG != `UQU_FPU_PIPE_INSIDE) &&
+             (MUA_FPU_PIPE_CONFIG != `UQU_FPU_PIPE_DISTRIBUTED)) ||
+            ((MUA_FPU_DIVSQRT != `UQU_FPU_DIVSQRT_PULP) &&
+             (MUA_FPU_DIVSQRT != `UQU_FPU_DIVSQRT_TH32) &&
+             (MUA_FPU_DIVSQRT != `UQU_FPU_DIVSQRT_THMULTI))) begin : gen_invalid_configuration
+            uqu_fpu_invalid_configuration invalid_configuration ();
+        end
         if (ISA_ZFINX != 0) begin : gen_unimplemented
             uqu_fpu_zfinx_not_implemented u_unimplemented ();
         end

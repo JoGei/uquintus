@@ -1,0 +1,6 @@
+`verilator_config
+// CVFPU's format tables intentionally use ascending packed ranges.
+lint_off -rule ASCRANGE -file "*/fpnew_pkg.sv"
+// Known upstream width conversions in the pinned package's helper functions.
+// Keep width diagnostics enabled for project RTL and other imported files.
+lint_off -rule WIDTHEXPAND -file "*/fpnew_pkg.sv"

@@ -119,6 +119,69 @@ hash per run. This builds the project helper, not Spike or its dependencies.
 Retain the optional ELF `.uqu.irqs` table; its stimulus contract is defined in
 [verification Section 2.8](uqu_spec.verif.md#28-initial-spike-differential-elf-checking).
 
+### 1.3. Pinned CVFPU dependency without Git submodules
+
+CVFPU and FPnew are the same backend; its Bender package name is `FPnew`
+(dependency key `fpnew`). `Bender.yml` pins Git revision
+`77811635cb7e8649f1d9484733ee6a0bdb44a0e6`; `Bender.lock` records exact revisions
+for it and all transitive packages, including `common_cells` and
+`fpu_div_sqrt_mvp`. The graph also contains `common_verification` and
+`tech_cells_generic`; Bender target selection determines their applicable HDL.
+The lockfile is version-controlled. These are dependency checkouts in ignored
+`.bender/`, with no `.gitmodules` entry or Git submodule in uquintus.
+
+Project `.bender.yml` sets `git_submodules: false`. Upstream CVFPU's legacy
+submodules are not needed by its Bender RTL manifest: Bender supplies those RTL
+dependencies independently, and its FlexFloat testbench is not part of this
+integration. An initial checkout may report warning W36 for these intentionally
+unpopulated paths. No source list shall reference them.
+
+```sh
+bender checkout                         # Fetch exact locked dependencies
+bender packages                         # Inspect the resolved graph
+bender path fpnew                       # Locate its checkout
+bender script flist -t fpu              # Include backend/dependency sources
+bender script flist -t ex --no-deps     # Owned RTL only
+```
+
+Changing a dependency is a deliberate manifest/lockfile update with
+`bender update`; ordinary runs shall reuse the recorded revisions. Bender may
+fetch missing checkouts when generating sources/scripts, so prepare the cache
+before offline runs. It manages Git downloads and ordered source/include lists,
+not compiler installation or an RTL build of the dependency.
+
+The shared runner defaults to `--no-deps` for existing native component manifests.
+A component that actually instantiates imported IP shall set boolean
+`bender_dependencies: true`; both the flat source list and structured include
+tree then include dependencies. HDL header provenance covers `.vh` and `.svh`;
+imported-IP runs retain a lockfile snapshot and its hash with source provenance.
+The runner also selects the simulator's Bender target (`verilator` currently).
+Optional `bender_targets` selects additional upstream/project source groups.
+The CVFPU Verilator import profile uses:
+
+```yaml
+bender_dependencies: true
+bender_targets:
+  - tech_cells_generic_exclude_deprecated
+  - cvfpu_verilator
+```
+
+The first target excludes obsolete generic pad models with unsupported
+transistor primitives. The second selects `verif/sim/common/uqu_cvfpu.vlt`,
+which waives only the pinned package's ascending packed ranges and known
+helper-function width conversions. Controls precede HDL compilation without
+changing HDL dependency order. Project RTL diagnostics stay enabled. Do not add
+the generic `simulation` target for this Verilator profile: it selects upstream
+randomized SV test utilities that this simulator version does not support.
+Import parsing/lint qualification is separate from executing FPU instructions.
+
+The current FPU remains an inactive endpoint: dependency availability and the
+six propagated parameters do not yet provide floating-point execution.
+
+References: [Bender dependency workflow](https://pulp-platform.github.io/bender/workflow/dependencies.html),
+[project configuration](https://pulp-platform.github.io/bender/configuration.html),
+and the [pinned CVFPU manifest](https://github.com/openhwgroup/cvfpu/blob/77811635cb7e8649f1d9484733ee6a0bdb44a0e6/Bender.yml).
+
 ## 2. Shared core configuration and separate build targets
 
 **Status:** Strict YAML validation, selector generation, presets and simulation
@@ -175,6 +238,10 @@ catalog is `config/selectors.json`, with the shared generator in
 `verif/sim/common/hw_config.py`. Complete initial presets are `config/rv32i.yml`,
 `config/rv32im.yml`, and `config/rv32im_iterative.yml`. The baseline keeps M disabled; both M-enabled presets currently select the
 shared iterative MUL/DIV chain with unroll factor eight.
+FPU selector labels and four explicit register counts follow
+[architecture Section 3.3.2](uqu_spec.arch.md#332-cvfpu-implementation-configuration).
+All presets state these settings even with `ISA_ZFINX = 0`; the configuration
+helper validates counts and labels before encoding the two selectors for RTL.
 All hardware presets explicitly set boolean `MUA_DE_OPERAND_RETENTION`,
 defaulting to zero for continuous DE source resolution. The additional
 `config/rv32i_retained.yml` preset enables optional hazard-unit DE operand
@@ -597,3 +664,4 @@ later decisions determine the active contract.
 | D-138 | Generate guarded Verilog-2005 `.vh` macro headers for shared selector encodings from one canonical definition also used by YAML configuration translation. | Keep synthesis-compatible RTL constants and build-tool mappings consistent without SystemVerilog packages in the synthesizable design. | Implemented canonical JSON catalog and guarded-header generator in verif/sim/common/hw_config.py; Section 2 |
 | D-258 | Place common processor RTL directly in `src/uquintus/`, with `src/wrap/` for protocol-specific top levels and `src/adapt/` for reusable protocol adapters as sibling directories. | Keep common core files together without an extra directory level. | Agreed; replaces D-131 |
 | D-295 | Generate a shared static report under build/report with an HTML landing page, category/run pages, configuration comparison, Markdown summary and versioned JSON data; collect existing flow artifacts and accept a common per-run record for future flows. | Visualize evidence across configurations without losing failures, provenance or comparison conditions, and produce a portable artifact suitable for later website publication. | Initial aggregation implemented; Section 6.1; synthesis/formal/benchmark producers, CI retention and deployment remain follow-ups |
+| D-303 | Fetch commit-pinned CVFPU/FPnew through Bender with exact transitive revisions in Bender.lock, disable upstream Git submodule checkout in project configuration, and opt imported HDL into component builds through a manifest flag. | Reuse upstream source/dependency metadata without adding repository submodules or compiling unused IP into native tests. | Implemented dependency/configuration preparation; Section 1.3; execution adapter under architecture D-302 remains open |

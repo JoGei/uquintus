@@ -1,0 +1,2 @@
+# Dependencies use Bender manifests rather than upstream Git submodules.
+git_submodules: false

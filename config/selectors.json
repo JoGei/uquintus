@@ -19,6 +19,17 @@
   "MUA_DIV": {
     "iterative": {"value": 0, "macro": "UQU_DIV_ITERATIVE"}
   },
+  "MUA_FPU_PIPE_CONFIG": {
+    "before": {"value": 0, "macro": "UQU_FPU_PIPE_BEFORE"},
+    "after": {"value": 1, "macro": "UQU_FPU_PIPE_AFTER"},
+    "inside": {"value": 2, "macro": "UQU_FPU_PIPE_INSIDE"},
+    "distributed": {"value": 3, "macro": "UQU_FPU_PIPE_DISTRIBUTED"}
+  },
+  "MUA_FPU_DIVSQRT": {
+    "pulp": {"value": 0, "macro": "UQU_FPU_DIVSQRT_PULP"},
+    "th32": {"value": 1, "macro": "UQU_FPU_DIVSQRT_TH32"},
+    "thmulti": {"value": 2, "macro": "UQU_FPU_DIVSQRT_THMULTI"}
+  },
   "MUA_REGFILE_IMPL": {
     "ff": {"value": 0, "macro": "UQU_RF_FF"},
     "latch": {"value": 1, "macro": "UQU_RF_LATCH"}

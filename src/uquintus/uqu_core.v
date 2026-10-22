@@ -29,6 +29,12 @@ module uqu_core #(
     parameter MUA_MUL = `UQU_MUL_ITERATIVE,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
     parameter MUA_MULDIV_ITERUNROLL = 8,
+    parameter MUA_FPU_PIPE_REGS_FMA = 2,
+    parameter MUA_FPU_PIPE_REGS_DIVSQRT = 0,
+    parameter MUA_FPU_PIPE_REGS_NONCOMP = 0,
+    parameter MUA_FPU_PIPE_REGS_CONV = 1,
+    parameter MUA_FPU_PIPE_CONFIG = `UQU_FPU_PIPE_DISTRIBUTED,
+    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_PULP,
     parameter XIF = 0,
     parameter XIF_NUM_RS = 3,
     parameter XIF_DUALWRITE = 0,
@@ -307,6 +313,12 @@ module uqu_core #(
         .xif_register_id_o(xif_register_id_o), .xif_register_rs_o(xif_register_rs_o), .xif_register_rs_valid_o(xif_register_rs_valid_o)
     );
     uqu_stage_ex #(
+        .MUA_FPU_PIPE_REGS_FMA(MUA_FPU_PIPE_REGS_FMA),
+        .MUA_FPU_PIPE_REGS_DIVSQRT(MUA_FPU_PIPE_REGS_DIVSQRT),
+        .MUA_FPU_PIPE_REGS_NONCOMP(MUA_FPU_PIPE_REGS_NONCOMP),
+        .MUA_FPU_PIPE_REGS_CONV(MUA_FPU_PIPE_REGS_CONV),
+        .MUA_FPU_PIPE_CONFIG(MUA_FPU_PIPE_CONFIG),
+        .MUA_FPU_DIVSQRT(MUA_FPU_DIVSQRT),
         .ISA_M(ISA_M), .ISA_ZFINX(ISA_ZFINX), .MUA_MUL(MUA_MUL), .MUA_DIV(MUA_DIV), .MUA_MULDIV_ITERUNROLL(MUA_MULDIV_ITERUNROLL)
     ) u_ex (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(ex_flush), .valid_i(ex_valid_q), .ready_o(), .valid_o(ex_complete), .ready_i(ex_ready),

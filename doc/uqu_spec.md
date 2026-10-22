@@ -276,7 +276,7 @@ shall not silently enable a deferred feature.
 
 | Work area | Follow-up home |
 | --- | --- |
-| FPU/backend selection, core debug integration, dynamic prediction, physical validation and remaining feature acceptance | [Architecture follow-ups](uqu_spec.arch.md#21-implementation-follow-ups-and-deferred-scope) |
+| FPU adapter/configuration qualification, core debug integration, dynamic prediction, physical validation and remaining feature acceptance | [Architecture follow-ups](uqu_spec.arch.md#21-implementation-follow-ups-and-deferred-scope) |
 | External memory guarantees, optional IP/DM integration, reset conditioning and deferred XIF features | [Interface follow-ups](uqu_spec.interfaces.md#12-integration-follow-ups) |
 | Broader reference coverage, formal toolchain/binding/proofs, coverage targets and CI implementation | [Verification follow-ups](uqu_spec.verif.md#4-verification-follow-ups) |
 | Additional simulator backends, ORFS targets, tool/PDK pins and provisioned environments | [Build follow-ups](uqu_spec.build.md#8-build-follow-ups) |

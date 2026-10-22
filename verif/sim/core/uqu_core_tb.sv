@@ -29,6 +29,12 @@ module uqu_core_tb #(
     parameter MUA_MUL = `UQU_MUL_ITERATIVE,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
     parameter MUA_MULDIV_ITERUNROLL = 8,
+    parameter MUA_FPU_PIPE_REGS_FMA = 2,
+    parameter MUA_FPU_PIPE_REGS_DIVSQRT = 0,
+    parameter MUA_FPU_PIPE_REGS_NONCOMP = 0,
+    parameter MUA_FPU_PIPE_REGS_CONV = 1,
+    parameter MUA_FPU_PIPE_CONFIG = `UQU_FPU_PIPE_DISTRIBUTED,
+    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_PULP,
     parameter XIF = 0,
     parameter XIF_NUM_RS = 3,
     parameter XIF_DUALWRITE = 0,
@@ -141,6 +147,12 @@ module uqu_core_tb #(
     wire [3:0] raw_rvfi_mem_fault_rmask;
     wire [3:0] raw_rvfi_mem_fault_wmask;
     uqu_core #(
+        .MUA_FPU_PIPE_REGS_FMA(MUA_FPU_PIPE_REGS_FMA),
+        .MUA_FPU_PIPE_REGS_DIVSQRT(MUA_FPU_PIPE_REGS_DIVSQRT),
+        .MUA_FPU_PIPE_REGS_NONCOMP(MUA_FPU_PIPE_REGS_NONCOMP),
+        .MUA_FPU_PIPE_REGS_CONV(MUA_FPU_PIPE_REGS_CONV),
+        .MUA_FPU_PIPE_CONFIG(MUA_FPU_PIPE_CONFIG),
+        .MUA_FPU_DIVSQRT(MUA_FPU_DIVSQRT),
         .ISA_E(ISA_E),
         .ISA_M(ISA_M),
         .ISA_C(ISA_C),

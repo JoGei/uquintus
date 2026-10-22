@@ -10,7 +10,9 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from component_runner import ROOT, bender_include_dirs, check_results, load_component, simulator_build_key
+from component_runner import (ROOT, bender_include_dirs, bender_source_options,
+                              check_results, load_component, order_control_files,
+                              simulator_build_key)
 from hw_config import load_configuration, parameters_for_component
 
 
@@ -35,6 +37,68 @@ class ComponentRunnerTests(unittest.TestCase):
         manifest["parameters"] = []
         (self.directory / "other_unit.yml").write_text(yaml.safe_dump(manifest))
         self.assertEqual(load_component("other_unit", self.directory)["parameters"], [])
+
+    def test_imported_sources_require_manifest_opt_in(self):
+        manifest = load_component('ex')
+        expected = ['-t', manifest['bender_target'], '-t', 'verilator']
+        self.assertEqual(bender_source_options(manifest), expected + ['--no-deps'])
+        for enabled in (False, True):
+            manifest['bender_dependencies'] = enabled
+            (self.directory / 'imported.yml').write_text(yaml.safe_dump(manifest))
+            checked = load_component('imported', self.directory)
+            self.assertEqual(bender_source_options(checked),
+                             expected + ([] if enabled else ['--no-deps']))
+        for invalid in (0, 1, 'true'):
+            manifest['bender_dependencies'] = invalid
+            (self.directory / 'imported.yml').write_text(yaml.safe_dump(manifest))
+            with self.assertRaisesRegex(ValueError, 'bender_dependencies.*boolean'):
+                load_component('imported', self.directory)
+        manifest['bender_dependencies'] = True
+        manifest['bender_targets'] = ['tech_cells_generic_exclude_deprecated']
+        (self.directory / 'imported.yml').write_text(yaml.safe_dump(manifest))
+        checked = load_component('imported', self.directory)
+        self.assertEqual(bender_source_options(checked),
+                         expected + ['-t', 'tech_cells_generic_exclude_deprecated'])
+        for invalid in ('target', ['two', 'two'], [None], [1], ['bad target']):
+            manifest['bender_targets'] = invalid
+            (self.directory / 'imported.yml').write_text(yaml.safe_dump(manifest))
+            with self.assertRaisesRegex(ValueError, 'bender_targets'):
+                load_component('imported', self.directory)
+
+    def test_file_controls_precede_imports_without_reordering_hdl(self):
+        paths = list(map(Path, ['fpnew_pkg.sv', 'fpnew_top.sv', 'cvfpu.vlt', 'uqu_fpu.v']))
+        self.assertEqual(order_control_files(paths), [paths[2], paths[0], paths[1], paths[3]])
+        self.assertEqual(order_control_files(paths[:2]), paths[:2])
+
+    def test_fpu_configuration_is_explicit_and_validated_when_inactive(self):
+        from hw_config import FPU_PIPE_PARAMS
+
+        catalog = json.loads((ROOT / 'config/selectors.json').read_text())
+        config = load_configuration(ROOT / 'config/rv32i.yml', catalog)
+        self.assertEqual(config['ISA_ZFINX'], 0)
+        path = self.directory / 'fpu.yml'
+        for name in FPU_PIPE_PARAMS:
+            for value in (0, 1, 4):
+                path.write_text(yaml.safe_dump(dict(config, **{name:value})))
+                self.assertEqual(load_configuration(path, catalog)[name], value)
+            for value in (-1, True, 1.5, '2', 0x80000000):
+                path.write_text(yaml.safe_dump(dict(config, **{name:value})))
+                with self.assertRaisesRegex(ValueError, name):
+                    load_configuration(path, catalog)
+        names = FPU_PIPE_PARAMS | {'MUA_FPU_PIPE_CONFIG', 'MUA_FPU_DIVSQRT'}
+        for name in names:
+            path.write_text(yaml.safe_dump({k:v for k,v in config.items() if k != name}))
+            with self.assertRaisesRegex(ValueError, 'missing=.*'+name):
+                load_configuration(path, catalog)
+        for name in ('MUA_FPU_PIPE_CONFIG', 'MUA_FPU_DIVSQRT'):
+            for label, entry in catalog[name].items():
+                checked = dict(config, **{name:label})
+                path.write_text(yaml.safe_dump(checked))
+                self.assertEqual(parameters_for_component(load_configuration(path, catalog),
+                    [name], catalog), {name:entry['value']})
+            path.write_text(yaml.safe_dump(dict(config, **{name:'unknown'})))
+            with self.assertRaisesRegex(ValueError, 'unsupported '+name):
+                load_configuration(path, catalog)
 
     def test_selector_mapping_and_generated_header_share_catalog(self):
         from hw_config import write_header

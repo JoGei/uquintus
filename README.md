@@ -196,6 +196,16 @@ wiring. Its [interface contract](doc/uqu_spec.arch.md#331-unimplemented-fpu-inte
 defines a decoded operation selector, three operands, rounding, and
 result/exception-flag ports. The endpoint
 accepts no requests, produces no results, and rejects enabled Zfinx elaboration.
+CVFPU/FPnew and its dependencies are now pinned through Bender, without repository
+submodules. Six `MUA_FPU_*` settings are propagated through core/EX to this endpoint;
+the [FPU configuration contract](doc/uqu_spec.arch.md#332-cvfpu-implementation-configuration)
+defines their counts, placement and divide/square-root choices. The execution
+adapter is the next implementation step.
+
+Run `bender checkout` to prepare the exact dependencies recorded in `Bender.lock`.
+Native component tests select owned RTL only; imported HDL is included when a
+component manifest requests it. See the
+[dependency guide](doc/uqu_spec.build.md#13-pinned-cvfpu-dependency-without-git-submodules).
 
 Provide Bender, Verilator, GNU Make, a C++ compiler, and the Python dependencies
 in `verif/requirements.txt` through your environment. Then run:

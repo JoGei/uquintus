@@ -17,10 +17,15 @@ CHOICES = {
     "XIF_NUM_RS": (2, 3),
 }
 
+FPU_PIPE_PARAMS = {
+    "MUA_FPU_PIPE_REGS_FMA", "MUA_FPU_PIPE_REGS_DIVSQRT",
+    "MUA_FPU_PIPE_REGS_NONCOMP", "MUA_FPU_PIPE_REGS_CONV",
+}
+
 
 def load_configuration(path, catalog):
     config = yaml.safe_load(path.read_text())
-    expected = BOOLEAN_PARAMS | set(CHOICES) | set(catalog) | {"MUA_IF_BUFFER_WORDS"}
+    expected = BOOLEAN_PARAMS | set(CHOICES) | set(catalog) | FPU_PIPE_PARAMS | {"MUA_IF_BUFFER_WORDS"}
     if not isinstance(config, dict):
         raise ValueError("hardware configuration must be a YAML mapping")
     if set(config) != expected:
@@ -32,6 +37,9 @@ def load_configuration(path, catalog):
     for name, values in CHOICES.items():
         if type(config[name]) is not type(values[0]) or config[name] not in values:
             raise ValueError(f"unsupported {name}: {config[name]!r}")
+    for name in FPU_PIPE_PARAMS:
+        if type(config[name]) is not int or not 0 <= config[name] <= 0x7fffffff:
+            raise ValueError(f"{name} must be a nonnegative 32-bit signed integer")
     if (type(config["MUA_IF_BUFFER_WORDS"]) is not int or
             config["MUA_IF_BUFFER_WORDS"] < 2):
         raise ValueError("MUA_IF_BUFFER_WORDS must be an integer >= 2")

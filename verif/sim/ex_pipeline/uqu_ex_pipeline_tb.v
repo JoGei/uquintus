@@ -8,7 +8,13 @@ module uqu_ex_pipeline_tb #(
     parameter ISA_ZFINX = 0,
     parameter MUA_MUL = `UQU_MUL_ITERATIVE,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
-    parameter MUA_MULDIV_ITERUNROLL = 8
+    parameter MUA_MULDIV_ITERUNROLL = 8,
+    parameter MUA_FPU_PIPE_REGS_FMA = 2,
+    parameter MUA_FPU_PIPE_REGS_DIVSQRT = 0,
+    parameter MUA_FPU_PIPE_REGS_NONCOMP = 0,
+    parameter MUA_FPU_PIPE_REGS_CONV = 1,
+    parameter MUA_FPU_PIPE_CONFIG = `UQU_FPU_PIPE_DISTRIBUTED,
+    parameter MUA_FPU_DIVSQRT = `UQU_FPU_DIVSQRT_PULP
 ) (
     input wire          clk_i,
     input wire          rst_ni,
@@ -141,6 +147,12 @@ module uqu_ex_pipeline_tb #(
     end
 
     uqu_stage_ex #(
+        .MUA_FPU_PIPE_REGS_FMA(MUA_FPU_PIPE_REGS_FMA),
+        .MUA_FPU_PIPE_REGS_DIVSQRT(MUA_FPU_PIPE_REGS_DIVSQRT),
+        .MUA_FPU_PIPE_REGS_NONCOMP(MUA_FPU_PIPE_REGS_NONCOMP),
+        .MUA_FPU_PIPE_REGS_CONV(MUA_FPU_PIPE_REGS_CONV),
+        .MUA_FPU_PIPE_CONFIG(MUA_FPU_PIPE_CONFIG),
+        .MUA_FPU_DIVSQRT(MUA_FPU_DIVSQRT),
         .ISA_M(ISA_M), .ISA_ZFINX(ISA_ZFINX), .MUA_MUL(MUA_MUL), .MUA_DIV(MUA_DIV),
         .MUA_MULDIV_ITERUNROLL(MUA_MULDIV_ITERUNROLL)
     ) u_ex (

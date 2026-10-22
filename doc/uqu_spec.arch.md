@@ -207,6 +207,12 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_MUL` | `parallel`, `parallel+stages+2`, or `iterative`; iterative unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
 | `MUA_DIV` | `iterative`; unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
 | `MUA_MULDIV_ITERUNROLL` | Integer factor 1, 2, 4, 8, 16, or 32 for the shared iterative chain; 1 means no unrolling; inactive when `ISA_M = 0`. | `8` |
+| `MUA_FPU_PIPE_REGS_FMA` | Nonnegative register count for the FP32 add/multiply/fused-operation group. | `2` |
+| `MUA_FPU_PIPE_REGS_DIVSQRT` | Nonnegative extra register count around the iterative divide/square-root unit. | `0` |
+| `MUA_FPU_PIPE_REGS_NONCOMP` | Nonnegative register count for sign injection, min/max, comparison and classification. | `0` |
+| `MUA_FPU_PIPE_REGS_CONV` | Nonnegative register count for FP32/integer conversions. | `1` |
+| `MUA_FPU_PIPE_CONFIG` | `before`, `after`, `inside`, or `distributed`; register placement within the backend. | `distributed` |
+| `MUA_FPU_DIVSQRT` | `pulp`, `th32`, or `thmulti`; CVFPU divide/square-root implementation. | `pulp` |
 
 Enumerated selectors use readable YAML labels translated into integer RTL
 values through the canonical definition in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets); their exact numeric
@@ -674,7 +680,7 @@ implementation work.
 ### 3.3. Native Zfinx execution and FPU implementation
 
 **Status:** Blocking EX integration and immediate flush cancellation agreed;
-inactive interface stub available; FPU implementation selection open
+CVFPU selected and configuration propagated; execution adapter remains to be implemented
 
 Native Zfinx operations shall execute through an FPU attached to EX,
 independently of CV-X-IF. The owning instruction shall remain in EX until its
@@ -711,9 +717,9 @@ status are available and MEM can accept them. Downstream stalls shall not
 restart the operation or lose a completed result. No fixed-latency prediction
 shall substitute for the actual result-valid/readiness checks.
 
-Exact operation latencies, arithmetic algorithms, adapter payloads, and
-implementation-specific cancellation wiring shall remain TBD until an FPU and
-configuration are selected. The native integer MUL/DIV fixed-latency contract
+Actual operation latencies, backend-control mapping and implementation-specific
+reset/cancellation wiring shall be validated with the selected CVFPU revision
+and configuration. The native integer MUL/DIV fixed-latency contract
 in [architecture, Section 3](uqu_spec.arch.md#3-classical-five-stage-pipeline) shall remain applicable to those units.
 
 The current floating-point scope shall be scalar Zfinx with single-precision
@@ -722,13 +728,13 @@ operations and additional FP formats, including FP8 and FP16, shall be deferred.
 An imported FPU's broader capabilities shall not imply additional supported
 instructions or require extra format/lane hardware in the initial integration.
 
-**Candidate for evaluation, not selected:** OpenHW's
+**Selected backend for integration:** OpenHW's
 [CVFPU / FPnew](https://github.com/openhwfoundation/cvfpu) provides configurable
 floating-point arithmetic and Bender support. Its
 [interface documentation](https://github.com/openhwfoundation/cvfpu/blob/develop/docs/README.md)
 describes three operand inputs, rounding-mode input, result/status outputs,
 and input/output valid/ready handshakes. This makes an EX adapter a plausible
-integration approach; the core would retain instruction decoding, register
+integration approach; the core retains instruction decoding, register
 access, and architectural CSR updates.
 
 CVFPU is written in synthesizable SystemVerilog, including packages and typed
@@ -736,9 +742,10 @@ parameters. Imported IP and its dependencies may retain SystemVerilog under
 the exception in the [RTL language rules](uqu_spec.style.md#2-language-and-source-files);
 project-owned RTL, including the FPU adapter, shall remain plain Verilog-2005.
 The documented asynchronous active-low reset must still be reconciled with the
-core's synchronous reset contract. No dependency revision or configuration is
-selected; operation coverage, timing, reset/flush behavior, and flow compatibility
-remain to be evaluated before implementation selection. An imported FPU shall
+core's synchronous reset contract. The exact revision is pinned through Bender
+under build Section 1.3; initial settings are defined in Section 3.3.2.
+Operation coverage, timing, reset/flush behavior and flow compatibility still
+require adapter implementation and qualification. An imported FPU shall
 meet the immediate cancellation requirement above.
 
 #### 3.3.1. Unimplemented FPU interface
@@ -782,9 +789,10 @@ Values 22 through 31 are reserved. The instruction names identify the scalar
 computation; source and destination values use integer registers under
 [Zfinx](https://docs.riscv.org/reference/isa/v20260120/unpriv/zfinx.html).
 The three operands and effective rounding mode remain separate payload fields.
-Instruction legality, DE decoding, rounding checks, backend-control mapping,
-and the actual backend remain implementation work. The stub performs none of
-them and does not execute any selector value.
+Native decoder/DE logic already recognizes configured Zfinx operations and
+checks effective rounding modes. Backend-control mapping and execution remain
+adapter work. The stub performs no arithmetic and does not execute any selector
+value.
 
 The placeholder supports only `ISA_ZFINX = 0`. It continuously drives
 `req_ready_o = 0`, `res_valid_o = 0`, `res_data_o = 0`, and `res_fflags_o = 0`,
@@ -796,10 +804,61 @@ configured Zfinx encodings, but a complete EX/core configuration shall not enabl
 Zfinx execution until a real backend is provided. The stub shall not advertise implemented
 floating-point capability or provide a successful substitute result.
 
-The Bender `fpu` target selects the endpoint; `rtl` also includes it. Functional
-floating-point tests and backend dependencies remain deferred. Placeholder
+The Bender `fpu` target selects the endpoint; `rtl` also includes it. CVFPU and
+its transitive dependencies are pinned and fetched through Bender, but the
+endpoint does not yet instantiate them. Functional floating-point tests await
+the execution adapter. Placeholder
 validation covers Verilog parsing, synthesis to constant inactive outputs, and
 rejection of enabled elaboration, and is not floating-point functional coverage.
+
+#### 3.3.2. CVFPU implementation configuration
+
+The six `MUA_FPU_*` settings in Section 2.2 shall be explicit in every hardware
+YAML, inactive when `ISA_ZFINX = 0`, validated even when inactive, encoded through the shared selector catalog,
+and forwarded through `uqu_core` → `uqu_stage_ex` → `uqu_fpu`. The four counts
+shall be integers from zero through `2^31 - 1`, matching the portable RTL guard.
+They count backend registers, not additional architectural stages or promised
+total instruction latency. Defaults are initial exploration settings, without
+a mapped timing or area claim. The endpoint remains disabled until its adapter
+is implemented; parameter propagation alone does not enable Zfinx execution.
+
+CVFPU's `Implementation.PipeRegs` entries for FP32 shall receive the four counts
+for `ADDMUL`, `DIVSQRT`, `NONCOMP` and `CONV`, respectively. One
+`Implementation.PipeConfig` selects `BEFORE`, `AFTER`, `INSIDE` or `DISTRIBUTED`.
+The selector encodings in `config/selectors.json` match the pinned package.
+Zero means no additional configured registers; a divide/square-root operation
+still uses its iterative engine and handshake. Placement is backend-specific:
+`INSIDE` does not split the iterative division recurrence, and its wrapper uses
+output staging. Increasing the divide/square-root register count shall not be
+described as increasing the iteration unroll factor or reducing its iteration
+count. Actual request-to-result behavior must be checked for each supported
+configuration and cancellation path.
+
+`MUA_FPU_DIVSQRT` maps to upstream `DivSqrtSel`: `PULP = 0`, `TH32 = 1`,
+`THMULTI = 2`. TH32 is an FP32-only alternative; THMULTI's additional formats
+shall remain disabled by the scalar FP32 feature mask. PULP is the initial
+default. Exposing a backend selector does not claim that every implementation
+has already passed uquintus functional or physical qualification.
+
+The initial feature contract shall fix width to 32, FP format to FP32, integer
+conversion width to 32, and vector/SIMD operation to disabled. All required
+Zfinx operations and rounding modes remain available; denormals and required
+exception behavior shall not be configurable approximations. `UnitTypes`
+shall initially use one FP32 format-specific ADDMUL unit, one NONCOMP unit,
+and merged DIVSQRT/CONV groups. `PARALLEL` versus `MERGED` selects format-slice
+organization, not separate add/multiply pipelines or another core issue slot;
+it is not exposed as a generic arithmetic-sharing option for this one-format
+integration. ADD, MUL and fused operations use the ADDMUL unit.
+
+No additional request queue, tag-width, format-mask or operation-disable
+parameter is needed for the one-live-operation blocking EX contract. Result
+data/flags must remain held together, flush must cancel immediately, and
+interrupts must wait for completion under the existing contracts. Those
+requirements are not tuning options.
+
+Upstream references: [configuration and pipelining](https://github.com/openhwgroup/cvfpu/blob/77811635cb7e8649f1d9484733ee6a0bdb44a0e6/docs/README.md),
+[configuration types](https://github.com/openhwgroup/cvfpu/blob/77811635cb7e8649f1d9484733ee6a0bdb44a0e6/src/fpnew_pkg.sv)
+and [top-level interface](https://github.com/openhwgroup/cvfpu/blob/77811635cb7e8649f1d9484733ee6a0bdb44a0e6/src/fpnew_top.sv).
 
 ### 3.4. Shared extended arithmetic primitive
 
@@ -3488,7 +3547,7 @@ be resolved when their implementation milestone is undertaken:
 | Execution/control | Full uqu_core pipeline/control, shared hazards and initial standard-channel XIF issue/ID/kill integration are implemented; core debug sequencing and physical timing evaluation remain. |
 | Memory access | IF/MEM, CSR-owned PMP state, the shared checker, precise-effect permissions and fences are connected in the core. Broader system integration and physical validation remain; XIF shared-LSU access stays deferred. |
 | Integer arithmetic | ALU, MUL/DIV, shared arithmetic and EX control are integrated in the core. Preserve fixed execution latencies and physical sharing during synthesis/timing validation. |
-| Zfinx | Inactive FPU interface stub available; select and pin an FPU/backend configuration, establish exact operation latencies, and validate adapters, reset, flush, rounding, flags, and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
+| Zfinx | CVFPU and dependencies pinned; six implementation parameters propagated to the inactive FPU endpoint. Implement and qualify the execution adapter, reset/flush behavior, rounding/flags, all selected divider variants and tool compatibility; retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
 | ISA/CSR/PMP | WB CSR state/access checks, counters, trap/MRET updates, core control/PMP and initial XIF tracking are integrated. Broader architectural verification and core debug integration remain; FPU state awaits its backend. |
 | Frontend | Full-core event arbitration, expansion placement, prefetch/fault association, redirects and none/static_not_taken behavior are connected. Dynamic predictors and the standard XIF compressed channel remain future work. |
@@ -3657,3 +3716,4 @@ later decisions determine the active contract.
 | D-287 | Assemble uqu_stage_if around fetch, word storage, alignment and selected IF expansion; own frontend pointers/containment while leaving IF/DE, PMP and global arbitration in the core; implement none/static_not_taken control with canonical encodings 0/1. | Make native frontend behavior concrete with reserved capacity, independent request/delivery holds, precise original instruction identity and persistent stale-transaction draining. | Implemented IF, parent fixtures and full-core connection; Sections 15.5 and 3.13; standard XIF compressed channel deferred |
 | D-288 | Implement core-owned uqu_pipeline_ctrl with separate occupancy/completion, parent-owned slot enables/validity, age-qualified fault flushes, live IRQ drain/dispatch, serial metadata, older-WB memory safety proof and two-bit fence request/ack tracking; keep WB readiness independent of result completion and preserve WB's own accepted event. | Make native global sequencing executable without duplicating pipeline/CSR/unit state or creating protocol feedback paths; provide normalized drain/admission hooks for later optional adapters. | Implemented standalone, parent/MEM/WB fixtures and full-core binding; Sections 3.2.1 and 3.13; XIF ID adapter under D-301; core debug open |
 | D-289 | Integrate native uqu_core with actual five stages, parent-owned boundaries/GPR/hazards/shared PMP/control, precise WB recovery, live privilege and MPRV-aware data checks; reject unfinished optional backends/adapters at elaboration. | Make the agreed first native implementation executable while keeping unsupported features explicit and preserving the existing component contracts. | Implemented; Section 3.13; RVFI/CSR, ELF/riscv-tests, scoped Spike and initial XIF available under D-290 through D-301; FPU, core debug, formal and ASIC flow unfinished |
+| D-302 | Select CVFPU/FPnew for scalar Zfinx integration and propagate four per-group pipeline-register counts, one placement selector and one divide/square-root selector through complete hardware YAML, core, EX and FPU. | Explore internal timing/area choices without changing ISA coverage, five-stage boundaries or the blocking EX handshake contract. | Configuration preparation implemented; Section 3.3.2; dependency pin under D-303; execution adapter and functional qualification remain open |

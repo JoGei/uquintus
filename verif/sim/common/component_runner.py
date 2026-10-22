@@ -22,7 +22,7 @@ from hw_config import load_configuration, parameters_for_component, write_header
 
 ROOT = Path(__file__).resolve().parents[3]
 
-# Keep owned .v sources in Verilog-2005 while allowing .sv verification files.
+# Keep owned .v sources in Verilog-2005; imported IP and verification may use .sv.
 HDL_LANGUAGE_ARGS = ["--language", "1364-2005", "+1800-2017ext+sv"]
 
 
@@ -37,10 +37,17 @@ def load_component(name, directory=None):
     component = yaml.safe_load(path.read_text())
     expected = {"top_module", "bender_target", "test_module", "parameters", "tests"}
     if (not isinstance(component, dict) or not expected <= set(component) or
-            set(component) - expected - {'requires_elf'}):
-        raise ValueError(f"component manifest must contain {sorted(expected)}; optional: requires_elf")
-    if 'requires_elf' in component and type(component['requires_elf']) is not bool:
-        raise ValueError('component requires_elf must be a boolean')
+            set(component) - expected - {'requires_elf', 'bender_dependencies', 'bender_targets'}):
+        raise ValueError(f"component manifest must contain {sorted(expected)}; "
+                         "optional: requires_elf, bender_dependencies, bender_targets")
+    for key in ('requires_elf', 'bender_dependencies'):
+        if key in component and type(component[key]) is not bool:
+            raise ValueError(f'component {key} must be a boolean')
+    targets = component.get('bender_targets', [])
+    if (not isinstance(targets, list) or
+            any(not isinstance(value, str) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*', value)
+                for value in targets) or len(set(targets)) != len(targets)):
+        raise ValueError('component bender_targets must contain unique target identifiers')
     for key, pattern in {
         "top_module": r"[A-Za-z_][A-Za-z0-9_$]*",
         "bender_target": r"[A-Za-z_][A-Za-z0-9_-]*",
@@ -73,6 +80,22 @@ def check_results(path, expected_tests):
 
 def command_output(command):
     return subprocess.check_output(command, cwd=ROOT, text=True).strip()
+
+
+def bender_source_options(component, simulator='verilator'):
+    """Include imported HDL only for manifests that explicitly require it."""
+    options = ['-t', component['bender_target'], '-t', simulator]
+    for target in component.get('bender_targets', []):
+        options += ['-t', target]
+    if not component.get('bender_dependencies', False):
+        options.append('--no-deps')
+    return options
+
+
+def order_control_files(sources):
+    """Read Verilator file-specific controls before their affected HDL files."""
+    return ([path for path in sources if path.suffix == '.vlt'] +
+            [path for path in sources if path.suffix != '.vlt'])
 
 
 def check_reference(run_dir, config, reference_info):
@@ -182,16 +205,19 @@ def main(argv=None, shared_build=None):
     (run_dir / "config.yml").write_text(yaml.safe_dump(config, sort_keys=False))
     (run_dir / "component.yml").write_text(yaml.safe_dump(component, sort_keys=False))
     (run_dir / "selectors.json").write_text(json.dumps(catalog, indent=2) + "\n")
-    sources_text = command_output([args.bender, "script", "flist", "-t", component["bender_target"]])
-    (run_dir / "sources.f").write_text(sources_text + "\n")
+    source_options = bender_source_options(component, args.sim)
+    sources_text = command_output([args.bender, "script", "flist", *source_options])
     sources = [(ROOT / line.strip()).resolve() for line in sources_text.splitlines()
                if line.strip() and not line.lstrip().startswith("//")]
     if not sources or any(not path.is_file() for path in sources):
         raise ValueError("Bender did not produce an existing HDL source list")
-    source_tree_text = command_output([args.bender, "sources", "-t", component["bender_target"]])
+    sources = order_control_files(sources)
+    (run_dir / "sources.f").write_text(''.join(str(path) + '\n' for path in sources))
+    source_tree_text = command_output([args.bender, "sources", *source_options])
     (run_dir / "bender_sources.json").write_text(source_tree_text + "\n")
     include_dirs = [run_dir / "include", *bender_include_dirs(json.loads(source_tree_text))]
-    headers = sorted({header for directory in include_dirs for header in directory.rglob("*.vh")})
+    headers = sorted({header for directory in include_dirs for suffix in ('*.vh', '*.svh')
+                      for header in directory.rglob(suffix)})
     metadata = {
         "component": args.component, "action": args.action, "test": args.test,
         'target': args.sim,
@@ -200,13 +226,18 @@ def main(argv=None, shared_build=None):
         "hdl_language_args": HDL_LANGUAGE_ARGS,
         "python": sys.version, "simulator": command_output([args.sim, "--version"]),
         "bender": command_output([args.bender, "--version"]),
-        "source_sha256": {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
+        "source_sha256": {str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path):
+                          hashlib.sha256(path.read_bytes()).hexdigest()
                           for path in sources},
         "include_dirs": [str(directory) for directory in include_dirs],
         "header_sha256": {str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path):
                           hashlib.sha256(path.read_bytes()).hexdigest() for path in headers},
         "status": "running",
     }
+    if component.get('bender_dependencies', False):
+        lock = ROOT / 'Bender.lock'
+        shutil.copyfile(lock, run_dir / 'Bender.lock')
+        metadata['bender_lock_sha256'] = hashlib.sha256(lock.read_bytes()).hexdigest()
     metadata_path = run_dir / "run.json"
     if args.label:
         if elf_path is None:
