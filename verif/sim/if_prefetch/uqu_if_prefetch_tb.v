@@ -65,8 +65,8 @@ module uqu_if_prefetch_tb #(
         (word0_valid_o && (word0_addr_o != {pc_q[31:2],2'b00})) ||
         (word1_valid_o && (word1_addr_o != word0_addr_o + 32'd4));
 
-    // With one outstanding transaction and no other writer, available space
-    // at native acceptance remains reserved until that result is inserted.
+    // The engine reserves its own registered completion slots before issuing.
+    // Its result handshake backpressures safely when the word FIFO is full.
     uqu_ifetch u_ifetch (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
         .req_valid_i(fetch_valid), .req_ready_o(fetch_ready),

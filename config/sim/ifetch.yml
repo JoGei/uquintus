@@ -6,3 +6,5 @@ tests:
   - directed
   - randomized
   - control
+  - streaming
+  - pipelined_flush

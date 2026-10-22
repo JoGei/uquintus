@@ -1,7 +1,8 @@
 `default_nettype none
 
-// One word transaction for IF. The core owns PMP; the requester supplies its
-// completed denial decision for the aligned containing word at acceptance.
+// Registered request, one granted OBI transaction, and two registered results.
+// A response may retire on the same edge as the following request is granted.
+// The core supplies the completed PMP denial decision at native acceptance.
 module uqu_ifetch (
     input  wire        clk_i,
     input  wire        rst_ni,
@@ -24,87 +25,125 @@ module uqu_ifetch (
     input  wire [31:0] imem_rdata_i,
     input  wire        imem_err_i
 );
-    localparam [2:0] ST_IDLE = 3'd0;
-    localparam [2:0] ST_PERMISSION = 3'd1;
-    localparam [2:0] ST_REQUEST = 3'd2;
-    localparam [2:0] ST_RESPONSE = 3'd3;
-    localparam [2:0] ST_RESULT = 3'd4;
+    reg request_valid_q;
+    reg request_presented_q;
+    reg request_armed_q;
+    reg request_killed_q;
+    reg [31:0] request_addr_q;
+    reg request_fault_q;
+    reg pending_q;
+    reg pending_killed_q;
+    reg [31:0] pending_addr_q;
+    reg [31:0] result_addr_q [0:1];
+    reg [31:0] result_data_q [0:1];
+    reg result_error_q [0:1];
+    reg result_head_q;
+    reg result_tail_q;
+    reg [1:0] result_count_q;
 
-    reg [2:0] state_q;
-    reg killed_q;
-    reg [31:0] addr_q;
-    reg [31:0] data_q;
-    reg error_q;
-    wire req_fire = req_valid_i && req_ready_o;
-    wire grant_fire = imem_req_o && imem_gnt_i;
     wire res_fire = res_valid_o && res_ready_i;
+    wire response = pending_q && imem_rvalid_i;
+    wire response_push = response && !pending_killed_q && !flush_i;
+    // Reserve room for the next non-backpressurable response before presenting
+    // its request. A presented request retains that reservation through grant.
+    wire [2:0] count_after_response = {1'b0,result_count_q} - {2'b00,res_fire} +
+                                    {2'b00,response_push};
+    wire response_room = count_after_response < 3'd2;
+    wire may_present = request_armed_q && !flush_i && response_room && (!pending_q || response);
+    wire grant_fire = imem_req_o && imem_gnt_i;
+    wire denied_done = request_valid_q && request_fault_q && !pending_q &&
+                       !flush_i && response_room;
+    wire request_done = grant_fire || denied_done;
+    wire req_fire = req_valid_i && req_ready_o;
+    // Preserve the original next-cycle completion for an idle denied request.
+    // Otherwise it queues behind earlier work, preserving response order.
+    wire denied_direct = req_fire && req_access_fault_i && !request_valid_q &&
+                         !pending_q && response_room;
+    wire push = response_push || denied_done || denied_direct;
+    wire [31:0] push_addr = response_push ? pending_addr_q :
+                           denied_done ? request_addr_q : {req_addr_i[31:2],2'b00};
+    wire push_error = !response_push || imem_err_i;
+    wire [2:0] count_after_push = {1'b0,result_count_q} - {2'b00,res_fire} + {2'b00,push};
+    wire pending_after = grant_fire || (pending_q && !response);
 
-    assign req_ready_o = rst_ni && !flush_i && (state_q == ST_IDLE);
-    assign busy_o = rst_ni && (state_q != ST_IDLE);
-    assign res_valid_o = rst_ni && !flush_i && (state_q == ST_RESULT);
-    assign res_addr_o = res_valid_o ? addr_q : 32'd0;
-    assign res_data_o = res_valid_o && !error_q ? data_q : 32'd0;
-    assign res_error_o = res_valid_o && error_q;
-
-    // Ordinary flush and permission changes cannot retract an OBI request.
-    // Reset alone may abandon it under the coordinated system-reset contract.
-    assign imem_req_o = rst_ni && (state_q == ST_REQUEST);
-    assign imem_addr_o = imem_req_o ? addr_q : 32'd0;
+    assign req_ready_o = rst_ni && !flush_i && (!request_valid_q || request_done);
+    assign busy_o = rst_ni && (request_valid_q || pending_q || (result_count_q != 0));
+    assign res_valid_o = rst_ni && !flush_i && (result_count_q != 0);
+    assign res_addr_o = res_valid_o ? result_addr_q[result_head_q] : 32'd0;
+    assign res_error_o = res_valid_o && result_error_q[result_head_q];
+    assign res_data_o = res_valid_o && !res_error_o ? result_data_q[result_head_q] : 32'd0;
+    // No response-data bypass. Only response validity participates in turnover.
+    // Flush may cancel private work, but never withdraw a presented request.
+    assign imem_req_o = rst_ni && request_valid_q && !request_fault_q &&
+                        (request_presented_q || may_present);
+    assign imem_addr_o = imem_req_o ? request_addr_q : 32'd0;
 
     always @(posedge clk_i) begin
         if (!rst_ni) begin
-            state_q <= ST_IDLE;
-            killed_q <= 1'b0;
+            request_valid_q <= 1'b0;
+            request_presented_q <= 1'b0;
+            request_armed_q <= 1'b0;
+            request_killed_q <= 1'b0;
+            pending_q <= 1'b0;
+            pending_killed_q <= 1'b0;
+            result_head_q <= 1'b0;
+            result_tail_q <= 1'b0;
+            result_count_q <= 2'd0;
         end else begin
-            if (flush_i && (state_q != ST_IDLE)) begin
-                killed_q <= 1'b1;
+            if (response) pending_q <= 1'b0;
+            if (flush_i && pending_q) pending_killed_q <= 1'b1;
+            if (grant_fire) begin
+                pending_q <= 1'b1;
+                pending_addr_q <= request_addr_q;
+                pending_killed_q <= request_killed_q || flush_i;
             end
-            case (state_q)
-                ST_IDLE: begin
-                    if (req_fire) begin
-                        addr_q <= {req_addr_i[31:2], 2'b00};
-                        killed_q <= 1'b0;
-                        if (req_access_fault_i) begin
-                            data_q <= 32'd0;
-                            error_q <= 1'b1;
-                            state_q <= ST_RESULT;
-                        end else if (request_permit_i) begin
-                            state_q <= ST_REQUEST;
-                        end else begin
-                            state_q <= ST_PERMISSION;
-                        end
-                    end
+
+            if (request_valid_q && !request_armed_q && request_permit_i)
+                request_armed_q <= 1'b1;
+            if (imem_req_o) request_presented_q <= 1'b1;
+            if (request_done) begin
+                request_valid_q <= 1'b0;
+                request_presented_q <= 1'b0;
+            end
+            // If this edge opens permission/capacity, the request becomes
+            // visible immediately afterwards. Preserve it even if the next
+            // cycle introduces a flush before another sampling edge.
+            if (request_valid_q && !request_done && !request_fault_q &&
+                (request_armed_q || request_permit_i) && !pending_after &&
+                (count_after_push < 3'd2)) request_presented_q <= 1'b1;
+            if (flush_i) begin
+                if (request_valid_q && request_presented_q && !grant_fire)
+                    request_killed_q <= 1'b1;
+                else begin
+                    request_valid_q <= 1'b0;
+                    request_presented_q <= 1'b0;
                 end
-                ST_PERMISSION: begin
-                    if (flush_i) begin
-                        state_q <= ST_IDLE;
-                    end else if (request_permit_i) begin
-                        state_q <= ST_REQUEST;
-                    end
+            end else if (req_fire) begin
+                request_valid_q <= !denied_direct;
+                request_addr_q <= {req_addr_i[31:2],2'b00};
+                request_fault_q <= req_access_fault_i;
+                request_armed_q <= request_permit_i;
+                request_killed_q <= 1'b0;
+                // In an idle engine the captured request is presented during
+                // the next cycle, even if that cycle introduces a flush.
+                request_presented_q <= !req_access_fault_i && request_permit_i &&
+                                       !pending_after && (count_after_push < 3'd2);
+            end
+
+            if (flush_i) begin
+                result_head_q <= 1'b0;
+                result_tail_q <= 1'b0;
+                result_count_q <= 2'd0;
+            end else begin
+                if (push) begin
+                    result_addr_q[result_tail_q] <= push_addr;
+                    result_data_q[result_tail_q] <= push_error ? 32'd0 : imem_rdata_i;
+                    result_error_q[result_tail_q] <= push_error;
+                    result_tail_q <= !result_tail_q;
                 end
-                ST_REQUEST: begin
-                    if (grant_fire) begin
-                        state_q <= ST_RESPONSE;
-                    end
-                end
-                ST_RESPONSE: begin
-                    if (imem_rvalid_i) begin
-                        if (killed_q || flush_i) begin
-                            state_q <= ST_IDLE;
-                        end else begin
-                            data_q <= imem_err_i ? 32'd0 : imem_rdata_i;
-                            error_q <= imem_err_i;
-                            state_q <= ST_RESULT;
-                        end
-                    end
-                end
-                ST_RESULT: begin
-                    if (flush_i || res_fire) begin
-                        state_q <= ST_IDLE;
-                    end
-                end
-                default: state_q <= ST_IDLE;
-            endcase
+                if (res_fire) result_head_q <= !result_head_q;
+                result_count_q <= count_after_push[1:0];
+            end
         end
     end
 endmodule

@@ -51,9 +51,13 @@ also preserves any buffered data and already outstanding completion.
 
 Fetch fills capacity while `ready_i` or `permit_i` is low. The sequential
 fetch pointer advances by four on native acceptance; PC advances by the original
-instruction length on delivery unless prediction selects a target. With one outstanding transaction and one writer,
-checking FIFO readiness at native acceptance reserves its eventual response
-capacity, as detailed in the buffer guide. No additional reservation queue exists.
+instruction length on delivery unless prediction selects a target. The engine
+reserves its own registered completion capacity before issuing bus requests and
+retains results when the FIFO is full. `MUA_IF_BUFFER_WORDS` selects FIFO slots;
+up to three additional accepted words may reside in the engine. There remains
+at most one granted transaction awaiting a response. With immediate grants,
+one-cycle responses and continuous delivery, the frontend sustains one word
+per cycle after startup; the FIFO retains its registered, no-empty-bypass contract.
 
 Reset clears control, samples boot PC and establishes inactive bus/output
 handshakes. FIFO and fetch payload storage remains unreset. Reset may abandon
@@ -112,6 +116,7 @@ IF neither owns PMP CSRs/checkers nor adds privilege signals to OBI.
 - `stream`: 256 known instructions, original/normalized bits, mixed lengths and
   crossing words, PC wraparound, capacity fill under stalls, delivery permission,
   randomized grants/response delays, exact ordering and no duplicate fetches.
+- `throughput`: 256 consecutive 32-bit instructions delivered without gaps under immediate grants and one-cycle responses.
 - `control`: private request permission, branch holds versus static prediction,
   stable presented requests despite holds, independent fetch/delivery permits,
   and misaligned target containment.

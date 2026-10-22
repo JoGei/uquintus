@@ -17,3 +17,4 @@ tests:
   - redirects
   - compressed
   - prediction
+  - throughput

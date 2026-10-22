@@ -34,13 +34,14 @@ checks. This fixture tests local denial without replacing that protection test.
 The Python scoreboard maintains independent word and reservation deques,
 sequential pointers, delayed memory responses and known instruction bytes. It
 compares instruction selection against the shared byte-window oracle, checks
-head/successor addresses, and asserts that buffered words plus the fetcher's
-busy transaction never exceed the configured capacity. Presented ungranted
+head/successor addresses, and checks bounded FIFO and independent engine
+completion storage. The engine reserves its own response capacity; FIFO depth
+does not include its private request and registered completions. Presented ungranted
 requests must retain their addresses across all control changes.
 
 - `stream`: 256 known native/mixed-length instructions across 32-bit address
   wraparound, randomized grants/response delays and downstream stalls, exact
-  capacity fill while stalled, request holds, halfword reuse, sequential fetch
+  FIFO capacity fill and bounded engine backpressure while stalled, request holds, halfword reuse, sequential fetch
   addresses and no duplicate word requests or instruction transfers.
 - `faults`: local PMP denial without OBI, errored first words, exactly one fault
   transfer followed by containment, and with C enabled, a low-half compressed

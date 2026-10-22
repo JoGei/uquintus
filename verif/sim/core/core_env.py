@@ -382,8 +382,18 @@ class CoreTest(uvm_test):
             getattr(d, bus+'_rvalid_i').value = 0
             getattr(d, bus+'_rdata_i').value = self.rng.getrandbits(32)
             getattr(d, bus+'_err_i').value = 1
-        await Timer(1, units='ns')
         grants, returns = {}, {}
+        # Responses are independent inputs. Settle them before observing a
+        # request: IF may turn over its single outstanding transaction here.
+        for bus, pending in self.pending.items():
+            response_enable=respond.get(bus) if isinstance(respond,dict) else respond
+            returning = rst and pending is not None and (pending[0] == 0 if response_enable is None else response_enable)
+            returns[bus] = returning
+            getattr(d, bus+'_rvalid_i').value = int(returning)
+            if returning:
+                getattr(d, bus+'_rdata_i').value = pending[1]
+                getattr(d, bus+'_err_i').value = pending[2]
+        await Timer(1, units='ns')
         for bus in self.pending:
             req = self.signal(bus+'_req_o')
             fields = ('we','addr','wdata','be') if bus == 'dmem' else ('addr',)
@@ -391,16 +401,8 @@ class CoreTest(uvm_test):
             if rst and self.held[bus] is not None:
                 assert req and payload == self.held[bus], f'{bus} request changed before grant'
             take = rst and req and (self.rng.randrange(3)!=0 if grant is None and self.random_wait else (1 if grant is None else grant))
-            pending = self.pending[bus]
-            response_enable=respond.get(bus) if isinstance(respond,dict) else respond
-            returning = rst and pending is not None and (pending[0] == 0 if response_enable is None else response_enable)
             grants[bus] = (take, payload)
-            returns[bus] = returning
             getattr(d, bus+'_gnt_i').value = int(take)
-            getattr(d, bus+'_rvalid_i').value = int(returning)
-            if returning:
-                getattr(d, bus+'_rdata_i').value = pending[1]
-                getattr(d, bus+'_err_i').value = pending[2]
             self.held[bus] = payload if rst and req and not take else None
         if self.coprocessor: self.coprocessor.drive(rst)
         await Timer(1, units='ns')

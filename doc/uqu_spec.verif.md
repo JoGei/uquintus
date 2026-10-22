@@ -294,6 +294,21 @@ discarded fault responses across all three compressed paths. Initial full-core
 retirement/trap programs are described in Section 2.4; the initial deterministic
 Spike/RVFI ELF adapter is defined in Section 2.8.
 
+The fetch-engine `streaming` regression shall require consecutive native
+acceptances, grants and registered results for 256 words under immediate grants,
+one-cycle responses and continuous readiness. The production IF `throughput`
+regression shall additionally require 256 consecutive 32-bit instruction
+transfers, including with C enabled. Pipelined randomized traffic shall cover
+PMP denials, bus errors and independent consumer/grant/response waits.
+`pipelined_flush` shall cover concurrent registered, outstanding and queued
+words, full completion storage, presented-request persistence, killed-response
+turnover into a new stream, denied private work and reset. Scoreboards shall
+check at most one granted transaction awaiting its response, ordered delivery
+and bounded storage. Memory agents shall drive existing responses before
+sampling requests so response/request turnover is modeled without an artificial
+bubble. Native/checked benchmark qualification shall retain exact timer and
+BPU-counter agreement after fetch-engine changes.
+
 The [pipeline-controller tests](../verif/sim/pipeline_ctrl/README.md) shall
 separately exercise stage movement, age-qualified fault barriers, older-safety
 memory permission, live IRQ masks/priority, serial barriers, accepted redirects

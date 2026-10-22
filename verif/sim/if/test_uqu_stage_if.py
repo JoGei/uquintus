@@ -24,8 +24,8 @@ class StreamTest(IfStageTest):
             values.append((value,size))
         expected = self.put(0xFFFFFFE0,values)
         await self.reset(0xFFFFFFE0)
-        await self.until(lambda o:self.credits==self.depth and not o['fetch_busy'])
-        assert self.accepted==[(0xFFFFFFE0+4*k)&MASK for k in range(self.depth)]
+        await self.fill()
+        assert self.accepted==[(0xFFFFFFE0+4*k)&MASK for k in range(len(self.accepted))]
         for _ in range(24):
             o = await self.cycle()
             assert not o['pmp_valid'] and o['valid']
@@ -37,6 +37,26 @@ class StreamTest(IfStageTest):
         else:
             raise AssertionError('stream did not finish')
         assert not self.faults and len(self.accepted)==len(set(self.accepted))
+        self.drop_objection()
+
+
+class ThroughputTest(IfStageTest):
+    async def run_phase(self):
+        self.raise_objection()
+        count = 256
+        self.put(0x1000, [(0x00000013,4)]*count)
+        self.response_latency = 1
+        await self.reset()
+        deliveries = []
+        for tick in range(count+64):
+            o = await self.cycle(grant=1,ready=1)
+            if o['valid']:
+                deliveries.append(tick)
+            if len(deliveries)==count:
+                break
+        assert len(deliveries)==count
+        assert all(b-a==1 for a,b in zip(deliveries,deliveries[1:])), deliveries
+        assert [pc for pc,*_ in self.delivered]==list(range(0x1000,0x1000+4*count,4))
         self.drop_objection()
 
 
@@ -66,7 +86,7 @@ class ControlTest(IfStageTest):
         await self.until(lambda o:bool(o['valid']),fetch_enable=0)
         # Delivery permission and downstream ready do not govern prefetch filling.
         before = len(self.accepted)
-        await self.until(lambda o:self.credits==self.depth and not o['fetch_busy'],permit=0)
+        await self.fill(permit=0)
         assert len(self.accepted)>before and not self.delivered
         for _ in range(8):
             o = await self.cycle(permit=0,ready=1)
@@ -79,7 +99,7 @@ class ControlTest(IfStageTest):
         if self.params['MUA_BRANCH_PREDICTOR']==0:
             assert len(self.accepted)==before
         else:
-            assert len(self.accepted)==before+self.depth
+            assert self.depth<=len(self.accepted)-before<=self.depth+3
         await self.until(lambda o:bool(o['valid']),ready=1)
         # Misaligned redirect is an integration diagnostic, not a new trap.
         bad = 0x6001 if self.c else 0x6002
@@ -97,7 +117,7 @@ class FaultsTest(IfStageTest):
         await self.reset()
         await self.until(lambda o:bool(o['valid']))
         await self.cycle(ready=1)
-        assert self.faults==[(0x1000,1,0x1000)] and not self.granted
+        assert self.faults==[(0x1000,1,0x1000)] and 0x1000 not in self.granted
         for _ in range(12):
             o = await self.cycle(ready=1)
             assert not o['valid'] and not o['pmp_valid']
@@ -278,3 +298,8 @@ async def compressed(dut):
 @cocotb.test(timeout_time=1000,timeout_unit='us')
 async def prediction(dut):
     await uvm_root().run_test('PredictionTest')
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def throughput(dut):
+    await uvm_root().run_test('ThroughputTest')

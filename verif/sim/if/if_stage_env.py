@@ -43,6 +43,7 @@ class IfStageTest(uvm_test):
         self.faults = []
         self.predictor = BpuModel(self.params)
         self.held_prediction = None
+        self.response_latency = None
 
     def memory(self,address):
         return self.words.get(address,0x00010001 if self.c else 0x00000013)
@@ -93,22 +94,23 @@ class IfStageTest(uvm_test):
         d.imem_rvalid_i.value = 0
         d.imem_rdata_i.value = self.rng.getrandbits(32)
         d.imem_err_i.value = 1
-        await Timer(1,units='ns')
-        query = int(d.pmp_valid_o.value),int(d.pmp_addr_o.value)
-        allowed = query[1] not in self.denied and not (self.deny_user and not i['priv_m'])
-        d.pmp_allow_i.value = int(allowed)
-        req,addr = int(d.imem_req_o.value),int(d.imem_addr_o.value)
-        if self.previous_bus and i['rst_n']:
-            assert (req,addr)==(1,self.previous_bus),'presented OBI request changed before grant'
-        gnt = int(bool(req and (self.rng.randrange(3)==0 if grant is None else grant)))
         returning = bool(self.response is not None and
                          (self.response[0]==0 if respond is None else respond))
-        d.imem_gnt_i.value = gnt
         d.imem_rvalid_i.value = int(returning)
         if returning:
             _,_,_,data,error = self.response
             d.imem_rdata_i.value = data
             d.imem_err_i.value = error
+        await Timer(1,units='ns')
+        req,addr = int(d.imem_req_o.value),int(d.imem_addr_o.value)
+        if self.previous_bus and i['rst_n']:
+            assert (req,addr)==(1,self.previous_bus),'presented OBI request changed before grant'
+        gnt = int(bool(req and (self.rng.randrange(3)==0 if grant is None else grant)))
+        d.imem_gnt_i.value = gnt
+        await Timer(1,units='ns')
+        query = int(d.pmp_valid_o.value),int(d.pmp_addr_o.value)
+        allowed = query[1] not in self.denied and not (self.deny_user and not i['priv_m'])
+        d.pmp_allow_i.value = int(allowed)
         await Timer(1,units='ns')
         names = ('valid','pc','instr','original_instr','compressed','next_pc','predicted_next_pc',
                  'exception_valid','exception_cause','exception_tval','misaligned',
@@ -143,10 +145,10 @@ class IfStageTest(uvm_test):
         if o['pmp_valid']:
             assert active and not misaligned and i['fetch_enable']
             assert self.params['MUA_BRANCH_PREDICTOR']!=0 or not i['branch_pending']
-            assert not o['fetch_busy'] and self.credits-int(pop)<self.depth
+            assert self.credits-int(pop)<self.depth+3
             assert o['pmp_addr']==self.fetch_addr and o['pmp_size']==2
             assert o['pmp_priv_m']==i['priv_m']
-            assert expected is None or not expected['exception_valid'],'fetch started past contained fault'
+            assert not o['exception_valid'],'fetch started past visible contained fault'
         else:
             assert not o['pmp_addr'] and not o['pmp_size'] and not o['pmp_priv_m']
         if not i['rst_n'] or invalidate:
@@ -155,8 +157,7 @@ class IfStageTest(uvm_test):
             self.complete.clear()
             self.credits = 0
             self.fault_hold = False
-            if not req:
-                self.bus_owners.clear()  # A private unpresented request is canceled.
+            self.bus_owners = deque(list(self.bus_owners)[:1] if req else [])
             if not i['rst_n']:
                 self.pc = i['boot_addr']
                 self.fetch_addr = self.pc&~3
@@ -174,8 +175,7 @@ class IfStageTest(uvm_test):
                 self.live.clear()
                 self.complete.clear()
                 self.credits = 0
-                if not req:
-                    self.bus_owners.clear()
+                self.bus_owners = deque(list(self.bus_owners)[:1] if req else [])
                 self.fetch_addr = predicted_pc&~3
             elif pop:
                 del self.live[self.pc&~3]
@@ -198,7 +198,7 @@ class IfStageTest(uvm_test):
                     self.bus_owners.append((self.epoch,address,self.memory(address),int(address in self.errors)))
                 else:
                     self.complete.add(address)
-        assert 0<=self.credits<=self.depth
+        assert 0<=self.credits<=self.depth+3
         if not i['rst_n']:
             self.response = None
         else:
@@ -215,7 +215,7 @@ class IfStageTest(uvm_test):
                 epoch,address,data,error = self.bus_owners.popleft()
                 assert addr==address and addr&3==0
                 self.granted.append(addr)
-                self.response = self.rng.randrange(8),epoch,address,data,error
+                self.response = (self.rng.randrange(8) if self.response_latency is None else self.response_latency-1),epoch,address,data,error
         self.previous_bus = addr if req and not gnt and i['rst_n'] else None
         if not i['rst_n'] or invalidate or transfer:
             self.held_prediction = None
@@ -228,6 +228,16 @@ class IfStageTest(uvm_test):
         d.clk_i.value = 1
         await Timer(1,units='ns')
         return o
+
+    async def fill(self, **changes):
+        last, stable = -1, 0
+        for _ in range(1024):
+            o = await self.cycle(**changes)
+            stable = stable+1 if len(self.accepted)==last else 0
+            last = len(self.accepted)
+            if self.credits>=self.depth and stable==32:
+                return o
+        raise AssertionError('prefetch did not reach bounded backpressure')
 
     async def reset(self,pc=0x1000):
         await self.cycle(rst_n=0,boot_addr=pc)

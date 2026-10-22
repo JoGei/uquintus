@@ -159,16 +159,17 @@ int main(int argc, char **argv) {
             dut->imem_rdata_i = dut->dmem_rdata_i = 0;
             dut->imem_err_i = dut->dmem_err_i = 1;
             eval();
+            bool returning[2] = {!reset && pending[0].valid && pending[0].delay == 0,
+                                 !reset && pending[1].valid && pending[1].delay == 0};
+            dut->imem_rvalid_i = returning[0]; dut->dmem_rvalid_i = returning[1];
+            if (returning[0]) { dut->imem_rdata_i = pending[0].data; dut->imem_err_i = 0; }
+            if (returning[1]) { dut->dmem_rdata_i = pending[1].data; dut->dmem_err_i = 0; }
+            eval();
             Request request[2] = {
                 {bool(!reset && dut->imem_req_o), false, dut->imem_addr_o, 0, 0, 0},
                 {bool(!reset && dut->dmem_req_o), bool(dut->dmem_we_o), dut->dmem_addr_o,
                  dut->dmem_wdata_o, dut->dmem_be_o, dut->dmem_pc_o}};
-            bool returning[2] = {!reset && pending[0].valid && pending[0].delay == 0,
-                                 !reset && pending[1].valid && pending[1].delay == 0};
             dut->imem_gnt_i = request[0].valid; dut->dmem_gnt_i = request[1].valid;
-            dut->imem_rvalid_i = returning[0]; dut->dmem_rvalid_i = returning[1];
-            if (returning[0]) { dut->imem_rdata_i = pending[0].data; dut->imem_err_i = 0; }
-            if (returning[1]) { dut->dmem_rdata_i = pending[1].data; dut->dmem_err_i = 0; }
             eval();
             if (!reset) {
                 if (dut->trap_o) throw std::runtime_error("unexpected trap at PC " + std::to_string(dut->trap_pc_o) +

@@ -1,8 +1,9 @@
 # Instruction-word fetch engine
 
 [uqu_ifetch.v](../../../src/uquintus/uqu_ifetch.v) is the IF-owned, single-word
-OBI transaction engine. It has private request/result storage, independent of
-the future prefetch buffer, [instruction aligner](../if_aligner/README.md) and
+OBI transaction engine. It has a private request register, one granted
+transaction, and two registered completion slots, independent of the
+fetched-word buffer, [instruction aligner](../if_aligner/README.md) and
 parent-owned IF/DE register.
 It implements no ISA decoding, PMP rules, CSR storage or redirect arbitration.
 
@@ -14,7 +15,7 @@ make test COMPONENT=ifetch_pmp CONFIG=rv32i_pmp
 ```
 
 Use `PYTHON=.venv/bin/python` for the repository environment. The
-[manifest](../../../config/sim/ifetch.yml) selects three cocotb/pyuvm suites.
+[manifest](../../../config/sim/ifetch.yml) selects five cocotb/pyuvm suites.
 The leaf has no hardware parameters. `ISA_C` and the compressed-decode strategy
 do not change its aligned 32-bit word interface.
 
@@ -24,7 +25,7 @@ do not change its aligned 32-bit word interface.
 | --- | --- |
 | `clk_i`, `rst_ni` | Single clock, active-low synchronous reset of control state only. |
 | `flush_i` | Discard current work/results; finish any already presented bus transaction. |
-| `req_valid_i`, `req_ready_o` | Accept one private word request on an active edge with both high. |
+| `req_valid_i`, `req_ready_o` | Accept one word request on an active edge with both high; may be ready while busy. |
 | `req_addr_i[31:0]` | Byte address of the containing fetch word; bits 1:0 are ignored. |
 | `req_access_fault_i` | Completed external protection-denial decision for that aligned four-byte word, sampled at request acceptance. |
 | `request_permit_i` | Permission to start new external work; accepted work may wait privately for it. |
@@ -33,7 +34,7 @@ do not change its aligned 32-bit word interface.
 | `res_addr_o[31:0]` | Captured aligned word address, qualified by result validity. |
 | `res_data_o[31:0]`, `res_error_o` | Registered word and combined protection/bus error; data is zero on error. Invalid results expose all-zero fields. |
 
-The **core owns one shared `uqu_pmp`**. The future IF parent queries its IF
+The **core owns one shared `uqu_pmp`**. The IF parent queries its IF
 port with `{req_addr_i[31:2],2'b00}`, size 2 (four bytes), execute permission and
 current fetch privilege. It supplies `!if_allow_o` as `req_access_fault_i`.
 The MEM parent independently queries the same checker for its LSU's actual
@@ -72,12 +73,28 @@ Grant may already be high when a request is presented.
 Every live response is captured at the active edge regardless of consumer
 readiness. Result validity follows in the next cycle; there is no combinational
 bus-response bypass. Address/data/error remain stable until consumption or
-flush. Error is sampled only with response valid. The single private result
-slot reserves response capacity: no replacement request is accepted while a
-transaction or retained result occupies it. There is a return-to-idle cycle
-before accepting replacement work; this baseline prioritizes simple control.
-Prefetch-buffer integration must account for this storage and outstanding work;
-`MUA_IF_BUFFER_WORDS` itself is not implemented by this leaf.
+flush. Error is sampled only with response valid. The engine reserves one of its two completion slots before presenting each
+request. It can accept the next native address while the previous request is
+granted, and grant that queued request on the same edge that the older response
+returns. There is at most one granted transaction awaiting its response; a
+response and replacement grant on one edge preserve that limit. Only response
+validity participates in turnover, never response data. This creates a control
+path from `imem_rvalid_i` to request presentation that integration timing must cover.
+
+With continuous input/output readiness, permission, immediate grants and
+one-cycle responses, requests, grants and registered results sustain one word
+per cycle after startup. Initial latency still includes request capture, bus
+response registration and result transfer. Slow memory reduces throughput;
+full completion storage applies backpressure before starting another bus request.
+No response relies on a future consumer-ready promise.
+
+Accepted work stays ordered, including PMP denials behind earlier transactions.
+An idle denied request still produces a registered result in the following
+cycle. Up to three accepted words can be retained across private request,
+outstanding transaction and completions; the two-slot response reservation
+prevents all physical storage roles being occupied simultaneously. This storage
+is separate from `MUA_IF_BUFFER_WORDS`, which configures the downstream FIFO.
+The engine holds completions if that FIFO fills.
 
 ## Flush and reset
 
@@ -90,8 +107,10 @@ Prefetch-buffer integration must account for this storage and outstanding work;
 | Retained completion | Suppress transfer and discard it. |
 
 Flush on the grant or response edge follows the same rules. Repeated flushes
-cannot release outstanding ownership early. New-target requests wait for
-`req_ready_o`; redirects and target selection belong to the IF/core controller.
+cannot release outstanding ownership early. New-target addresses may queue
+privately behind a killed transaction, but new
+bus work waits for its response to drain. Redirects and target selection belong
+to the IF/core controller.
 
 Reset clears transaction control, may withdraw a request, and does not wait
 for pre-reset bus work. Integration must prevent stale responses after reset
@@ -106,14 +125,25 @@ have no reset; validity prevents their use until initialized.
 - `randomized`: 512 transactions per seed with independent request addresses,
   data, protection decisions, grant/response delays and consumer backpressure.
 - `control`: flush at every phase and on grant/response edges, repeated killed
-  drains, blocked replacement requests, reset/recovery and long waits without
+  drains, replacement bus-work ordering, reset/recovery and long waits without
   timeout/retry. Common checks enforce stable presented requests/results and
   safe invalid outputs on every cycle.
+- `streaming`: 256 back-to-back words with an explicit one-word-per-cycle
+  acceptance/grant/result check, then 1,024 pipelined words with independent
+  grant/response/consumer waits, mixed PMP denials and bus errors. The scoreboard
+  checks ordering, data, bounded storage and at most one granted outstanding
+  transaction.
+- `pipelined_flush`: registered, outstanding and queued words active together;
+  pending/returning killed responses, held requests, full result storage, queued
+  denials, new-target turnover and reset. The control suite also checks that
+  permission release followed immediately by flush preserves a presented request.
 
 The [shared-PMP fixture](../ifetch_pmp/README.md) connects one real core-owned
 checker to both real engines. Standalone and fixture lint use Verilog-2005.
-Synthesis finds 67 storage bits, only four with synchronous reset; no latches,
-combinational bus-response-to-result path or flush-to-bus withdrawal path.
+Payload storage is unreset; only control is reset. The registered-result
+contract and presented-request persistence remain unchanged. Physical area and
+timing costs of the additional completion storage require fresh implementation
+measurements.
 The [word buffer](../if_buffer/README.md) and
 [prefetch fixture](../if_prefetch/README.md) add real fetch/buffer/aligner
 integration with capacity reservation, fault containment and redirect draining.

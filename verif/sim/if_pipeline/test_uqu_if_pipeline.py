@@ -50,18 +50,18 @@ class PipelineTest(uvm_test):
         d.imem_rvalid_i.value = 0
         d.imem_rdata_i.value = self.rng.getrandbits(32)
         d.imem_err_i.value = 1
-        await Timer(1,units='ns')
-        req,addr = int(d.imem_req_o.value),int(d.imem_addr_o.value)
-        if self.previous_bus and i['rst_n']:
-            assert (req,addr)==(1,self.previous_bus)
-        grant = req and self.rng.randrange(3)!=0
         returning = self.response is not None and self.response[0]==0
-        d.imem_gnt_i.value = int(grant)
         d.imem_rvalid_i.value = int(returning)
         if returning:
             _,data,error = self.response
             d.imem_rdata_i.value = data
             d.imem_err_i.value = error
+        await Timer(1,units='ns')
+        req,addr = int(d.imem_req_o.value),int(d.imem_addr_o.value)
+        if self.previous_bus and i['rst_n']:
+            assert (req,addr)==(1,self.previous_bus)
+        grant = req and self.rng.randrange(3)!=0
+        d.imem_gnt_i.value = int(grant)
         await Timer(1,units='ns')
         names = ('if_transfer','if_pc','if_instr','if_original','if_compressed','if_exception',
                  'slot_valid','slot_instr','slot_original','slot_compressed','valid','pc',
