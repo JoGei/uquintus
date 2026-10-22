@@ -11,7 +11,159 @@ unfinished and reject enabled elaboration.
 The core testbed includes verification-only RVFI instruction/CSR collectors and SV JSONL trace;
 see the [RVFI profile](verif/common/README.md) for coverage and remaining formal work.
 
-Implemented components:
+## Core structure
+
+Stage regions contain their local logic. The four blocks with thick outlines
+are pipeline registers owned by `uqu_core`, outside the stage modules. Each carries
+instruction identity, validity and the payload needed by subsequent stages.
+The shared region also belongs to the core; CSR storage belongs to WB.
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 16, "rankSpacing": 20, "padding": 10}, "themeVariables": {"fontSize": "14px"}}}%%
+flowchart TB
+    IMEM["External instruction memory"]
+    DMEM["External data memory"]
+
+    subgraph CORE["uqu_core — single issue, in order"]
+        direction TB
+        subgraph PIPELINE["Stage logic and pipeline boundaries"]
+            direction LR
+            subgraph IF["IF · fetch"]
+                direction TB
+                FETCH["Fetch engine<br/>Word FIFO · aligner"]
+                C_IF["Optional C expansion<br/>IF placement"]
+                FETCH ~~~ C_IF
+            end
+            IF_DE["IF / DE<br/>registers"]
+            subgraph DE["DE · decode"]
+                direction TB
+                DECODE["Native decoder<br/>Operand selection<br/>Branch / jump resolution"]
+                C_DE["Optional C handling<br/>Expand OR direct decode"]
+                ISSUE["Optional XIF<br/>Issue / registers"]
+                DECODE ~~~ C_DE ~~~ ISSUE
+            end
+            DE_EX["DE / EX<br/>registers"]
+            subgraph EX["EX · execute"]
+                direction TB
+                ALU["Integer ALU"]
+                ARITH["Shared add/sub slice<br/>ALU / MUL-DIV mux"]
+                MULDIV["Optional MUL / DIV<br/>Iterative slices"]
+                FPU["Optional FPU<br/>Zfinx · scalar FP32"]
+                ALU ~~~ ARITH ~~~ MULDIV ~~~ FPU
+            end
+            EX_MEM["EX / MEM<br/>registers"]
+            subgraph MEM["MEM · memory"]
+                LSU["LSU<br/>Registered load result"]
+            end
+            MEM_WB["MEM / WB<br/>registers"]
+            subgraph WB["WB · writeback"]
+                direction TB
+                COMMIT["Commit · GPR writes<br/>CSR storage / access<br/>Trap entry · MRET"]
+                RESULT["Optional XIF<br/>Commit / result<br/>Optional paired writes"]
+                COMMIT ~~~ RESULT
+            end
+
+            IF --> IF_DE --> DE --> DE_EX --> EX --> EX_MEM --> MEM --> MEM_WB --> WB
+        end
+
+        PIPELINE ~~~ SHARED
+
+        subgraph SHARED["Core-owned shared logic — connections omitted"]
+            direction LR
+            CTRL["Pipeline control<br/>Stalls · flushes · redirects · drains"]
+            GPR["GPR file · FF or latch<br/>RV32I: 32 / RV32E: 16 registers"]
+            HAZARD["Hazards / forwarding<br/>DE / EX operand resolution"]
+            PMP["Optional shared PMP<br/>Concurrent IF / MEM checks"]
+            XIF["Optional XIF lifetime control<br/>IDs · kills · drain readiness"]
+            CTRL ~~~ GPR ~~~ HAZARD ~~~ PMP ~~~ XIF
+        end
+    end
+
+    IMEM <-->|"imem · read-only OBI · IF"| CORE
+    CORE <-->|"dmem · read / write OBI · MEM"| DMEM
+
+    classDef base stroke:#3b82f6,stroke-width:2px
+    classDef optional stroke:#d97706,stroke-width:2px,stroke-dasharray:5 3
+    classDef boundary stroke:#8b5cf6,stroke-width:3px
+    classDef external stroke:#6b7280
+    class FETCH,DECODE,ALU,ARITH,LSU,COMMIT,CTRL,GPR,HAZARD base
+    class C_IF,C_DE,ISSUE,MULDIV,FPU,RESULT,PMP,XIF optional
+    class IF_DE,DE_EX,EX_MEM,MEM_WB boundary
+    class IMEM,DMEM external
+    style CORE stroke:#6b7280,stroke-width:2px
+    style SHARED stroke:#6b7280
+    style PIPELINE stroke-width:0px
+    style IF stroke:#6b7280
+    style DE stroke:#6b7280
+    style EX stroke:#6b7280
+    style MEM stroke:#6b7280
+    style WB stroke:#6b7280
+```
+
+**Legend:** Solid blue outlines = baseline logic, including configurable
+implementations; dashed orange outlines = optional hardware; thick violet
+outlines = pipeline storage. Fills and text colors follow the viewer's
+Mermaid theme.
+Solid arrows show stage transfers or the labeled external bus, not every
+internal connection. Instruction and data memories are outside the core.
+
+`ISA_C` enables exactly one of three paths: expansion in IF, expansion in DE,
+or direct compressed decoding in DE, selected by `MUA_C_IMPL` and
+`MUA_C_DECOMPRESS_STAGE`. The two orange C boxes show alternative locations.
+`ISA_M`, `ISA_PMP` and `XIF` enable their corresponding blocks. XIF connects an
+external coprocessor to DE issue/register and WB commit/result endpoints;
+`XIF_DUALWRITE` enables paired writes. The optional FPU path targets scalar FP32
+Zfinx (`ISA_ZFINX`).
+
+The GPR file remains core-owned while serving DE reads and WB writes. Its
+third read port is enabled for three-source XIF or Zfinx.
+`MUA_REGFILE_IMPL` selects FF/latch storage; `MUA_DE_OPERAND_RETENTION` selects
+optional retention inside the hazard unit. See the
+[configuration catalog](doc/uqu_spec.arch.md#2-isa-and-microarchitecture-configuration-parameters)
+for all selectors and supported combinations.
+
+### Forwarding paths
+
+All bypasses pass through the core-owned `uqu_hazard`; arrows below show logical
+producer-to-consumer routes. The solid chain shows normal pipeline progress.
+Orange dashed arrows are configurable bypasses, rather than additional stages.
+
+```mermaid
+%%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 25, "padding": 10}, "themeVariables": {"fontSize": "14px"}}}%%
+flowchart LR
+    DE["DE operands"] --> DE_EX["DE / EX"] --> EX["EX operands / result"]
+    EX --> EX_MEM["EX / MEM"] --> MEM["MEM result"] --> MEM_WB["MEM / WB"] --> WB["WB result"]
+
+    %% Bypass edges 6–10; keep linkStyle indices aligned with these routes.
+    EX -.->|"EX → DE"| DE
+    MEM -.->|"MEM → DE"| DE
+    WB -.->|"WB → DE"| DE
+    MEM -.->|"MEM → EX"| EX
+    WB -.->|"WB → EX"| EX
+
+    classDef stage stroke:#3b82f6,stroke-width:2px
+    classDef boundary stroke:#8b5cf6,stroke-width:3px
+    class DE,EX,MEM,WB stage
+    class DE_EX,EX_MEM,MEM_WB boundary
+    linkStyle 6,7,8,9,10 stroke:#d97706,stroke-width:2px
+```
+
+| Bypass | Enable |
+| --- | --- |
+| EX → DE | `MUA_FORWARDING && MUA_FORWARD_EX_TO_DE` |
+| MEM → DE | `MUA_FORWARDING && MUA_FORWARD_MEM_TO_DE` |
+| WB → DE | `MUA_FORWARDING` (no separate path selector) |
+| MEM → EX | `MUA_FORWARDING && MUA_FORWARD_MEM_TO_EX` |
+| WB → EX | `MUA_FORWARDING && MUA_FORWARD_WB_TO_EX` |
+
+All five routes default to enabled. A matching producer must have a valid,
+forwardable result; otherwise the consumer waits or uses a proven EX-bypass
+guarantee. Load data becomes forwardable after registering a successful response.
+Store data is resolved in EX. Paired XIF results forward only the primary
+destination; the secondary waits for register-file visibility. See the
+[hazard contract](doc/uqu_spec.arch.md#4-configurable-operand-forwarding).
+
+## Implemented components
 
 | Component | RTL | Verification guide |
 | --- | --- | --- |
