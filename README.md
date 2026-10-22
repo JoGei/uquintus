@@ -168,3 +168,7 @@ check the shared tooling without running an HDL simulator.
 
 The complete processor, architectural verification, formal checks, and ASIC
 implementation flow are not yet implemented.
+
+Optional [Spike differential checking](verif/reference/README.md) is available for
+ELF runs and riscv-tests through `REFERENCE=spike`. Supply the pinned external
+binary through `SPIKE`, `$RISCV/bin` or `PATH`.

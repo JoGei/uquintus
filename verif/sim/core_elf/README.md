@@ -95,3 +95,7 @@ Loader/protocol tooling tests also run without a compiler or simulator through
 the loader and execution environment; the
 [pinned riscv-tests adapter](../../sw/riscv_tests/README.md) uses this target for
 independent ELF runs with compatible simulator-build reuse.
+
+Select `REFERENCE=spike` to compare a successful native run with the pinned external
+ISA simulator. Discovery, supported events and retained first-mismatch evidence
+are defined in the [reference guide](../../reference/README.md).

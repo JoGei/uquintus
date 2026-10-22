@@ -75,3 +75,8 @@ The result file must contain exactly the selected tests, all passing.
 `make test-runner` runs Python tooling checks without an HDL simulator. Provide
 Python dependencies from `verif/requirements.txt` externally; no target installs
 dependencies or invokes containers.
+
+`spike.py` supplies the optional, binary-pinned external reference adapter for
+ELF runs. Select `REFERENCE=spike`; discovery uses `SPIKE`, `$RISCV/bin/spike`,
+then `PATH`. The [reference guide](../../reference/README.md) defines the initial
+comparison scope, unsupported-event policy and retained mismatch diagnostics.

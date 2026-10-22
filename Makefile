@@ -12,6 +12,8 @@ RISCV_CC ?=
 SW ?= smoke
 RISCV_TESTS ?= all
 RISCV_TESTS_ARCHIVE ?=
+REFERENCE ?= none
+SPIKE ?=
 
 .PHONY: help test sim lint sw riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests report test-report test-runner clean
 
@@ -23,6 +25,8 @@ help:
 	@echo 'make test COMPONENT=core_elf ELF=<path> [CONFIG=rv32i] [MAX_CYCLES=100000]'
 	@echo 'make riscv-tests-fetch [RISCV_TESTS_ARCHIVE=<offline-tar.gz>]'
 	@echo 'make riscv-tests [CONFIG=rv32i] [RISCV_TESTS=all|rv32ui-p-add,...]'
+	@echo 'Add REFERENCE=spike to ELF tests or riscv-tests for differential checking.'
+	@echo 'Spike discovery: SPIKE, then RISCV/bin/spike, then PATH; pinned build required.'
 	@echo 'Compiler discovery: RISCV_CC, then RISCV/bin, then PATH (GCC or Clang/LLD).'
 	@echo 'make test-runner  # Check shared component-runner helpers'
 	@echo 'make report       # Refresh build/report/index.html from existing artifacts'
@@ -35,7 +39,8 @@ test sim lint:
 	$(PYTHON) verif/sim/common/component_runner.py --action $(if $(filter lint,$@),lint,test) \
 		--component "$(COMPONENT)" --config "$(CONFIG)" --sim "$(SIM)" \
 		--bender "$(BENDER)" --seed "$(SEED)" --test "$(TEST)" --waves "$(WAVES)" \
-		$(if $(ELF),--elf "$(ELF)") --max-cycles "$(MAX_CYCLES)"
+		$(if $(ELF),--elf "$(ELF)") --max-cycles "$(MAX_CYCLES)" \
+		--reference "$(REFERENCE)" --spike "$(SPIKE)"
 
 sw:
 	$(PYTHON) verif/sim/common/software_build.py --config "$(CONFIG)" --program "$(SW)" --cc "$(RISCV_CC)"
@@ -49,7 +54,8 @@ riscv-tests-build:
 riscv-tests: riscv-tests-build
 riscv-tests riscv-tests-run:
 	$(PYTHON) verif/sim/common/riscv_tests.py run --config "$(CONFIG)" --seed "$(SEED)" \
-		--sim "$(SIM)" --bender "$(BENDER)" --max-cycles "$(MAX_CYCLES)" --waves "$(WAVES)"
+		--sim "$(SIM)" --bender "$(BENDER)" --max-cycles "$(MAX_CYCLES)" --waves "$(WAVES)" \
+		--reference "$(REFERENCE)" --spike "$(SPIKE)"
 
 test-runner:
 	$(PYTHON) -m unittest discover -s verif/sim/common/tests -v

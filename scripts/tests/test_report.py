@@ -103,6 +103,24 @@ class ReportTests(unittest.TestCase):
         (path / 'results.xml').write_text('<testsuites><testsuite><testcase name="wrong"/></testsuite></testsuites>')
         self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
 
+    def test_spike_evidence_is_preserved_and_required_for_differential_pass(self):
+        path = self.run_record(component='core_elf')
+        metadata = json.loads((path / 'run.json').read_text())
+        metadata['reference'] = dict(profile='test', executable_sha256='a'*64)
+        metadata['context'] = dict(reference='spike:' + 'a'*64)
+        (path / 'run.json').write_text(json.dumps(metadata))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        (path / 'spike.json').write_text(json.dumps(dict(status='failed', detail='first mismatch')))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        (path / 'spike.json').write_text(json.dumps(dict(status='passed', compared_instructions=12,
+            profile='test', tool=metadata['reference'])))
+        (path / 'spike.log').write_text('reference observation')
+        record = report.collect(self.build, self.root)['records'][0]
+        self.assertEqual(record['status'], 'passed')
+        self.assertEqual(record['tools']['reference']['profile'], 'test')
+        self.assertTrue(any(a['path'] == 'spike.log' for a in record['artifacts']))
+        self.assertIn('Spike aaaaaaaa', report.run_table([record]))
+
     def test_malformed_records_are_reported_as_collection_issues(self):
         path = self.run_record()
         (path / 'run.json').write_text('{incomplete')

@@ -19,7 +19,8 @@ def discover_compiler(explicit=None, environ=None):
     if selected:
         candidates = [selected]
     else:
-        names = ['riscv32-unknown-elf-gcc', 'riscv64-unknown-elf-gcc', 'clang']
+        names = ['riscv32-unknown-elf-gcc', 'riscv64-unknown-elf-gcc',
+                 'riscv-none-elf-gcc', 'clang']
         candidates = []
         if environment.get('RISCV'):
             directory = Path(environment['RISCV']) / 'bin'
@@ -32,7 +33,7 @@ def discover_compiler(explicit=None, environ=None):
             # toolchain resources even when the executable is a symlink.
             return str(Path(executable).absolute())
     raise ValueError('RISC-V compiler not found; set RISCV_CC, provide $RISCV/bin, '
-                     'or put riscv32/64-unknown-elf-gcc or Clang/LLD on PATH')
+                     'or put riscv32/64-unknown-elf-gcc, riscv-none-elf-gcc or Clang/LLD on PATH')
 
 
 def identify_compiler(executable, config):

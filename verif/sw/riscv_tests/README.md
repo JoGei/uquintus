@@ -127,3 +127,7 @@ distinguishable.
 
 This suite complements component and pipeline/error/reset tests. Spike and
 architectural certification tests remain separate goals.
+
+Add `REFERENCE=spike` to `make riscv-tests` or `make riscv-tests-run` for independent
+reference comparison of each ELF. See the [reference guide](../../reference/README.md)
+for the qualified binary, discovery and initial comparison restrictions.

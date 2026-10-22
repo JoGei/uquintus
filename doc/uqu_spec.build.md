@@ -87,7 +87,7 @@ selection, output paths and simulator-build reuse.
 Both native software and instruction-suite builds shall discover an externally
 supplied compiler through explicit `RISCV_CC`, then the installation root
 `$RISCV/bin`, then `PATH`. Automatic discovery shall support RV32/RV64-prefixed
-bare-metal GCC and Clang with an explicit RISC-V target and external LLD. Derive
+bare-metal GCC, `riscv-none-elf-gcc`, and Clang with an explicit RISC-V target and external LLD. Derive
 ISA/ABI options from hardware YAML and probe that the compiler actually targets
 RV32. Invalid explicit tools or unsupported targets shall fail clearly.
 
@@ -96,6 +96,12 @@ from predefined macros, complete version banner, effective target, ISA/ABI and
 exact command. Build and execution artifacts shall preserve that identity and
 the test-suite revision for the shared report. No compiler installation,
 dependency build or container invocation shall become implicit in Make.
+
+`REFERENCE=spike` shall optionally compare native ELF and instruction-suite runs
+against the qualified external binary, discovered through `SPIKE`, `$RISCV/bin`
+or `PATH`. The [reference contract](uqu_spec.verif.md#28-initial-spike-differential-elf-checking)
+defines pinning, supported events and retained JUnit/report diagnostics. The
+default `REFERENCE=none` preserves native-only checking.
 
 ## 2. Shared core configuration and separate build targets
 

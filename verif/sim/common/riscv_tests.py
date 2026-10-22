@@ -214,6 +214,8 @@ def main():
     parser.add_argument('--bender', default='bender')
     parser.add_argument('--max-cycles', type=int, default=100000)
     parser.add_argument('--waves', type=int, choices=(0, 1), default=0)
+    parser.add_argument('--reference', choices=('none', 'spike'), default='none')
+    parser.add_argument('--spike', default='')
     args = parser.parse_args()
     if args.action == 'fetch':
         fetch(args.archive)
@@ -231,7 +233,8 @@ def main():
         if suite.get('upstream') != load_lock():
             raise ValueError('built suite pin differs from lock.json; rebuild')
         run_suite(manifest, config_path, config, root=ROOT, seed=args.seed,
-                  simulator=args.sim, bender=args.bender, max_cycles=args.max_cycles, waves=args.waves)
+                  simulator=args.sim, bender=args.bender, max_cycles=args.max_cycles, waves=args.waves,
+                  reference=args.reference, spike=args.spike)
 
 
 if __name__ == '__main__':

@@ -33,10 +33,14 @@ def validate_suite(path, config):
 
 
 def run_suite(path, config_path, config, *, root, seed=1, simulator='verilator',
-              bender='bender', max_cycles=100000, waves=0):
+              bender='bender', max_cycles=100000, waves=0, reference='none', spike=''):
     if max_cycles <= 0:
         raise ValueError('suite max_cycles must be positive')
     suite = validate_suite(path, config)
+    reference_info = None
+    if reference == 'spike':
+        from spike import discover_spike, identify_spike
+        reference_info = identify_spike(discover_spike(spike))
     directory = root / 'build' / f'uquintus-{config_path.stem}' / simulator / 'riscv-tests' / (
         f'suite-seed{seed}-{uuid.uuid4().hex[:12]}')
     directory.mkdir(parents=True)
@@ -57,6 +61,9 @@ def run_suite(path, config_path, config, *, root, seed=1, simulator='verilator',
               'required_tests': [p['name'] for p in suite['programs']],
               'excluded_tests': suite['excluded'],
               'metrics': [], 'runs': []}
+    if reference_info:
+        record['reference'] = reference_info
+        record['context']['reference'] = 'spike:' + reference_info['executable_sha256']
     failures, shared_build = [], {}
 
     def save():
@@ -75,7 +82,8 @@ def run_suite(path, config_path, config, *, root, seed=1, simulator='verilator',
                     '--component', 'core_elf', '--config', str(config_path),
                     '--test', 'execute', '--elf', program['path'], '--label', program['name'],
                     '--seed', str(seed), '--sim', simulator, '--bender', bender,
-                    '--max-cycles', str(max_cycles), '--waves', str(waves)], shared_build=shared_build)
+                    '--max-cycles', str(max_cycles), '--waves', str(waves),
+                    '--reference', reference, '--spike', spike], shared_build=shared_build)
                 record['runs'].append({'name': program['name'], 'run': str(output.relative_to(root)), 'status': 'passed'})
             except Exception as error:
                 failures.append(program['name'])

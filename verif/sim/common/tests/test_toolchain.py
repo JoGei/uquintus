@@ -36,6 +36,15 @@ class ToolchainTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'compiler not found'):
                 discover_compiler('missing-explicit-compiler', env)
 
+    def test_xpack_compiler_name_in_riscv_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary) / 'bin'
+            directory.mkdir()
+            compiler = directory / 'riscv-none-elf-gcc'
+            compiler.write_text('#!/bin/sh\nexit 0\n')
+            compiler.chmod(0o755)
+            self.assertEqual(discover_compiler(environ=dict(RISCV=temporary, PATH='')), str(compiler))
+
     def test_clang_and_gcc_versions_come_from_macros_and_target_probe(self):
         config = dict(ISA_E=0, ISA_M=0, ISA_C=0, ISA_ZIFENCEI=0)
         for family, macros, banner, expected in (

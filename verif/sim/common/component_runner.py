@@ -74,6 +74,21 @@ def command_output(command):
     return subprocess.check_output(command, cwd=ROOT, text=True).strip()
 
 
+def check_reference(run_dir, config, reference_info):
+    from spike import check_run
+    try:
+        return check_run(run_dir, config, reference_info)
+    except BaseException as error:
+        # A successful HDL run alone must not appear as a passing differential
+        # run in JUnit or the aggregate report.
+        results = run_dir / 'results.xml'
+        tree = ET.parse(results)
+        case = tree.find('.//testcase')
+        ET.SubElement(case, 'failure', type='SpikeDifferential', message=str(error)).text = str(error)
+        tree.write(results, encoding='unicode', xml_declaration=True)
+        raise
+
+
 def bender_include_dirs(source_tree, root=ROOT):
     """Collect selected Bender source-group include paths in declaration order."""
     directories = []
@@ -120,6 +135,8 @@ def main(argv=None, shared_build=None):
     parser.add_argument("--elf", help="statically linked RV32 ELF for a requires_elf component")
     parser.add_argument('--label', help='scenario label for an ELF suite member')
     parser.add_argument("--max-cycles", type=int, default=100000, help="ELF execution watchdog")
+    parser.add_argument('--reference', choices=('none', 'spike'), default='none')
+    parser.add_argument('--spike', default='', help='external Spike executable; otherwise SPIKE, RISCV/bin, PATH')
     args = parser.parse_args(argv)
     component = load_component(args.component)
     if args.test != "all" and args.test not in component["tests"]:
@@ -149,6 +166,12 @@ def main(argv=None, shared_build=None):
         image.tohost  # Validate completion storage before compiling the simulator.
     elif args.elf:
         raise ValueError('ELF is only supported for tests of a requires_elf component')
+    reference_info = None
+    if args.reference == 'spike':
+        if elf_path is None:
+            raise ValueError('Spike comparison requires ELF execution')
+        from spike import discover_spike, identify_spike
+        reference_info = identify_spike(discover_spike(args.spike))
     run_dir = ROOT / "build" / f"uquintus-{config_path.stem}" / args.sim / args.component / (
         f"{args.action}-{args.test}-seed{args.seed}-{uuid.uuid4().hex[:12]}")
     run_dir.mkdir(parents=True)
@@ -213,6 +236,12 @@ def main(argv=None, shared_build=None):
                     if software.get('upstream'):
                         metadata['context']['suite_revision'] = software['upstream']['revision']
         extra_env.update(UQU_ELF=str(program), UQU_MAX_CYCLES=str(args.max_cycles))
+    if reference_info:
+        metadata['reference'] = reference_info
+        metadata['input_scope'] = 'HDL, headers, recorded software sources and reference adapter/pin'
+        metadata.setdefault('context', {})['reference'] = 'spike:' + reference_info['executable_sha256']
+        for path in (ROOT / 'verif/sim/common/spike.py', ROOT / 'verif/reference/spike.lock.json'):
+            metadata['source_sha256'][str(path.relative_to(ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"Artifacts: {run_dir}", flush=True)
     try:
@@ -262,7 +291,10 @@ def main(argv=None, shared_build=None):
                 extra_env=extra_env,
                 log_file=run_dir / "simulation.log",
             )
-            metadata["tests_passed"] = check_results(results, selected_tests)
+            native_passed = check_results(results, selected_tests)
+            if reference_info:
+                metadata['differential'] = check_reference(run_dir, config, reference_info)
+            metadata['tests_passed'] = native_passed
         metadata["status"] = "passed"
     except BaseException as error:
         metadata["status"] = "failed"

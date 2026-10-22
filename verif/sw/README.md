@@ -12,6 +12,7 @@ Programs:
 | `SW` | Purpose |
 | --- | --- |
 | `smoke` | Initialized data, zeroed BSS, constants read through the data port from the executable segment, dependent loops, calls/stack, FENCE, and M arithmetic when selected. |
+| `reference_csr` | Deterministic CSR register/immediate write, set, clear and read forms, plus hart ID 5; compatible with the initial Spike reference profile. |
 | `fail` | Deliberately return 7 to exercise software failure reporting. |
 | `hang` | Deliberately loop forever to exercise the testbench watchdog. |
 

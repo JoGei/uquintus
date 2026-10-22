@@ -91,7 +91,8 @@ order values after reset. The collector shall contain no simulation I/O or
 environment constraints; simulation formatting/file writing stays in its own
 SV module. Collector tool-compatibility checks shall not be described as core
 formal proofs. Formal core signal binding, RVFI_BUS, complete
-instruction proofs and the pinned Spike adapter remain follow-ups.
+instruction proofs remain follow-ups. The initial pinned Spike adapter is
+defined in Section 2.8.
 
 ### 1.2. Native CSR observation channels
 
@@ -158,8 +159,10 @@ independent checks. Custom operations require an explicit behavioral model or
 checking contract, with coverage recorded separately.
 
 [Spike](https://github.com/riscv-software-src/riscv-isa-sim) shall be the
-simulation reference model. The Spike revision and comparison adapter remain TBD;
-the verification configuration shall pin the selected revision for reproducibility.
+simulation reference model. The initial adapter and exact external binary pin
+are defined in Section 2.8. Its source revision is unknown and shall not be
+inferred from its development-version banner. Future source-built references
+shall pin the source revision and build identity for reproducibility.
 
 Starting with the first implementation milestone, simulation shall include
 randomized memory timing in addition to directed tests and architectural
@@ -225,7 +228,8 @@ See the [shared simulation guide](../verif/sim/common/README.md) for invocation
 and manifests, and the [register-file](../verif/sim/gpregfile/README.md) and
 [arithmetic](../verif/sim/arith/README.md) guides for test scope. The
 [core guide](../verif/sim/core/README.md) describes native RVFI integration;
-Spike/formal integration and other simulator backends remain open.
+Initial Spike comparison is defined in Section 2.8; formal integration and other
+simulator backends remain open.
 
 ### 2.2. Independently selectable component regressions
 
@@ -278,8 +282,8 @@ PC+2 versus PC+4 links. See the
 [IF/DE parent fixture](../verif/sim/if_pipeline/README.md) add real bus fetching,
 word-boundary stitching, capacity reservation, accepted branch redirects and
 discarded fault responses across all three compressed paths. Initial full-core
-retirement/trap programs are described in Section 2.4; Spike/RVFI integration
-remains separate work.
+retirement/trap programs are described in Section 2.4; the initial deterministic
+Spike/RVFI ELF adapter is defined in Section 2.8.
 
 The [pipeline-controller tests](../verif/sim/pipeline_ctrl/README.md) shall
 separately exercise stage movement, age-qualified fault barriers, older-safety
@@ -378,9 +382,10 @@ until implemented.
 
 The interpreter consumes the RVFI testbed's retirement records and independently
 checks operands, memory lanes, fault reporting and instruction sequence. It is
-not the selected Spike reference. Spike comparison,
-riscv-formal core binding/proofs, broader software coverage and configuration CI
-remain required follow-ups. Passing the initial native programs shall not be reported as
+not the selected Spike reference. Section 2.8 adds an initial deterministic Spike
+comparison; broader reference coverage, riscv-formal core binding/proofs,
+software coverage and configuration CI remain required follow-ups.
+Passing the initial native programs shall not be reported as
 completion of the first milestone's acceptance criteria.
 
 ### 2.5. Formal RVFI integration goal
@@ -432,8 +437,8 @@ in a formal-verification claim.
 
 ### 2.6. ELF software execution
 
-**Status:** Initial native ELF execution implemented; external suites and Spike
-comparison remain follow-ups
+**Status:** Initial native ELF execution implemented; riscv-tests and deterministic
+Spike comparison added in Sections 2.7 and 2.8
 
 A reusable ELF execution environment shall load statically linked little-endian
 RISC-V ELF32 `PT_LOAD` segments and zero their memory tails, including BSS, into
@@ -463,13 +468,13 @@ and software-initialization contracts are defined in the execution guide.
 Verify initialized data, BSS, shared memory visibility, stack/calls and explicit
 failure/timeout fixtures before integrating external instruction suites.
 The initial `riscv-tests` adapter is defined in Section 2.7. Architectural tests
-and Spike comparison remain follow-ups; ELF execution alone does not establish architectural compliance or
+and broader Spike comparison remain follow-ups; ELF execution alone does not establish architectural compliance or
 complete the first milestone's verification acceptance criteria.
 
 ### 2.7. Pinned riscv-tests instruction regression
 
-**Status:** Initial RV32I/M/C adapter implemented; architectural certification
-and Spike comparison remain separate work
+**Status:** Initial RV32I/M/C adapter implemented; optional Spike comparison in
+Section 2.8; architectural certification remains separate work
 
 Consume unchanged instruction bodies and scalar macros from a checksum-pinned
 `riscv-tests` archive without repository submodules. The
@@ -500,6 +505,41 @@ must succeed for the selected cohort to pass. Passing this adapted instruction
 suite does not replace pipeline/error/reset regressions, Spike comparison or
 architectural certification tests.
 
+### 2.8. Initial Spike differential ELF checking
+
+`REFERENCE=spike` shall add external reference checking to ELF tests and
+riscv-tests suites, preserving the native Python oracle and randomized OBI
+timing. Discovery shall use explicit `SPIKE`, then `$RISCV/bin/spike`, then
+`PATH`. No dependency installation is implied. The exact qualified executable
+hash, banner and adapter profile shall be pinned in
+[`verif/reference/spike.lock.json`](../verif/reference/spike.lock.json).
+Record source revision as unknown when unavailable, plus binary identity,
+ISA/privilege configuration, command and memory settings in each run.
+
+The initial adapter shall compare original instruction/PC/next-PC, privilege,
+GPR destinations/results and consumed source operands, byte-lane memory effects
+and explicitly supported deterministic CSR channels. Spike store observations
+shall update an independent byte image for load-response comparison. Explicit
+CSR writes shall match Spike effects; read values/masks shall match prior
+deterministic state. Bootstrap removal shall validate a fixed known prefix,
+never search for a matching trace position. One lookahead instruction shall
+check the final next PC. Missing/extra commits and unknown log formats fail.
+
+The [reference guide](../verif/reference/README.md) defines the initial native
+64 KiB RAM, I/E/M/C, M or M/U and deterministic CSR profile. Traps, interrupts,
+counter/other implementation-dependent CSR accesses, PMP, host services and
+unsupported features shall fail explicitly. Full trap/interrupt synchronization,
+CSR/WARL coverage and cycle-sensitive read reconciliation remain required
+follow-ups; this initial adapter does not satisfy their broader acceptance scope.
+
+Keep raw reference/process logs, ELF/RVFI evidence and a JSON summary with the
+first mismatch index/field and both observations. A mismatch shall fail JUnit,
+the run and its containing suite; later suite cases shall still run. Reporting
+shall distinguish reference binary identities and checked/unchecked runs, link
+retained evidence, and reject passed metadata with absent or failed reference
+evidence. Tooling tests shall deliberately corrupt observations and exercise
+unsupported events, log formats and process timeout.
+
 ## 3. Supported-configuration CI coverage
 
 **Status:** CI requirement agreed; detailed build flow TBD
@@ -521,7 +561,8 @@ management, CI execution environment, and result artifacts remain TBD.
 
 ## 4. Verification follow-ups
 
-Pin Spike, RVFI/riscv-formal, tools, solvers, and any library reference models.
+Maintain the Spike binary pin and extend its initial profile; pin its source
+revision when available, plus RVFI/riscv-formal, tools, solvers and library models.
 Define the first supported configuration matrix, tests, formal assumptions and
 proof scope/depth, coverage, seeds, CI environment, and result artifacts.
 Extend the shared component runner and pinned cocotb/pyuvm environment in
@@ -555,7 +596,7 @@ later decisions determine the active contract.
 | D-070 | Use RVFI as the verification observation contract; do not require RVVI. | Connect tracing and open-source `riscv-formal` checks through a shared observation contract; define the required profile separately. | Agreed; profile TBD |
 | D-071 | Require simulation and formal checks with `riscv-formal`, starting with RV32I. | Establish both execution-based testing and formal instruction checks as verification requirements, with explicit scope and assumptions. | Agreed; detailed coverage TBD |
 | D-072 | Require simulation comparison of standard-instruction retirement and trap outcomes against an independent software RISC-V reference model. | Check architectural execution independently of pipeline implementation; configure the model and adapter separately. | Agreed; Spike selected in D-073 |
-| D-073 | Use Spike as the simulation reference model. | Provide an independent executable ISA reference for architectural comparison. | Agreed; pinned revision and adapter TBD |
+| D-073 | Use Spike as the simulation reference model. | Provide an independent executable ISA reference for architectural comparison. | Initial binary-pinned adapter in D-297; broader comparison remains open |
 | D-120 | Require CI to elaborate and synthesize every explicitly supported configuration; define the build flow before implementing this requirement. | Check supported configurations as the design grows while keeping deeper functional-verification coverage explicit. | Agreed; build tools selected by D-121, detailed flow and CI implementation TBD |
 | D-218 | Require randomized OBI grant/response timing tests from the first milestone, alongside directed tests and Spike comparison; exercise errors, redirects, and reset with pending transactions, and accept/report explicit random seeds. | Exercise variable-latency memory interactions and make randomized failures reproducible. | Agreed; testbench implementation deferred |
 | D-254 | Propose cocotb for Python-to-simulator interaction and pyuvm for reusable verification environments, retaining Verilator as the default simulator and the existing SV trace/RVFI and formal contracts. | Support Python verification with a reusable UVM structure while preserving the existing build and observation boundaries. | Proposal finalized by D-256; runner and versions remain TBD |
@@ -563,9 +604,10 @@ later decisions determine the active contract.
 | D-256 | Use cocotb and pyuvm project-wide for component, subsystem, and full-core simulation testbenches, including simple leaf tests; allow lightweight tests without unnecessary UVM component hierarchies. | Keep one shared testbench structure while scaling verification complexity to the DUT. | Agreed; finalizes D-254, with runner and compatible versions TBD |
 | D-257 | Place component simulation tests in `verif/sim/<component>/` and full-core tests in `verif/sim/core/`, initially using `test_<module>.py`; keep local environments and HDL wrappers beside their tests and shared utilities in `verif/common/`. | Make tests easy to locate and run independently while growing their structure only as needed. | Agreed; simulation-specific shared helper/wrapper placement refined by D-259 |
 | D-259 | Put shared component-testing Make helpers, simulation utilities, and reusable HDL wrappers in `verif/sim/common/`; use `config/sim/<component>.yml` for DUT/test metadata and shared configuration helpers rather than separate component runner scripts. | Make invocation responsibilities explicit and reuse the flow as components are added. | Agreed; utilities shared with formal verification may remain in `verif/common/` |
-| D-290 | Add a verification-only single-channel RV32 RVFI collector, simulation core wrapper and separate SV JSONL writer; preserve actual consumed operands and raw memory responses, with explicit fault/handler/reset semantics. | Establish architectural observations without changing core RTL/ports or hiding forwarding errors; reuse the collector for later formal binding. | Implemented; Section 1.1; CSR channels added under D-292; formal core binding/proofs and Spike adapter remain unfinished |
+| D-290 | Add a verification-only single-channel RV32 RVFI collector, simulation core wrapper and separate SV JSONL writer; preserve actual consumed operands and raw memory responses, with explicit fault/handler/reset semantics. | Establish architectural observations without changing core RTL/ports or hiding forwarding errors; reuse the collector for later formal binding. | Implemented; Section 1.1; CSR channels added under D-292; formal core binding/proofs remain deferred; initial Spike adapter in D-297 |
 | D-291 | Defer formal core binding and proof execution until a working open-source formal toolchain and configuration are selected; retain the planned riscv-formal direction and current RVFI simulation checks. | Avoid implementing a tool-specific formal harness before selecting its actual frontend, orchestration and solver; distinguish simulation/structural checks from proofs. | Deferred pending toolchain selection; qualifies implementation timing under D-071 |
 | D-292 | Add native per-CSR RVFI channels with actual pre-/post-state, registered event alignment, 64-bit counter aliases, implicit trap/MRET updates and sparse JSONL diagnostics checked against the CSR model. | Observe CSR behavior without duplicating WARL/locking logic or changing processor RTL; preserve the formal deferral under D-291. | Implemented; Section 1.2; native simulation coverage and structural checks; formal binding/proofs remain deferred |
 | D-293 | Make a reusable RVFI formal integration a verification goal: shared passive collectors, a formal-compatible core wrapper, symbolic OBI environment, RVFI_BUS observations and documented riscv-formal checker configuration. | Reuse execution observations across simulation and formal verification while checking their connection to actual core and bus behavior and stating the demonstrated proof scope. | Agreed goal; Section 2.5; implementation and proof execution remain deferred under D-291 |
-| D-294 | Add reusable ELF32 software execution with shared instruction/data RAM, PT_LOAD zero-fill, bare-metal startup/linker files, retired-store tohost completion, configurable watchdog and preserved ELF/RVFI diagnostics. | Establish a compiler-built software execution foundation reusable by later ISA suites without adding test-completion ports to the processor. | Implemented initial native environment; Section 2.6; riscv-tests added under D-296; architectural tests and Spike comparison remain follow-ups |
-| D-296 | Integrate checksum/commit-pinned riscv-tests without submodules, using adapted bare-metal instruction tests, explicit ISA/misalignment exclusions, independent ELF runs, compatible simulator-build reuse and compiler family/version/target discovery from RISCV_CC, RISCV or PATH. | Add reproducible external instruction coverage while preserving the chosen core behavior, externally supplied tools and honest cross-configuration reporting. | Initial RV32I/M/C adapter implemented; Section 2.7; build contract in build Section 1.2; other ISA/privileged families, architectural certification and Spike remain separate |
+| D-294 | Add reusable ELF32 software execution with shared instruction/data RAM, PT_LOAD zero-fill, bare-metal startup/linker files, retired-store tohost completion, configurable watchdog and preserved ELF/RVFI diagnostics. | Establish a compiler-built software execution foundation reusable by later ISA suites without adding test-completion ports to the processor. | Implemented initial native environment; Section 2.6; riscv-tests added under D-296; architectural tests and broader Spike coverage remain follow-ups; initial adapter in D-297 |
+| D-296 | Integrate checksum/commit-pinned riscv-tests without submodules, using adapted bare-metal instruction tests, explicit ISA/misalignment exclusions, independent ELF runs, compatible simulator-build reuse and compiler family/version/target discovery from RISCV_CC, RISCV or PATH. | Add reproducible external instruction coverage while preserving the chosen core behavior, externally supplied tools and honest cross-configuration reporting. | Initial RV32I/M/C adapter implemented; Section 2.7; build contract in build Section 1.2; initial Spike checking in D-297; other ISA/privileged families and architectural certification remain separate |
+| D-297 | Add optional external Spike differential checking for native ELF/riscv-tests runs, with an exact qualified binary pin, strict bounded commit-log parsing, original instruction/PC/GPR/source/memory checks, deterministic CSR checks and retained first-mismatch/JUnit/report evidence. | Add the selected independent ISA reference without silently ignoring unsupported traps, interrupts, counters or implementation-dependent state; preserve external tools and native timing/error checks. | Initial profile implemented; Section 2.8; full CSR/trap/interrupt coverage and source-revision pin remain follow-ups |

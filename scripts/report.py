@@ -41,7 +41,8 @@ INPUT_LABELS = {
 }
 FILES = ('run.json', 'build.json', 'report.json', 'results.xml', 'execution.json',
          'config.yml', 'component.yml', 'selectors.json', 'lint.log',
-         'simulation.log', 'build.log', 'program.map', 'software-build.json')
+         'simulation.log', 'build.log', 'program.map', 'software-build.json',
+         'spike.json', 'spike.log', 'spike-process.log')
 
 
 def digest(value):
@@ -196,7 +197,7 @@ def normalize(path, build, root, hashes):
         'time_basis': time_basis, 'source': rel, 'context': context,
         'metrics': list(metrics), 'cases': [], 'notes': [], 'artifacts': [],
         'revision': raw.get('revision'),
-        'tools': {k: raw[k] for k in ('simulator', 'bender', 'compiler', 'compiler_info', 'upstream', 'packages') if k in raw},
+        'tools': {k: raw[k] for k in ('simulator', 'bender', 'compiler', 'compiler_info', 'upstream', 'packages', 'reference') if k in raw},
         'workload': raw.get('workload', raw.get('elf', {}).get('sha256')),
     }
     for field in ('component', 'target', 'selection'):
@@ -251,6 +252,24 @@ def normalize(path, build, root, hashes):
         if state == 'passed' and detail.get('status') != 'passed':
             record['status'] = 'error'
             record['notes'].append('Passed metadata conflicts with execution status.')
+    differential = path.parent / 'spike.json'
+    if differential.is_file():
+        evidence = read_json(differential)
+        record['notes'].append('Spike differential: ' + evidence.get('status', 'unknown'))
+        if evidence.get('detail'): record['notes'].append(evidence['detail'])
+        reference = raw.get('reference', {})
+        count = evidence.get('compared_instructions')
+        consistent = (evidence.get('status') == 'passed' and type(count) is int and count > 0 and
+                      evidence.get('tool', {}).get('executable_sha256') == reference.get('executable_sha256') and
+                      evidence.get('profile') == reference.get('profile'))
+        if consistent:
+            record['metrics'].append({'name': 'spike_compared_instructions', 'value': count, 'unit': 'instructions'})
+        if state == 'passed' and not consistent:
+            record['status'] = 'error'
+            record['notes'].append('Passed metadata conflicts with Spike status/count/reference identity.')
+    elif raw.get('reference') and raw.get('component') == 'core_elf' and state == 'passed':
+        record['status'] = 'error'
+        record['notes'].append('Passed differential run has no spike.json evidence.')
     artifacts = list(FILES)
     if native:
         if not isinstance(raw.get('artifacts', []), list):
@@ -351,13 +370,15 @@ def run_table(records, depth=1):
     rows = []
     for r in records:
         config = r['configuration']
-        search = ' '.join(str(x) for x in (config['name'], config['id'], r['component'], r['target'], r['selection'], r['seed']))
+        reference = r['tools'].get('reference')
+        reference_label = ('Spike ' + str(reference.get('executable_sha256', 'unknown'))[:8]) if isinstance(reference, dict) else ''
+        search = ' '.join(str(x) for x in (config['name'], config['id'], r['component'], r['target'], r['selection'], r['seed'], reference_label))
         cases = Counter(c['status'] for c in r['cases'])
         counts = ', '.join(f'{n} {s}' for s, n in sorted(cases.items())) or '—'
         attrs = f'data-search="{esc(search.lower())}" data-status="{r["status"]}" data-latest="{int(r["latest"])}" data-config="{config["id"]}"'
         rows.append(f'''<tr {attrs}><td><a href="{prefix}runs/{r['id']}.html">{badge(r['status'])}</a></td>
 <td title="{config['fingerprint']}">{esc(config['name'])}<small>{config['fingerprint'][:8]}</small></td>
-<td>{esc(r['component'])}</td><td>{esc(r['target'])}</td><td>{esc(r['selection'])}<small>seed {esc(r['seed'] if r['seed'] is not None else '—')}</small></td>
+<td>{esc(r['component'])}</td><td>{esc(r['target'])}</td><td>{esc(r['selection'])}<small>seed {esc(r['seed'] if r['seed'] is not None else '—')}</small><small>{esc(reference_label)}</small></td>
 <td>{esc(counts)}</td><td>{badge(r['inputs']['status'])}<small>{esc(r['inputs']['scope'])}</small></td>
 <td>{esc(r['time'])}<small>{esc(r['time_basis'])}</small></td></tr>''')
     return '''<div class="table-scroll"><table class="filter-table"><thead><tr>''' + ''.join(

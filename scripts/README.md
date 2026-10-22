@@ -170,3 +170,8 @@ Comparison bars use only passed latest records with a nonempty, exactly matching
 context, metric name and unit. Missing/different contexts are never merged into
 one performance comparison. Producers are responsible for complete context;
 the report cannot infer whether differently configured experiments are comparable.
+
+Differential ELF records include the reference identity in `reference` and the
+reference binary hash in comparison context. The report links `spike.json`,
+`spike.log` and `spike-process.log` subject to artifact limits, and requires
+successful Spike evidence for a declared differential pass.
