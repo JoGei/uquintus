@@ -11,6 +11,7 @@ from pyuvm import uvm_root
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.core_env import CoreTest, MASK
 from elf_image import completion_code, expected_traps, load_elf, validate_trap_sequence
+from interrupts import interrupt_plan, InterruptStimulus
 
 
 class ELFTest(CoreTest):
@@ -21,6 +22,7 @@ class ELFTest(CoreTest):
         self.tohost = self.image.tohost
         self.expected_trap_events = expected_traps(self.image)
         self.expected_faults = {pc: (cause, tval) for pc, cause, tval in self.expected_trap_events}
+        self.interrupts = InterruptStimulus(interrupt_plan(self.image,self.params))
         # Both independent OBI agents see the same RAM. The oracle owns a
         # separate copy, updated only by architectural stores at retirement.
         self.memory = self.image.memory()
@@ -32,10 +34,25 @@ class ELFTest(CoreTest):
         self.max_cycles = int(os.environ['UQU_MAX_CYCLES'])
 
     async def cycle(self, **kwargs):
+        if kwargs.get('rst',1) and not self.interrupts.lines and self.interrupts.index < len(self.interrupts.plan):
+            trigger=self.interrupts.plan[self.interrupts.index]
+            kind,pc=trigger['kind'],trigger['pc']
+            retired=bool(self.retired and self.retired[-1]==pc)
+            pending=bool(self.pending['dmem'] is not None and self.accesses and self.accesses[-1][0]==pc)
+            arithmetic=bool(self.signal('ex_valid_q') and self.signal('ex_pc_q')==pc and
+                            int(self.core.u_ex.issued_q.value) and not self.signal('ex_complete'))
+            if {1:retired,2:pending,3:arithmetic}[kind]:
+                self.interrupts.assert_next(self.cycles,self.rvfi_order,
+                    dict(retired_pc=self.last_retired,dmem_pending=pending,multicycle_active=arithmetic,
+                         priv_m=self.priv,mstatus=self.csrs[0x300],mie=self.csrs[0x304]))
+        kwargs['irq']=self.interrupts.lines if kwargs.get('rst',1) else 0
         before = len(self.faults)
+        before_irq=len(self.traps)
         result = await super().cycle(**kwargs)
         if len(self.faults) != before:
             validate_trap_sequence(self.expected_trap_events, self.faults)
+        if len(self.traps)!=before_irq:
+            self.interrupts.accept(*self.traps[-1],self.cycles-1,self.rvfi_order)
         return result
 
     def retire(self, pc, original, write, rd_actual, data_actual):
@@ -66,6 +83,7 @@ class ELFTest(CoreTest):
                     f'instructions={len(self.retired)}; see rvfi.jsonl')
             assert self.exit_code == 0, f'ELF reported failure code {self.exit_code}; see rvfi.jsonl'
             validate_trap_sequence(self.expected_trap_events, self.faults, complete=True)
+            self.interrupts.finish()
             assert not self.accesses, 'uncompleted memory operations'
             # RAM is modified when a store reaches the bus. Comparing the two
             # complete sparse images catches any flushed/faulting store effect,
@@ -87,7 +105,9 @@ class ELFTest(CoreTest):
                 'next_pc': self.pc, 'last_retired_pc': self.last_retired,
                 'max_cycles': self.max_cycles,
                 'expected_traps': self.expected_trap_events, 'observed_traps': self.faults,
+                'interrupts': self.interrupts.evidence(),
             }, indent=2) + '\n')
+            Path('interrupts.json').write_text(json.dumps(self.interrupts.evidence(),indent=2)+'\n')
             self.drop_objection()
 
 

@@ -15,6 +15,7 @@ from rv32_arithmetic import alu_result, muldiv_result, signed
 from rvfi_trace import read_trace
 from rvfi_csrs import CSR_CATALOG, CSRObservation
 from csregfile_model import INPUTS
+from interrupts import check_interrupt_cycle
 
 MASK = 0xffffffff
 BOOT = 0x1000
@@ -342,6 +343,15 @@ class CoreTest(uvm_test):
                 'wb_we0','wb_waddr0','wb_wdata0','wb_cause','wb_tval','trap_valid','trap_pc','trap_cause',
                 'redirect_valid','redirect_addr','de_valid_q','ex_valid_q','mem_valid_q','wb_valid_q',
                 'priv_m_q','mstatus','mie','mip','mtvec','mepc','de_pc_q','mem_pc_q')}
+        if rst:
+            assert o['priv_m_q']==self.priv and o['mstatus']==self.csrs[0x300] and o['mie']==self.csrs[0x304], ('IRQ pre-state',o,self.csrs)
+            assert o['mip']==irq, ('external IRQ pins/mip',o['mip'],irq)
+            # Include the independent bus agent's outstanding/held/granted work;
+            # a bad RTL busy flag must not make an unsafe entry appear valid.
+            data_busy = (self.signal('lsu_busy') or self.pending['dmem'] is not None or
+                         self.held['dmem'] is not None or grants['dmem'][0])
+            check_interrupt_cycle(o,priv_m=self.priv,mstatus=self.csrs[0x300],mie=self.csrs[0x304],
+                lines=irq,lsu_busy=data_busy,de_fire=self.signal('de_fire'))
         ci = dict(INPUTS, rst_n=rst, priv_m=self.priv, hart_id=5,
             irq_software=int(bool(irq & 8)), irq_timer=int(bool(irq & 128)),
             irq_external=int(bool(irq & 2048)), retire=o['wb_retire'],

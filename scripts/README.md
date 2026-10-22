@@ -179,3 +179,7 @@ successful Spike evidence for a declared differential pass.
 Spike v2 records include the adapter profile in comparison context and retain
 the bounded read-only debugger commands/state snapshots. Report metrics expose
 `spike_compared_traps` and `spike_compared_mrets` alongside instruction counts.
+
+Spike v3 adds `spike_compared_interrupts` and bundles `interrupts.json` plus
+`spike-irq-build.json`/`.log` for input and SDK/helper provenance. Interrupt entries
+do not count as instructions; they remain visible as separate trace events.

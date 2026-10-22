@@ -558,10 +558,49 @@ register sentinel and RAM guard against faulting and younger flushed effects,
 including the sequential path after MRET. Cover M-only and M/U execution, both
 IALIGN settings, 16-bit illegal/EBREAK instructions when C is enabled, and a
 return from U ECALL into M mode. Report observed trap/MRET counts and modes.
-Interrupts, counter/other implementation-dependent CSR accesses, PMP, host
-services and unsupported features shall still fail explicitly. Broader bus/PMP
-fault coverage, interrupt synchronization, CSR/WARL coverage and cycle-sensitive
-read reconciliation remain follow-ups.
+Counter/other implementation-dependent CSR accesses, PMP, host services and
+unsupported features shall still fail explicitly. Broader bus/PMP fault
+coverage, CSR/WARL coverage and cycle-sensitive read reconciliation remain
+follow-ups. The initial interrupt synchronization profile is defined below.
+
+Profile v3 shall support ELF-bound level-sensitive machine software, timer and
+external interrupt stimuli. A kept `.uqu.irqs` table between global
+`uqu_interrupts` and `uqu_interrupts_end` symbols shall declare ordered four-word
+rows: trigger kind, trigger PC, pending-line mask and a zero reserved word.
+Triggers shall support retirement at a specified PC, an outstanding data-memory
+response and active multi-cycle arithmetic at a specified PC. Masks use bits
+3, 7 and 11 only. Hold each mask until every declared source is serviced,
+acknowledging only the accepted source. Validate the table and require all
+triggers/entries to complete; no table means no injected IRQs.
+
+Native simulation shall independently derive interrupt eligibility from driven
+pins and the prior architectural CSR/privilege model. Each cycle shall check
+global/source masking, external > software > timer priority, blocked DE admission,
+EX/MEM/WB drain and LSU idle, entry timing and saved architectural PC. These checks
+shall not consume DUT eligibility or priority outputs as their expected values.
+Exercise masked pending sources, simultaneous sources, direct/vectored entry,
+memory and division stalls, pending lower-priority service across MRET and
+U-mode delivery with MSTATUS.MIE clear. Retain assertion/acceptance cycles,
+instruction orders, trigger context and full pending masks in `interrupts.json`.
+
+Replay shall validate this evidence against the copied ELF declaration and RVFI
+interrupt records, then drive the full pending mask into Spike at each accepted
+architectural boundary. Spike shall independently select the cause and produce
+actual trap state. Compare saved PC, cause, direct/vectored target, privilege,
+implicit CSR effects and handler/return behavior. IRQ entry shall not invent an
+instruction or increment RVFI order. The reference inputs shall remain low during
+ordinary replay so admitted native instructions may finish before aligned delivery.
+MIP reads shall remain unsupported by differential checking until their temporal
+policy is defined; native MIP shall still match pins every cycle.
+
+A verification-only Spike device may use its platform external-input API via
+bounded debugger commands. This helper shall not add target instructions or
+production core ports, change architectural PC/privilege, or fabricate a trap.
+Require checked pin acknowledgements and record local source, matching external
+SDK header/library hashes, host compiler/command and output identity. The matching
+Spike SDK and C++ compiler remain external dependencies, with explicit SPIKE_ROOT
+and CXX overrides; no install or Spike dependency build is implied. The reference
+guide defines SDK discovery, the restricted host-device address and artifacts.
 
 Keep raw reference/process logs, ELF/RVFI evidence and a JSON summary with the
 first mismatch index/field and both observations. A mismatch shall fail JUnit,
@@ -646,3 +685,4 @@ later decisions determine the active contract.
 | D-296 | Integrate checksum/commit-pinned riscv-tests without submodules, using adapted bare-metal instruction tests, explicit ISA/misalignment exclusions, independent ELF runs, compatible simulator-build reuse and compiler family/version/target discovery from RISCV_CC, RISCV or PATH. | Add reproducible external instruction coverage while preserving the chosen core behavior, externally supplied tools and honest cross-configuration reporting. | Initial RV32I/M/C adapter implemented; Section 2.7; build contract in build Section 1.2; initial Spike checking in D-297; other ISA/privileged families and architectural certification remain separate |
 | D-297 | Add optional external Spike differential checking for native ELF/riscv-tests runs, with an exact qualified binary pin, strict bounded commit-log parsing, original instruction/PC/GPR/source/memory checks, deterministic CSR checks and retained first-mismatch/JUnit/report evidence. | Add the selected independent ISA reference without silently ignoring unsupported traps, interrupts, counters or implementation-dependent state; preserve external tools and native timing/error checks. | Initial profile implemented; Section 2.8; full CSR/trap/interrupt coverage and source-revision pin remain follow-ups |
 | D-298 | Add ELF-bound ordered expected-trap declarations and Spike v2 synchronous-trap/MRET comparison using independent read-only state snapshots; test M-only/M-U transitions, illegal/ECALL/EBREAK and alignment faults, implicit CSRs, suppressed effects and explicit breakpoint-MTVAL reconciliation. | Verify precise exception behavior end to end while preserving strict no-trap defaults and distinguishing permitted implementation choices from architectural mismatches. | Implemented; Sections 2.6 and 2.8; broader CSR/bus/PMP/interrupt synchronization remains open |
+| D-299 | Add ELF-bound deterministic IRQ stimuli, independent native masking/priority/drain checks and Spike v3 delivery alignment through a qualified verification device; retain full input/entry evidence and check architectural state without inventing retirement. | Compare asynchronous behavior at valid instruction boundaries while checking native timing independently; keep platform MMIO controllers outside the core and SDK/tool provenance explicit. | Implemented initial software/timer/external IRQ profile; Section 2.8; MIP reads, WFI and counter reconciliation remain follow-ups |

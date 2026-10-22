@@ -42,7 +42,8 @@ INPUT_LABELS = {
 FILES = ('run.json', 'build.json', 'report.json', 'results.xml', 'execution.json',
          'config.yml', 'component.yml', 'selectors.json', 'lint.log',
          'simulation.log', 'build.log', 'program.map', 'software-build.json',
-         'spike.json', 'spike.log', 'spike-process.log', 'spike-debug.cmd')
+         'spike.json', 'spike.log', 'spike-process.log', 'spike-debug.cmd',
+         'interrupts.json', 'spike-irq-build.json', 'spike-irq-build.log')
 
 
 def digest(value):
@@ -264,7 +265,8 @@ def normalize(path, build, root, hashes):
                       evidence.get('profile') == reference.get('profile'))
         if consistent:
             record['metrics'].append({'name': 'spike_compared_instructions', 'value': count, 'unit': 'instructions'})
-            for field, unit in (('compared_traps','traps'), ('compared_mrets','instructions')):
+            for field, unit in (('compared_traps','traps'), ('compared_mrets','instructions'),
+                                ('compared_interrupts','interrupts')):
                 value = evidence.get(field)
                 if type(value) is int and value >= 0:
                     record['metrics'].append({'name':'spike_'+field, 'value':value, 'unit':unit})

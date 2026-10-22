@@ -12,6 +12,7 @@ import yaml
 from elf_image import expected_traps, load_elf
 from hw_config import load_configuration
 from toolchain import compiler_command, discover_compiler, identify_compiler
+from interrupts import interrupt_plan
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -64,7 +65,7 @@ def main():
         image = load_elf(directory / 'program.elf')
         image.validate_core(config)
         image.tohost
-        metadata.update(status='passed', expected_traps=expected_traps(image), elf_sha256=hashlib.sha256(
+        metadata.update(status='passed', expected_traps=expected_traps(image), interrupt_plan=interrupt_plan(image,config), elf_sha256=hashlib.sha256(
             (directory / 'program.elf').read_bytes()).hexdigest())
     except BaseException:
         metadata['status'] = 'failed'

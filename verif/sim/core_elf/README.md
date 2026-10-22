@@ -133,3 +133,30 @@ IALIGN=32 branch-target cases with 16-bit illegal and C.EBREAK cases. Each fault
 has a following poison store skipped by the handler; a RAM guard, destination
 sentinel and trap count are checked before completion. The MRET sequential path
 also contains a poison store. The program requires the full integer register set.
+
+## Declared external interrupts
+
+An optional kept `.uqu.irqs` section between global `uqu_interrupts` and
+`uqu_interrupts_end` symbols contains four-word rows:
+
+```asm
+uqu_interrupts:
+    .word 1, after_setup, 8, 0     /* Assert MSIP after this PC retires. */
+    .word 2, busy_load, 2048, 0    /* Assert MEIP while data response is pending. */
+    .word 3, busy_div, 128, 0      /* Assert MTIP during active multi-cycle EX. */
+uqu_interrupts_end:
+```
+
+The final word is reserved and must be zero. Trigger PCs are unique aligned
+executable sites; kind 3 requires M. Masks use native pending bits 3, 7 and 11
+(`0x888`). Rows run in order. The harness holds each mask until its sources are
+accepted, acknowledging only the selected bit; simultaneous sources therefore
+must be serviced in priority order, across handler/MRET masking. Completion
+requires all declared rows and sources to have run. No table means no driven IRQs.
+
+[`verif/sw/interrupts/main.S`](../../sw/interrupts/main.S) supplies masked,
+memory-stalled, multi-cycle and simultaneous-source scenarios, with direct and
+vectored handlers and optional U mode. It requires the full integer register
+set. `interrupts.json` and `execution.json` retain assertion and accepted-boundary
+evidence. The [reference guide](../../reference/README.md#external-interrupt-synchronization)
+defines independent checking, Spike delivery alignment and required external SDK.

@@ -108,6 +108,14 @@ Both shall receive the configured `UQU_ISA_UMODE` value for conditional M/U
 scenarios. The linker shall retain the optional embedded expected-trap table
 described in [verification Section 2.6](uqu_spec.verif.md#26-elf-software-execution).
 
+For IRQ/MIE reference tests, compile the local verification-only Spike device
+against externally supplied matching headers and `lib/libriscv.so`, located
+beside the executable or through `SPIKE_ROOT`. Use external host `CXX` (default
+`c++`) and record SDK/source hashes, compiler identity, command, log and output
+hash per run. This builds the project helper, not Spike or its dependencies.
+Retain the optional ELF `.uqu.irqs` table; its stimulus contract is defined in
+[verification Section 2.8](uqu_spec.verif.md#28-initial-spike-differential-elf-checking).
+
 ## 2. Shared core configuration and separate build targets
 
 **Status:** Agreed; YAML selected, schema and target details TBD

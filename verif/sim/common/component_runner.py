@@ -16,6 +16,7 @@ import xml.etree.ElementTree as ET
 import yaml
 
 from elf_image import expected_traps, load_elf
+from interrupts import interrupt_plan
 from hw_config import load_configuration, parameters_for_component, write_header
 
 
@@ -165,6 +166,7 @@ def main(argv=None, shared_build=None):
         image.validate_core(parameters)
         image.tohost  # Validate completion storage before compiling the simulator.
         declared_traps = expected_traps(image)
+        declared_interrupts = interrupt_plan(image,parameters)
     elif args.elf:
         raise ValueError('ELF is only supported for tests of a requires_elf component')
     reference_info = None
@@ -218,6 +220,7 @@ def main(argv=None, shared_build=None):
             'source': str(elf_path), 'sha256': hashlib.sha256(program.read_bytes()).hexdigest(),
             'entry': image.entry, 'tohost': image.tohost, 'max_cycles': args.max_cycles,
             'expected_traps': declared_traps,
+            'interrupt_plan': declared_interrupts,
             'segments': [{'address': s.address, 'file_size': len(s.data),
                           'memory_size': s.size, 'flags': s.flags} for s in image.segments],
         }
@@ -243,7 +246,9 @@ def main(argv=None, shared_build=None):
         metadata['input_scope'] = 'HDL, headers, recorded software sources and reference adapter/pin'
         metadata.setdefault('context', {})['reference'] = 'spike:' + reference_info['executable_sha256']
         metadata['context']['reference_profile'] = reference_info['profile']
-        for path in (ROOT / 'verif/sim/common/spike.py', ROOT / 'verif/reference/spike.lock.json'):
+        for path in (ROOT / 'verif/sim/common/spike.py', ROOT / 'verif/reference/spike.lock.json',
+                     ROOT / 'verif/sim/common/interrupts.py', ROOT / 'verif/sim/common/spike_irq.py',
+                     ROOT / 'verif/reference/spike_irq.cc'):
             metadata['source_sha256'][str(path.relative_to(ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
     print(f"Artifacts: {run_dir}", flush=True)

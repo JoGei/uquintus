@@ -1,8 +1,8 @@
 """Bounded external Spike execution and strict native RVFI differential checks.
 
-Synchronous traps and MRET use read-only debugger snapshots of actual Spike
-state. Interrupts, counters and unsupported platform features remain explicit
-errors. No event is silently skipped or resynchronized.
+Traps, interrupts and MRET use debugger snapshots of actual Spike state.
+An optional verification device drives IRQ inputs at independently checked
+native boundaries. No event is silently skipped or resynchronized.
 """
 import hashlib
 import json
@@ -15,12 +15,13 @@ import subprocess
 from elf_image import load_elf
 from rvfi_trace import read_trace
 from toolchain import isa_abi
+from interrupts import interrupt_plan, replay_masks, pending_interrupt
 
 ROOT = Path(__file__).resolve().parents[3]
 LOCK = ROOT / 'verif/reference/spike.lock.json'
 MASK = 0xffffffff
 RAM_BASE, RAM_SIZE = 0x80000000, 0x10000
-CSR_NAMES = {0x300: 'mstatus', 0x305: 'mtvec', 0x340: 'mscratch', 0x341: 'mepc',
+CSR_NAMES = {0x300: 'mstatus', 0x304: 'mie', 0x305: 'mtvec', 0x340: 'mscratch', 0x341: 'mepc',
              0x342: 'mcause', 0x343: 'mtval', 0xf14: 'mhartid'}
 BOOT_INSNS = [0x297, 0x02028593, 0xf1402573, 0x0182a283, 0x00028067]
 TRAP_CAUSES = {'trap_instruction_address_misaligned': 0, 'trap_illegal_instruction': 2,
@@ -76,6 +77,7 @@ def parse_commits(path):
     disasm = re.compile(r'core\s+\d+:\s+0x[0-9a-f]+\s+\(0x[0-9a-f]+\).*')
     effect = re.compile(r'\s+(?:x\s*(\d+)\s+(0x[0-9a-f]+)|c(\d+)_\w+\s+(0x[0-9a-f]+)|mem\s+(0x[0-9a-f]+)(?:\s+(0x[0-9a-f]+))?)')
     exception = re.compile(r'core\s+(\d+): exception (\w+), epc (0x[0-9a-f]+)')
+    interrupt = re.compile(r'core\s+(\d+): exception interrupt #(3|7|11), epc (0x[0-9a-f]+)')
     tval = re.compile(r'core\s+(\d+):\s+tval (0x[0-9a-f]+)')
     last_disasm = None
     for number, line in enumerate(Path(path).read_text().splitlines(), 1):
@@ -85,6 +87,13 @@ def parse_commits(path):
                 last_disasm = re.fullmatch(r'core\s+(\d+):\s+(0x[0-9a-f]+)\s+\((0x[0-9a-f]+)\).*', line)
                 continue
             trap = exception.fullmatch(line)
+            irq = interrupt.fullmatch(line)
+            if irq:
+                hart,cause,pc=irq.groups()
+                commits.append(dict(hart=int(hart),mode=None,pc=int(pc,16),insn=None,
+                    registers={},csrs={},memory=[],interrupt=True,cause=int(cause),tval=0,line=number))
+                last_disasm=None
+                continue
             if trap:
                 hart, name, pc = trap.groups()
                 if name not in TRAP_CAUSES or last_disasm is None:
@@ -98,7 +107,7 @@ def parse_commits(path):
                 continue
             value = tval.fullmatch(line)
             if value:
-                if not commits or not commits[-1].get('trap') or commits[-1]['hart'] != int(value[1]) or commits[-1].get('tval_seen'):
+                if not commits or not (commits[-1].get('trap') or commits[-1].get('interrupt')) or commits[-1]['hart'] != int(value[1]) or commits[-1].get('tval_seen'):
                     raise ValueError('unpaired or duplicate Spike exception tval')
                 commits[-1].update(tval=int(value[2], 16) & MASK, tval_seen=True)
                 continue
@@ -134,16 +143,34 @@ def parse_commits(path):
     return commits
 
 
-def debug_commands(steps):
+def irq_index(mask):
+    return ((mask >> 3)&1) | (((mask >> 7)&1)<<1) | (((mask >> 11)&1)<<2)
+
+
+def debug_commands(steps, masks=None):
     snapshot = ['pc 0', 'priv 0', *('reg 0 '+name for name in SNAPSHOT_CSRS)]
-    return '\n'.join([*snapshot, *(line for _ in range(steps) for line in ['run 1', *snapshot]), 'quit']) + '\n'
+    commands=list(snapshot)
+    if masks is not None and len(masks)!=steps: raise ValueError('IRQ replay step count mismatch')
+    for index in range(steps):
+        if masks is not None: commands.append(f'mem {0x50000000+8*irq_index(masks[index]):x}')
+        commands += ['run 1',*snapshot]
+    return '\n'.join([*commands,'quit'])+'\n'
 
 
-def read_snapshots(path, steps):
+def read_snapshots(path, steps, masks=None):
     lines = Path(path).read_text().splitlines()
     warning = "warning: tohost and fromhost symbols not in ELF; can't communicate with target"
     if lines and lines[0] == warning: lines.pop(0)
     width = len(SNAPSHOT_CSRS) + 2
+    if masks is not None:
+        if len(lines)!=(steps+1)*width+steps: raise ValueError('missing IRQ device acknowledgements/snapshots')
+        clean=lines[:width]
+        position=width
+        for mask in masks:
+            if lines[position]!=f'0x{irq_index(mask):08x}': raise ValueError('Spike IRQ pin acknowledgement mismatch')
+            clean += lines[position+1:position+1+width]
+            position+=width+1
+        lines=clean
     if len(lines) != (steps+1)*width:
         raise ValueError('missing/extra Spike debugger state observations')
     states = []
@@ -224,8 +251,10 @@ def validate_profile(records, config, image):
     instructions = []
     for record in records:
         if record['type'] == 'reset': continue
-        if record['type'] != 'instruction':
-            raise ValueError('Spike profile does not support interrupt injection')
+        if record['type'] == 'interrupt':
+            if record.get('cause') not in (3,7,11): raise ValueError('unsupported interrupt cause')
+            instructions.append(record)
+            continue
         if record['rvfi_trap'] and record['cause'] not in TRAP_CAUSES.values():
             raise ValueError('unsupported synchronous trap cause in Spike profile')
         insn = record['rvfi_insn']
@@ -252,6 +281,30 @@ def compare(instructions, commits, image):
     handler_entry, breakpoint_mtval = False, False
     for index, actual in enumerate(instructions):
         reference, following = commits[index+5:index+7]
+        if actual['type']=='interrupt':
+            equal(index,'interrupt_event',True,bool(reference.get('interrupt')))
+            equal(index,'interrupt_pc',reference['pc'],actual['pc'])
+            equal(index,'interrupt_cause',reference['cause'],actual['cause'])
+            equal(index,'interrupt_target',reference['after']['pc'],actual['target'])
+            equal(index,'interrupt_handler_pc',reference['after']['pc'],following['pc'])
+            before,after=reference['before']['csrs'],reference['after']['csrs']
+            equal(index,'interrupt_priority',pending_interrupt(reference['mode']==3,before['mstatus'],before['mie'],reference['irq_mask']),reference['cause'])
+            equal(index,'interrupt_vector',(before['mtvec'] & ~3)+(4*reference['cause'] if before['mtvec']&1 else 0),actual['target'])
+            equal(index,'interrupt_privilege',3,reference['after']['mode'])
+            for name,value in (('mepc',actual['pc']),('mcause',0x80000000|reference['cause']),('mtval',0)):
+                equal(index,'interrupt_snapshot:'+name,value,after[name])
+            equal(index,'interrupt_effects',({},[]),(reference['registers'],reference['memory']))
+            channels={'mstatus':(MASK,MASK),'mtvec':(MASK,0),'mepc':(0,MASK),'mcause':(0,MASK),'mtval':(0,MASK)}
+            equal(index,'interrupt_csr_channels',set(channels),set(actual['csrs']))
+            for name,(read,write) in channels.items():
+                channel=actual['csrs'][name]
+                equal(index,'interrupt_csr_masks:'+name,(read,write),(channel['rmask'],channel['wmask']))
+                mask=MSTATUS_MASK if name=='mstatus' else MASK
+                if read: equal(index,'interrupt_csr_read:'+name,before[name]&mask,channel['rdata'])
+                if write: equal(index,'interrupt_csr_write:'+name,after[name]&mask,channel['wdata'])
+            handler_entry,breakpoint_mtval=True,False
+            continue
+        equal(index,'unexpected_interrupt',False,bool(reference.get('interrupt')))
         trapped = bool(reference.get('trap'))
         for name, rvfi in (('pc', 'pc_rdata'), ('insn', 'insn'), ('mode', 'mode')):
             equal(index, name, reference[name], actual['rvfi_' + rvfi])
@@ -378,12 +431,24 @@ def check_run(directory, config, info, timeout=30):
     """Preserve raw log, process diagnostics and first-mismatch evidence."""
     directory = Path(directory)
     result = dict(status='running', profile=info['profile'], tool=info,
-                  policy='synchronous traps/MRET with independent snapshots; no interrupts or counters; breakpoint mtval native=0, Spike=0|PC',
+                  policy='IRQ delivery at independently checked native boundaries; no mip/counter reads; breakpoint mtval native=0, Spike=0|PC',
                   artifacts=['spike.log', 'spike-process.log', 'spike-debug.cmd', 'rvfi.jsonl'])
     try:
         image = load_elf(directory / 'program.elf')
         records = read_trace(directory / 'rvfi.jsonl')
         instructions = validate_profile(records, config, image)
+        plan=interrupt_plan(image,config)
+        masks=None
+        if plan:
+            audit=json.loads((directory/'interrupts.json').read_text())
+            masks=[0]*5+replay_masks(records,audit,plan)+[0]
+        elif any(r['type']=='interrupt' for r in instructions):
+            raise ValueError('interrupt trace requires an ELF-bound stimulus plan')
+        elif any(r['type']=='instruction' and r['rvfi_insn'] & 127==0x73 and
+                 r['rvfi_insn'] >> 20==0x304 for r in instructions):
+            # Isolate all three external inputs from Spike's default CLINT
+            # when the program can enable them, even for a no-IRQ test.
+            masks=[0]*(len(instructions)+6)
         march, _ = isa_abi(config)
         command = [info['executable'], '--isa=' + march,
                    '--priv=' + ('mu' if config['ISA_UMODE'] else 'm'), '--pmpregions=0',
@@ -391,19 +456,27 @@ def check_run(directory, config, info, timeout=30):
                    '-d', '--debug-cmd=' + str(directory / 'spike-debug.cmd'), '-l', '--log-commits',
                    '--log=' + str(directory / 'spike.log'), str(directory / 'program.elf')]
         result['command'] = command
+        if masks is not None:
+            from spike_irq import build_device
+            device=build_device(directory,info)
+            command[-1:-1]=['--extlib='+str(device),'--device=uqu_irq']
         steps = len(instructions)+6
-        (directory / 'spike-debug.cmd').write_text(debug_commands(steps))
+        (directory / 'spike-debug.cmd').write_text(debug_commands(steps,masks))
         result['elf_sha256'] = hashlib.sha256((directory / 'program.elf').read_bytes()).hexdigest()
         with (directory / 'spike-process.log').open('w') as output:
             process = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
         if process.returncode: raise ValueError(f'Spike exited with {process.returncode}; see spike-process.log')
         commits = parse_commits(directory / 'spike.log')
-        commits = attach_snapshots(commits, read_snapshots(directory / 'spike-process.log', steps))
+        commits = attach_snapshots(commits, read_snapshots(directory / 'spike-process.log', steps,masks))
+        if masks is not None:
+            for row,mask in zip(commits,masks): row['irq_mask']=mask
         count = compare(instructions, commits, image)
-        result.update(status='passed', compared_instructions=count,
-                      compared_traps=sum(r['rvfi_trap'] for r in instructions),
-                      compared_mrets=sum(r['rvfi_insn']==0x30200073 and not r['rvfi_trap'] for r in instructions),
-                      observed_modes=sorted({r['rvfi_mode'] for r in instructions}))
+        result.update(status='passed', compared_instructions=count-sum(r['type']=='interrupt' for r in instructions),
+                      compared_events=count,
+                      compared_traps=sum(r.get('rvfi_trap',0) for r in instructions),
+                      compared_interrupts=sum(r['type']=='interrupt' for r in instructions),
+                      compared_mrets=sum(r.get('rvfi_insn')==0x30200073 and not r['rvfi_trap'] for r in instructions),
+                      observed_modes=sorted({r['rvfi_mode'] for r in instructions if r['type']=='instruction'}))
     except BaseException as error:
         result.update(status='failed', detail=str(error))
         if isinstance(error, Mismatch):

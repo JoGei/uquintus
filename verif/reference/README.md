@@ -52,7 +52,7 @@ zero-filled segment tails. Startup must initialize GPRs before reading them;
 the checker does not accept Spike's zeroed reset GPRs as evidence for unreset
 core registers. RAM holes are initially zero. ELF `fromhost` services are rejected.
 
-Profile `spike-commit-rv32-v2` uses a bounded debugger command file: a read-only
+Profile `spike-commit-rv32-v3` uses a bounded debugger command file: a read-only
 state snapshot, then one `run 1` attempt and another snapshot at each step.
 Snapshots contain PC, privilege and the supported CSRs directly from Spike.
 This observes implicit trap/MRET state changes without reconstructing them from
@@ -79,7 +79,7 @@ Spike's logged values; loads compare selected RVFI response bytes with that imag
 as well as checking the loaded GPR against Spike. Unselected bus lanes are not
 architectural data. Compressed LW/SW/LWSP/SWSP are included.
 
-Deterministic `mstatus`, `mtvec`, `mscratch`, `mepc`, `mcause`, `mtval` and `mhartid`
+Deterministic `mstatus`, `mie`, `mtvec`, `mscratch`, `mepc`, `mcause`, `mtval` and `mhartid`
 accesses are supported. Explicit CSR writes match Spike's logged effects; RVFI
 read/write masks and values match its pre/post snapshots. MSTATUS comparison
 covers the native implemented bits (`0x00221888`); other native bits must remain
@@ -105,26 +105,86 @@ if the values differ; clear MTVAL first or take another exception that replaces
 it. The adapter does not rewrite GPR results or allow divergent control flow.
 
 Other CSRs and SYSTEM operations, including counter reads, are rejected.
-Injected interrupts, multiple reset epochs, PMP, FPU, atomics, XIF, debug,
+Multiple reset epochs, PMP, FPU, atomics, XIF, debug,
 host I/O and memory outside this RAM are not supported by this first profile.
 Encountering them fails explicitly rather than silently skipping observations.
-Full CSR/WARL, bus/PMP fault and interrupt synchronization remain follow-ups under the
+Full CSR/WARL, bus/PMP faults and cycle-dependent counters remain follow-ups under the
 broader Spike verification requirement. Native regressions continue checking
 those core features independently; this adapter is not architectural certification
 or formal proof.
+
+## External interrupt synchronization
+
+`SW=interrupts` declares level-sensitive software, timer and external IRQ stimuli
+in its ELF. See the [ELF guide](../sim/core_elf/README.md#declared-external-interrupts)
+for the table format. The native testbench asserts each declared mask after its
+retirement, pending-memory or active-multi-cycle trigger. It holds the lines
+until acceptance, clears only the accepted source, and requires every remaining
+source to be serviced. This acknowledgement is a testbench convention; no CLINT,
+PLIC, integration MMIO protocol or extra production-core ports are introduced.
+
+An independent native checker runs each cycle, deriving eligibility and priority
+from driven pins and the prior architectural CSR/privilege model. It checks
+global/source masking, external > software > timer priority, admission blocking,
+EX/MEM/WB drain, LSU idle and immediate entry at the safe boundary. Existing
+instruction and CSR models check the saved PC, precise state and handler effects.
+`interrupts.json` retains declarations, trigger context, assertion cycles/orders,
+pending masks and accepted PC/cause/order; missing, extra or wrong-order entries
+fail even without Spike.
+
+The functional reference receives each full pending mask at that independently
+checked accepted boundary. Spike chooses the cause from its own MIE/MSTATUS,
+enters the trap and supplies independent pre/post CSR and privilege snapshots.
+The checker compares cause, saved PC, direct/vectored target, MSTATUS, MCAUSE,
+MEPC, MTVAL, first-handler marker and MRET. Interrupt entries stay separate from
+RVFI instruction records and do not increment instruction order or invent a
+retirement. Input evidence must match both the copied ELF plan and RVFI boundary.
+
+Cycle timing differs between implementations. Spike's external inputs remain
+zero during ordinary instruction replay, allowing already-admitted native
+instructions to finish before delivery. Architectural MIP reads are explicitly
+unsupported by this profile; it does not rewrite pending-register/GPR reads to
+hide that timing difference. Native MIP is nevertheless checked against driven
+pins every cycle, including masked periods. WFI and counter reconciliation remain
+outside this initial IRQ profile.
+
+When checking an IRQ plan or a program accessing MIE, a small host-side
+[`spike_irq.cc`](spike_irq.cc) device drives only Spike's external input bits
+through the same API used by its platform devices. The debugger loads from a
+verification-only device at `0x50000000` to set the three levels. Each load
+acknowledgement is checked. Target software is restricted to native RAM and
+cannot access this device. Zero levels also isolate Spike's default CLINT when
+software enables machine interrupts without declaring stimuli.
+
+Building this device requires an externally supplied host C++ compiler (`CXX`,
+default `c++`) and the matching Spike headers and `lib/libriscv.so`. They are
+discovered beside the resolved executable, or under explicit `SPIKE_ROOT`.
+The runner compiles this local verification helper; it does not download/build
+Spike or install dependencies. Retain `spike-irq-build.json` with compiler banner,
+command, SDK header/library and source hashes, output hash and build log. Missing
+SDK/compiler or incompatible builds fail clearly. This device is qualified for
+the pinned binary/installed SDK rather than an assumed stable upstream C++ ABI.
+
+The interrupt program covers global/source masking, direct and vectored entry,
+pending data reads, division when M is enabled, simultaneous sources, delayed
+lower-priority service across MRET, and U-mode entry with global MIE clear when
+U mode is enabled. It records causes in RAM and checks data/results, preserving
+the existing RAM and GPR oracles. Run it like the trap program with
+`make sw SW=interrupts` and the corresponding ELF path.
 
 ## Evidence and checker tests
 
 Each differential ELF run retains `spike.json`, `spike.log`,
 `spike-process.log` (state snapshots), `spike-debug.cmd`, the copied ELF and
-`rvfi.jsonl`. The JSON records pass/fail, compared instruction/trap and MRET
+`rvfi.jsonl`. IRQ runs also retain `interrupts.json` and device build evidence.
+The JSON records pass/fail, compared instruction/trap, interrupt and MRET
 counts, observed modes or the first mismatching field, index, expected/actual
 values and both full observations. Raw traces preserve surrounding context.
 Failure marks the ELF's JUnit case and overall run failed; suite execution
 continues with subsequent ELFs and fails the aggregate command.
 
 Report context includes the reference binary hash and adapter profile so checked,
-unchecked and v1/v2 runs cannot hide each other's outcomes. HTML details include reference identity,
+unchecked and different adapter versions cannot hide each other's outcomes. HTML details include reference identity,
 status and artifact links, subject to the normal report size limit. Traces that
 exceed that limit remain at their recorded run paths.
 
