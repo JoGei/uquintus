@@ -9,7 +9,8 @@ controller, IF, DE, EX,
 MEM/LSU, instruction-word fetch/buffer/aligner, WB, PMP checker, CSR register file, and shared-arithmetic/prefetch/parent-register
 fixtures, native full-core regression and ELF software execution. ORFS mapped
 synthesis and preplacement timing are implemented for core/FPU targets;
-physical implementation remains open. See the
+placement and timing repair are available through `make impl`; CTS and routing
+remain open. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -21,7 +22,7 @@ does not imply that the documented hardware or build infrastructure exists.
 ## 1. Bender and GNU Make build structure
 
 **Status:** Bender/Make simulation, lint, software, reporting and ORFS synthesis
-implemented; formal and physical implementation open
+and placement implemented; formal, CTS and routing open
 
 The project shall use Bender for HDL source/dependency management and GNU Make
 as the build entry point. The responsibilities shall be:
@@ -48,7 +49,7 @@ ORFS integration is defined in [build, Section 4](uqu_spec.build.md#4-openroad-f
 described in the [ASIC guide](../impl/asic/README.md).
 The current configuration schema, simulation/software commands, Python helpers
 and output layout are implemented below and in the shared simulation guide.
-Formal/physical target definitions, broader tool-version pins and additional
+Formal and post-placement target definitions, broader tool-version pins and additional
 technology-specific integration remain open.
 The shared core-configuration and separate build-target requirements are
 defined in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
@@ -197,7 +198,7 @@ and the [pinned CVFPU manifest](https://github.com/openhwgroup/cvfpu/blob/778116
 
 **Status:** Strict YAML validation, selector generation, presets and simulation
 target manifests implemented; ORFS synthesis consumes the shared configuration;
-formal and physical consumers remain open
+placement shares that consumer; formal and post-placement consumers remain open
 
 Each supported core configuration shall be defined once in a shared
 YAML configuration file. Simulation, formal checking, synthesis, and CI shall
@@ -320,8 +321,10 @@ of the synthesis/implementation target rather than redefine the ISA.
 `make synth ASIC_FLOW=orfs TOP=core|fpu CONFIG=<hw> PLATFORM=sky130hd|ihp-sg13g2`
 selects the implementation flow, synthesizable top and technology independently.
 `ASIC_FLOW` defaults to `orfs`; unsupported selections shall fail explicitly.
-`TOP` defaults to `core`; `CLOCK_PERIOD_NS=20` and `JOBS=4` are flow settings. Formal and full
-physical implementation commands remain open.
+`make impl` uses the same selection and continues through placement and timing
+repair, before CTS and routing. `TOP` defaults to `core`; `CLOCK_PERIOD_NS=20`
+and `JOBS=4` are flow settings. `SDC=<file>` selects supplied integration
+constraints in either target. Formal and post-placement commands remain open.
 
 ## 3. Selectable simulation backend
 
@@ -353,8 +356,8 @@ simulator backends remain open.
 
 ## 4. OpenROAD-flow-scripts ASIC backbone
 
-**Status:** Mapped synthesis and preplacement reporting implemented; full physical
-implementation and broader configuration qualification open
+**Status:** Mapped synthesis, placement/timing repair and scoped timing reporting
+implemented; CTS, routing and broader configuration qualification open
 
 OpenROAD-flow-scripts (ORFS) shall provide the default ASIC build backbone,
 including its Yosys synthesis stage and subsequent physical implementation
@@ -385,6 +388,15 @@ to use their separate targets and tool integrations.
 The [ASIC guide](../impl/asic/README.md) defines the executable Make interface,
 source/top selection, constraints, tools and artifacts. `impl/asic/orfs/common/synth.py`
 generates an external-design configuration and invokes ORFS `make synth`.
+`make impl` continues that run through ORFS `place` and `place_repair_timing`.
+Its fixed evaluation footprint defaults to `DIE_AREA="0 0 1240 1240"`,
+`CORE_AREA="20 20 1220 1220"` in micrometers and `PLACE_DENSITY=0.65`.
+These settings are overridable and recorded, with actual geometry and pin
+locations retained. Pins use the native ORFS automatic placer. Require legal
+placement, nonnegative setup/hold slack and zero reported slew, capacitance and
+fanout violations to pass implementation; retain measurements on a missed target.
+Both clocks and parasitics remain explicitly labeled ideal/pre-CTS and
+placement-estimated, respectively.
 The baseline uses ORFS's native Verilog frontend; enabled Zfinx uses its Slang
 frontend for imported SystemVerilog. Canonicalization checks reject structural
 errors and unintended latches. A thin synthesis wrapper retains ORFS mapping
@@ -431,7 +443,8 @@ Zfinx disabled/enabled on SKY130 HD and IHP SG13G2. A controlled
 [IHP placement comparison](../impl/asic/orfs/investigations/ihp-placement.md) also reuses
 two mapped Zfinx core netlists through identical floorplanning, placement and
 timing repair, with separate `placed_pre_cts` report records. It does not establish
-a general physical Make target or post-CTS/routed closure. Full physical implementation,
+post-CTS/routed closure. The production `make impl` target now starts from RTL
+and runs the same ORFS stage sequence, using automatic pin placement. CTS/routing,
 broader parameter matrices and default tool/PDK lock policies remain open.
 Build-environment
 provisioning and discovery shall follow [build, Section 5](uqu_spec.build.md#5-externally-provisioned-build-environment). Additional implementation
@@ -445,8 +458,8 @@ and [flow stage definitions](https://github.com/The-OpenROAD-Project/OpenROAD-fl
 
 ### 4.1. Interface timing scope
 
-**Status:** Agreed; generic standalone profile implemented; integration-supplied
-SDC selection and separate internal/interface path summaries remain open
+**Status:** Generic standalone and supplied integration SDC selection plus
+separate internal/interface path summaries implemented
 
 The generated SDC shall be treated as a standalone evaluation profile. Its
 20%-of-period port delays, slew, load and clock assumptions describe an
@@ -454,7 +467,12 @@ exploratory environment; they shall not promise compatibility with a particular
 SRAM, bus fabric or coprocessor. Defer detailed per-signal budgets until a
 concrete integration is selected.
 
-The build shall support an integration-supplied SDC for a concrete subsystem.
+`SDC=<file>` shall select an integration-supplied SDC in place of the generated
+profile. It shall not be combined with `RESET_INPUT_DELAY_NS`. The current
+consumer requires exactly one ideal clock, whose period matches `CLOCK_PERIOD_NS`.
+Use the original file in place, retain its snapshot/hash and STA-resolved
+constraints, and allow a caller-selected clock name. External Tcl dependencies
+are not recursively discovered and remain the integrator's responsibility.
 Retain the selected profile, full constraints and hashes with its measurements.
 For flat SoC implementation, the SoC shall own the final constraints and timing
 analysis across the core, interconnect, memories and coprocessors. Standalone
@@ -511,8 +529,8 @@ platform environment used to build the design.
 
 ## 6. Build output naming
 
-**Status:** Simulation, software, synthesis and reporting layouts implemented; physical and
-formal target layouts open
+**Status:** Simulation, software, synthesis, placement and reporting layouts
+implemented; post-placement and formal target layouts open
 
 Generated build artifacts shall live under
 `build/uquintus-<hw>/<target>/` for each selected hardware configuration and
@@ -535,7 +553,8 @@ build/uquintus-rv32i-fast/verilator/
 ```
 
 Mapped synthesis uses `orfs_<platform>/synth-<top>-<timestamp>-<id>/`.
-Full physical and formal target names remain open. Netlists, reports, waveforms, software binaries and translated build inputs
+Implementation through timing repair uses `orfs_<platform>/impl-<top>-<timestamp>-<id>/`.
+Post-placement and formal target names remain open. Netlists, reports, waveforms, software binaries and translated build inputs
 shall be kept within the applicable output directory. Current simulation runs use
 `build/uquintus-<hw>/verilator/<component>/<run>/`; `<run>` includes action,
 test selection, seed and a unique run suffix. Runs retain metadata, logs,
@@ -730,8 +749,8 @@ externally provisioned platforms, rather than copies of ORFS or the PDKs.
 
 Generated artifacts shall use `build/uquintus-<hw>/<target>/` as defined in
 [build, Section 6](uqu_spec.build.md#6-build-output-naming), which records the implemented
-simulation/software/synthesis/report layouts and ignore rules. Physical/formal artifact
-layouts remain to be defined with those flows.
+simulation/software/synthesis/placement/report layouts and ignore rules.
+Post-placement and formal artifact layouts remain to be defined with those flows.
 `make clean` shall remove the generated `build/` directory.
 Directories could be added as their contents are implemented.
 
@@ -742,15 +761,16 @@ complete presets, Bender source groups and Make simulation/lint/software/report
 targets are implemented. Extend those shared definitions when adding features.
 The ORFS synthesis consumer reuses the shared schema and uses Slang for imported
 SystemVerilog while preserving owned Verilog RTL. Implement formal and full
-physical consumers without creating separate hardware schemas.
+post-placement consumers without creating separate hardware schemas.
 
 Extend the recorded per-run tool/platform provenance into default tool/PDK
 lock policies and broader supported-configuration matrices. ORFS discovery and
 synthesis constraints are defined above; Docker images/Compose services,
-physical/formal target names and artifacts, and CI wiring remain open. Additional
+post-placement/formal target names and artifacts, and CI wiring remain open. Additional
 simulator backends still require integration; Verilator is the current backend.
-Implement integration-supplied SDC selection and separate internal/interface
-critical-path summaries under Section 4.1 before claiming those capabilities.
+Integration-supplied SDC selection and separate internal/interface critical-path
+summaries are implemented under Section 4.1. Qualify concrete SRAM/XIF
+integrations separately.
 No container build or dependency installation shall become implicit in Make.
 
 The directory tree retains its explicit proposed subdivisions. Add directories
@@ -788,4 +808,5 @@ later decisions determine the active contract.
 | D-306 | Implement external ORFS mapped synthesis for core/FPU targets using shared hardware YAML and Bender, Slang for imported SV, latch/mapping checks, preplacement STA and provenance-rich report records. | Qualify open-source ASIC frontend/mapping compatibility and expose measured cell area/timing without conflating mapped synthesis with physical closure. | Implemented; Section 4 and impl/asic/README.md; six default core/FPU runs on SKY130 HD and IHP SG13G2; full physical flow and broader parameter matrices open |
 | D-309 | Organize ASIC integrations under impl/asic/<flow>/ with flow-owned scripts, platform adapters and investigations; keep targets.yml shared at the ASIC root and select the backend through ASIC_FLOW, defaulting to orfs. | Allow future ASIC flows without treating ORFS-specific files as technology-independent collateral. | Implemented; Sections 2, 4 and 7; unsupported flow selections fail explicitly |
 | D-310 | Keep ABC wire-load estimates enabled in the qualified ORFS speed script, remove synthesis buffers before placement, and use timing-driven physical buffering. Record the resolved policy and script hash; retain estimates disabled for explicit experiments. | Preserve the measured baseline's setup advantage while allowing OpenROAD to replace synthesis buffering using placement parasitics. | Implemented policy and provenance; Section 4 and ASIC guide; full physical flow remains open |
-| D-311 | Keep the generic core SDC as a standalone evaluation profile; let concrete integrations supply constraints and the SoC own final timing. Defer detailed SRAM/XIF budgets until integration and report internal/interface paths separately. | Preserve useful standalone PPA evidence without assuming an unknown memory or coprocessor environment or counting external delay twice during SoC timing. | Agreed; Section 4.1; custom SDC selection and separate path summaries remain open |
+| D-311 | Keep the generic core SDC as a standalone evaluation profile; let concrete integrations supply constraints and the SoC own final timing. Defer detailed SRAM/XIF budgets until integration and report internal/interface paths separately. | Preserve useful standalone PPA evidence without assuming an unknown memory or coprocessor environment or counting external delay twice during SoC timing. | Implemented; Section 4.1; concrete SRAM/XIF integration profiles remain deferred |
+| D-312 | Add make impl through ORFS placement and post-placement timing repair, reusing RTL/configuration/provenance and optional supplied SDC. Retain physical cell/geometry evidence and scoped critical paths; require legality, setup/hold and electrical checks to pass. | Establish a reproducible current-core physical baseline before CTS/routing or RTL timing optimization. | Implemented; Section 4 and ASIC guide; initial qualification on IHP; CTS and routing remain open |

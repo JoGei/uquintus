@@ -99,7 +99,9 @@ standalone profile or a concrete integration, as defined in the
 selected constraints and hashes. Internal and interface critical-path summaries
 shall keep explicit endpoints and path selection; an internal-only diagnostic
 shall not replace the full-interface result or imply an integrated SoC limit.
-Separate path summaries remain a reporting follow-up.
+Both synthesis and placement runs retain setup/hold summaries and full reports
+for all constrained paths, internal register-to-register paths and each interface
+path class, with endpoints and slacks displayed in the HTML run page.
 
 ## 2. Reset assumptions in frequency comparisons
 

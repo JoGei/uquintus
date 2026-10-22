@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GNU Make helper: configure external ORFS, synthesize, and retain evidence."""
+"""GNU Make helper: external ORFS synthesis and placement with retained evidence."""
 import argparse
 from datetime import datetime, timezone
 import hashlib
@@ -143,6 +143,103 @@ set_clock_uncertainty 0.1 [get_clocks core_clk]
 '''
 
 
+def constraint_profile(period,reset_input_delay,supplied):
+    if not math.isfinite(period) or period<=0:
+        raise ValueError('clock period must be finite and positive')
+    if supplied:
+        if reset_input_delay is not None:
+            raise ValueError('SDC and RESET_INPUT_DELAY_NS cannot be combined; put reset timing in the supplied SDC')
+        source=Path(supplied).expanduser().resolve()
+        text=source.read_text()
+        if not text.strip(): raise ValueError('Supplied SDC is empty: '+str(source))
+        return text,source,dict(constraint_profile='integration',sdc_source=key(source),sdc_sha256=digest(source))
+    return sdc(period,reset_input_delay),None,dict(constraint_profile='standalone',
+        io_delay_fraction=0.2,input_transition_ns=0.1,output_load_pf=0.01,clock_uncertainty_ns=0.1,
+        reset_input_max_delay_ns=reset_input_delay if reset_input_delay is not None else period*0.2,
+        reset_input_min_delay_ns=0 if reset_input_delay is not None else period*0.2)
+
+
+def implementation_settings(die_text,core_text,density):
+    def box(text,name):
+        values=[float(v) for v in text.split()]
+        if len(values)!=4 or not all(math.isfinite(v) for v in values) or values[0]>=values[2] or values[1]>=values[3]:
+            raise ValueError(name+' requires finite x0 y0 x1 y1 coordinates with positive dimensions')
+        return values
+    die=box(die_text,'DIE_AREA');core=box(core_text,'CORE_AREA')
+    if core[0]<die[0] or core[1]<die[1] or core[2]>die[2] or core[3]>die[3]:
+        raise ValueError('CORE_AREA must be inside DIE_AREA')
+    if not math.isfinite(density) or not 0<density<1:
+        raise ValueError('PLACE_DENSITY must be finite and between 0 and 1')
+    settings=dict(DIE_AREA=' '.join(f'{v:g}' for v in die),CORE_AREA=' '.join(f'{v:g}' for v in core),
+                  PLACE_DENSITY=f'{density:g}',GPL_ROUTABILITY_DRIVEN='1',TNS_END_PERCENT='100',
+                  SKIP_REPORT_METRICS='0',REPORT_CLOCK_SKEW='0',
+                  POST_REPAIR_TIMING_POST_PLACE_TCL=make_path(COMMON/'place_metrics.tcl'))
+    context=dict(die_area_um=die,core_area_um=core,place_density=density,
+                 placement_routability_driven=True,tns_end_percent=100,pin_placement='ORFS automatic')
+    return settings,context
+
+
+def timing_summary(directory,stage,expected_period):
+    folder=directory/'timing'/stage
+    values={}
+    for line in (folder/'metrics.tsv').read_text().splitlines():
+        name,value=line.split('\t')
+        if name in values: raise ValueError('Duplicate timing metric: '+name)
+        values[name]=float(value)
+    required=('clock_period_ns','minimum_clock_period','estimated_fmax','setup_worst_slack',
+              'hold_worst_slack','setup_total_negative_slack','slew_violations',
+              'capacitance_violations','fanout_violations')
+    if any(k not in values or not math.isfinite(values[k]) for k in required):
+        raise ValueError('Missing/nonfinite timing evidence: '+str(folder))
+    if values['minimum_clock_period']<=0 or values['estimated_fmax']<=0 or not math.isclose(
+            values['estimated_fmax'],1000/values['minimum_clock_period'],rel_tol=1e-6):
+        raise ValueError('Timing period/frequency evidence disagrees')
+    if not math.isclose(values['clock_period_ns'],expected_period,rel_tol=1e-5):
+        raise ValueError('SDC clock period must match CLOCK_PERIOD_NS / --clock-period')
+    paths={}
+    for line in (folder/'paths.tsv').read_text().splitlines():
+        fields=line.split('\t');scope,delay=fields[:2]
+        if scope not in ('full','reg_to_reg','input_to_reg','reg_to_output','input_to_output') or delay not in ('max','min'):
+            raise ValueError('Unknown timing path scope: '+line)
+        label=scope+'_'+delay
+        if label in paths: raise ValueError('Duplicate timing path scope: '+label)
+        if fields[2:]==['no_paths']:
+            paths[label]=dict(status='no_paths')
+        elif len(fields)==5 and math.isfinite(float(fields[2])) and fields[3] and fields[4]:
+            paths[label]=dict(status='timed',slack_ns=float(fields[2]),startpoint=fields[3],endpoint=fields[4])
+        else: raise ValueError('Invalid timing path evidence: '+line)
+    if len(paths)!=10 or paths['full_max']['status']!='timed' or paths['full_min']['status']!='timed':
+        raise ValueError('Incomplete constrained-path evidence')
+    for delay,metric in (('max','setup_worst_slack'),('min','hold_worst_slack')):
+        if not math.isclose(paths['full_'+delay]['slack_ns'],values[metric],abs_tol=1e-4):
+            raise ValueError('Full path and global worst slack disagree')
+    summary=dict(stage=stage,clock=(folder/'clock.txt').read_text().strip(),metrics=values,paths=paths)
+    (folder/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+    return summary
+
+
+def placed_metrics(directory,modules):
+    folder=directory/'physical'
+    if (folder/'placement_violations.txt').read_text().strip()!='0':
+        raise ValueError('Placement did not pass legality checking')
+    counts={};lef_area=0.0
+    for line in (folder/'cells.tsv').read_text().splitlines():
+        name,count,area=line.split('\t');count=int(count);area=float(area)
+        if name in counts or count<=0 or not math.isfinite(area) or area<0:
+            raise ValueError('Invalid physical cell evidence: '+line)
+        counts[name]=count;lef_area+=count*area
+    if not counts: raise ValueError('Empty physical design')
+    logical={n:c for n,c in counts.items() if n in modules}
+    area=sum(c*float(modules[n]['attributes']['area']) for n,c in logical.items())
+    if not math.isfinite(area) or area<=0: raise ValueError('Invalid physical Liberty cell area')
+    metrics=[dict(name='cell_count',value=sum(counts.values()),unit='cells'),
+             dict(name='cell_area',value=area,unit='um2'),dict(name='lef_cell_area',value=lef_area,unit='um2'),
+             dict(name='physical_only_count',value=sum(c for n,c in counts.items() if n not in modules),unit='cells'),
+             dict(name='placement_violations',value=0,unit='violations'),*buffer_metrics(modules,logical)]
+    (folder/'cells.json').write_text(json.dumps(counts,indent=2)+'\n')
+    return metrics
+
+
 def buffer_metrics(modules, counts):
     # read_liberty represents a non-inverting buffer by connecting its input
     # and output ports to the same bit. This also counts clock buffers without
@@ -205,6 +302,7 @@ def timing_metrics(path):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--action',choices=('synth','impl'),default='synth')
     parser.add_argument('--config',default='rv32i')
     parser.add_argument('--top',choices=('core','fpu'),default='core')
     parser.add_argument('--platform',choices=('sky130hd','ihp-sg13g2'),default='sky130hd')
@@ -212,12 +310,17 @@ def main():
     parser.add_argument('--reset-input-delay',type=float,default=None,
                         help='Reset maximum input delay in ns; minimum becomes 0 ns (default: legacy data-input budget)')
     parser.add_argument('--jobs',type=int,default=4)
+    parser.add_argument('--sdc',default='',help='Integration SDC, used in place of the generated standalone profile')
+    parser.add_argument('--die-area',default='0 0 1240 1240')
+    parser.add_argument('--core-area',default='20 20 1220 1220')
+    parser.add_argument('--place-density',type=float,default=0.65)
     parser.add_argument('--bender',default='bender')
     parser.add_argument('--orfs-root',default=os.environ.get('ORFS_ROOT',''))
     parser.add_argument('--yosys',default=os.environ.get('YOSYS_EXE',''))
     parser.add_argument('--openroad',default=os.environ.get('OPENROAD_EXE',''))
     args=parser.parse_args()
-    constraints=sdc(args.clock_period,args.reset_input_delay)
+    constraints,supplied_sdc,constraint_context=constraint_profile(args.clock_period,args.reset_input_delay,args.sdc)
+    physical_settings,physical_context=implementation_settings(args.die_area,args.core_area,args.place_density)
     if args.jobs<1: raise ValueError('jobs must be positive')
     config_path=Path(args.config)
     if not config_path.is_file(): config_path=ROOT/'config'/f'{args.config}.yml'
@@ -227,21 +330,19 @@ def main():
     parameters=parameters_for_component(config,config.keys() if manifest['parameters']=='all'
                                         else manifest['parameters'],catalog)
     stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-    directory=ROOT/'build'/f'uquintus-{config_path.stem}'/f'orfs_{args.platform}'/f'synth-{args.top}-{stamp}-{uuid.uuid4().hex[:8]}'
+    directory=ROOT/'build'/f'uquintus-{config_path.stem}'/f'orfs_{args.platform}'/f'{args.action}-{args.top}-{stamp}-{uuid.uuid4().hex[:8]}'
     directory.mkdir(parents=True)
     record=dict(schema_version=1,kind='synthesis',status='running',
                 configuration=dict(name=config_path.stem,parameters=config),component=manifest['module'],
-                target=f'orfs_{args.platform}',selection='synth',started_at=now(),
+                target=f'orfs_{args.platform}',selection=args.action,started_at=now(),
                 input_scope='RTL, recursive include headers, Bender lock, constraints, project/ORFS scripts and platform inputs',
                 context=dict(platform=args.platform,clock_period_ns=args.clock_period,
-                             stage='mapped_preplacement',io_delay_fraction=0.2,
-                             reset_input_max_delay_ns=args.reset_input_delay if args.reset_input_delay is not None else args.clock_period*0.2,
-                             reset_input_min_delay_ns=0 if args.reset_input_delay is not None else args.clock_period*0.2,
-                             input_transition_ns=0.1,output_load_pf=0.01,clock_uncertainty_ns=0.1,
+                             stage='mapped_preplacement',**constraint_context,
                              sta_interconnect='ideal_preplacement',abc_wire_loads=True,
                              remove_abc_buffers=True,placement_timing_driven=True,
                              placement_parasitics='placement_estimated'),
                 input_sha256={},metrics=[],artifacts=[])
+    if args.action=='impl': record['context'].update(physical_context)
     metadata=directory/'report.json'
     metadata.write_text(json.dumps(record,indent=2)+'\n')
     print('Artifacts: '+str(directory),flush=True)
@@ -291,12 +392,13 @@ def main():
         (directory/'parameters.json').write_text(json.dumps(parameters,indent=2)+'\n')
         (directory/'bender_sources.json').write_text(json.dumps(tree,indent=2)+'\n')
         shutil.copyfile(ROOT/'Bender.lock',directory/'Bender.lock')
-        (directory/'constraints.sdc').write_text(constraints)
+        if supplied_sdc: shutil.copyfile(supplied_sdc,directory/'constraints.sdc')
+        else: (directory/'constraints.sdc').write_text(constraints)
         platform=ORFS/'platforms'/args.platform/'config.mk'
         settings=dict(DESIGN_NAME=manifest['module'],VERILOG_FILES=' '.join(map(make_path,sources)),
                       VERILOG_INCLUDE_DIRS=' '.join(map(make_path,includes)),
                       VERILOG_TOP_PARAMS=' '.join(f'{k} {v}' for k,v in parameters.items()),
-                      SDC_FILE=make_path(directory/'constraints.sdc'),CLOCK_PERIOD=f'{args.clock_period:g}',
+                      SDC_FILE=make_path(supplied_sdc or directory/'constraints.sdc'),CLOCK_PERIOD=f'{args.clock_period:g}',
                       ABC_CLOCK_PERIOD_IN_PS=f'{args.clock_period*1000:g}',
                       **BUFFERING_SETTINGS,
                       SYNTH_HDL_FRONTEND=frontend,SYNTH_HIERARCHICAL='0',
@@ -304,6 +406,7 @@ def main():
                       SYNTH_SCRIPT=make_path(COMMON/'synth.tcl'),
                       POST_SYNTH_TCL=make_path(COMMON/'metrics.tcl'),
                       UQU_ALLOW_LATCHES=str(int(args.top=='core' and config['MUA_REGFILE_IMPL']=='latch')))
+        if args.action=='impl': settings.update(physical_settings)
         (directory/'config.mk').write_text('include '+make_path(platform)+'\n'+
             '\n'.join(f'export {k} = {v}' for k,v in settings.items())+'\n')
         # Hash all potentially consumed includes and flow/platform resources,
@@ -311,6 +414,8 @@ def main():
         inputs=[*sources,config_path,ROOT/'Makefile',ROOT/'Bender.yml',ROOT/'Bender.lock',ROOT/'config/selectors.json',
                 ROOT/'verif/sim/common/hw_config.py',ROOT/'verif/sim/common/component_runner.py',platform,
                 *(COMMON.glob('*.py')),*(COMMON.glob('*.tcl')),TARGETS]
+        if supplied_sdc: inputs.append(supplied_sdc)
+        inputs.append(directory/'constraints.sdc')
         for folder in includes:
             inputs += [p for p in folder.rglob('*') if p.suffix in ('.vh','.svh')]
         for folder in (flow/'scripts',flow/'util',flow/'platforms'/args.platform):
@@ -341,9 +446,44 @@ def main():
         if not (results/'1_synth.odb').is_file(): raise ValueError('ORFS synthesis database missing')
         metrics,counts=mapped_metrics(reports/'uqu_stat.json',results/'uqu_mapped.json',manifest['module'])
         metrics += timing_metrics(directory/'logs'/args.platform/manifest['module']/'base/1_synth.json')
+        timing_summary(directory,'mapped_preplacement',args.clock_period)
+        record['timing_paths']=json.loads((directory/'timing/mapped_preplacement/summary.json').read_text())['paths']
         (directory/'cells.json').write_text(json.dumps(counts,indent=2)+'\n')
+        (directory/'mapped_metrics.json').write_text(json.dumps(metrics,indent=2)+'\n')
+        if args.action=='impl':
+            record['synthesis_command']=command
+            command=[*command[:-1],'place','place_repair_timing']
+            record.update(command=command,detail='Mapped synthesis complete; physical implementation running')
+            metadata.write_text(json.dumps(record,indent=2)+'\n')
+            with (directory/'implementation.log').open('w') as log:
+                process=subprocess.run(command,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
+            if process.returncode:
+                raise RuntimeError(f'ORFS implementation failed ({process.returncode}); see {directory}/implementation.log')
+            if not (results/'3_6_place_repair_timing.odb').is_file():
+                raise ValueError('Post-placement timing-repair database missing')
+            summary=timing_summary(directory,'placed_pre_cts',args.clock_period)
+            record['timing_paths']=summary['paths']
+            modules=json.loads((results/'uqu_mapped.json').read_text())['modules']
+            metrics=placed_metrics(directory,modules)
+            units=dict(minimum_clock_period='ns',estimated_fmax='MHz',setup_worst_slack='ns',
+                       hold_worst_slack='ns',setup_total_negative_slack='ns',slew_violations='pins',
+                       capacitance_violations='pins',fanout_violations='pins')
+            metrics += [dict(name=k,value=summary['metrics'][k],unit=u) for k,u in units.items()]
+            for scope in ('reg_to_reg','input_to_reg','reg_to_output','input_to_output'):
+                for delay,label in (('max','setup'),('min','hold')):
+                    path=summary['paths'][scope+'_'+delay]
+                    if path['status']=='timed':
+                        metrics.append(dict(name=scope+'_'+label+'_worst_slack',value=path['slack_ns'],unit='ns'))
+            record['context'].update(stage='placed_pre_cts',sta_interconnect='placement_estimated',clock_model='ideal')
+            record['metrics']=metrics
+            checks=summary['metrics']
+            if checks['setup_worst_slack']<0 or checks['hold_worst_slack']<0 or any(
+                    checks[k]!=0 for k in ('slew_violations','capacitance_violations','fanout_violations')):
+                raise ValueError('Placement completed but setup/hold or electrical checks failed; inspect timing reports')
         record.update(status='passed',metrics=metrics,
-                      detail='Mapped synthesis and structural checks passed; timing is a preplacement estimate, not physical signoff.')
+                      detail=('Placement, timing repair, legality, setup/hold and electrical checks passed; '
+                              'ideal clock, placement-estimated RC, before CTS and routing.' if args.action=='impl' else
+                              'Mapped synthesis and structural checks passed; timing is a preplacement estimate, not physical signoff.'))
     except BaseException as error:
         record.update(status='failed',detail=str(error))
         raise
@@ -351,9 +491,9 @@ def main():
         record['finished_at']=now()
         record['artifacts']=[str(p.relative_to(directory)) for p in directory.rglob('*')
                              if p.is_file() and p!=metadata and p.suffix in
-                             ('.json','.log','.tcl','.mk','.sdc','.v','.txt','.rpt','.f','.yml','.lock','.script')]
+                             ('.json','.log','.tcl','.mk','.sdc','.v','.txt','.rpt','.f','.yml','.lock','.script','.tsv','.def','.odb')]
         metadata.write_text(json.dumps(record,indent=2)+'\n')
-    print('PASS: mapped synthesis '+config_path.stem+' '+args.top+' '+args.platform)
+    print('PASS: '+args.action+' '+config_path.stem+' '+args.top+' '+args.platform)
 
 
 if __name__=='__main__':

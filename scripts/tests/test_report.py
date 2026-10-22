@@ -218,6 +218,32 @@ class ReportTests(unittest.TestCase):
         self.assertIn('rv32i',charts)
         self.assertIn('uqu_core',charts)
 
+    def test_timing_path_endpoints_are_visible_escaped_and_missing_paths_stay_explicit(self):
+        path=self.native(context={'stage':'placed_pre_cts'})
+        raw=report.read_json(path/'report.json')
+        raw['timing_paths']={
+            'full_max':dict(status='timed',slack_ns=-0.25,startpoint='input<1>',endpoint='u_reg/D'),
+            'reg_to_reg_max':dict(status='no_paths')}
+        (path/'report.json').write_text(json.dumps(raw))
+        output=self.build/'report'
+        data=report.generate(self.build,output,self.root)
+        self.assertFalse(data['issues'])
+        run=data['records'][0]
+        html=(output/'runs'/f'{run["id"]}.html').read_text()
+        for text in ('Critical timing paths','input&lt;1&gt;','u_reg/D','-0.25','No constrained paths',
+                     'Internal: register to register'):
+            self.assertIn(text,html)
+        # A matching stage artifact also supports records without duplicated paths.
+        folder=path/'timing/placed_pre_cts';folder.mkdir(parents=True)
+        (folder/'summary.json').write_text(json.dumps(dict(stage='placed_pre_cts',paths=raw['timing_paths'])))
+        saved=raw.pop('timing_paths')
+        (path/'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build,self.root)['records'][0]['timing_paths'],saved)
+        raw['timing_paths']=saved
+        raw['timing_paths']['full_max']['slack_ns']=float('nan')
+        (path/'report.json').write_text(json.dumps(raw))
+        self.assertTrue(report.collect(self.build,self.root)['issues'])
+
     def test_artifacts_must_stay_inside_the_run_directory(self):
         path = self.native()
         raw = report.read_json(path / 'report.json')

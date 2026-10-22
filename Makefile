@@ -19,9 +19,13 @@ ASIC_FLOW ?= orfs
 PLATFORM ?= sky130hd
 CLOCK_PERIOD_NS ?= 20
 RESET_INPUT_DELAY_NS ?=
+SDC ?=
+DIE_AREA ?= 0 0 1240 1240
+CORE_AREA ?= 20 20 1220 1220
+PLACE_DENSITY ?= 0.65
 JOBS ?= 4
 
-.PHONY: help test sim lint synth sw riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests report test-report test-runner clean
+.PHONY: help test sim lint synth impl sw riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests report test-report test-runner clean
 
 help:
 	@echo 'make test [CONFIG=rv32i] [COMPONENT=gpregfile] [SIM=verilator]'
@@ -31,6 +35,9 @@ help:
 	@echo '           [PLATFORM=sky130hd|ihp-sg13g2]'
 	@echo '           [CLOCK_PERIOD_NS=20] [JOBS=4] [ORFS_ROOT=<installation>]'
 	@echo '           [RESET_INPUT_DELAY_NS=1]  # Optional reset arrival window: 0 to this maximum, in ns'
+	@echo 'make impl [same options as synth]  # Through placement and timing repair, before CTS'
+	@echo '          [DIE_AREA="0 0 1240 1240"] [CORE_AREA="20 20 1220 1220"] [PLACE_DENSITY=0.65]'
+	@echo 'Supply SDC=<file> to synth/impl for integration constraints; omit RESET_INPUT_DELAY_NS.'
 	@echo 'Supply YOSYS_EXE / OPENROAD_EXE or tools on PATH; enabled Zfinx requires Slang.'
 	@echo 'make sw [CONFIG=rv32i] [SW=smoke] [RISCV_CC=riscv32-unknown-elf-gcc|clang]'
 	@echo 'make test COMPONENT=core_elf ELF=<path> [CONFIG=rv32i] [MAX_CYCLES=100000]'
@@ -60,11 +67,13 @@ test sim lint:
 sw:
 	$(PYTHON) verif/sim/common/software_build.py --config "$(CONFIG)" --program "$(SW)" --cc "$(RISCV_CC)"
 
-synth:
+synth impl:
 ifeq ($(ASIC_FLOW),orfs)
-	$(PYTHON) impl/asic/orfs/common/synth.py --config "$(CONFIG)" --top "$(TOP)" \
+	$(PYTHON) impl/asic/orfs/common/synth.py --action "$@" --config "$(CONFIG)" --top "$(TOP)" \
 		--platform "$(PLATFORM)" --clock-period "$(CLOCK_PERIOD_NS)" --jobs "$(JOBS)" \
 		$(if $(RESET_INPUT_DELAY_NS),--reset-input-delay "$(RESET_INPUT_DELAY_NS)") \
+		$(if $(SDC),--sdc "$(SDC)") \
+		$(if $(filter impl,$@),--die-area "$(DIE_AREA)" --core-area "$(CORE_AREA)" --place-density "$(PLACE_DENSITY)") \
 		--bender "$(BENDER)" --orfs-root "$(ORFS_ROOT)" --yosys "$(YOSYS_EXE)" --openroad "$(OPENROAD_EXE)"
 else
 	$(error Unsupported ASIC_FLOW '$(ASIC_FLOW)'; supported: orfs)

@@ -257,7 +257,8 @@ and OBI v1.6.0 in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-inst
 Component/core regressions, ELF execution, pinned riscv-tests and scoped Spike
 comparison are implemented as described in the verification specification.
 Formal checks remain deferred under D-291. ORFS mapped synthesis and preplacement
-measurements are implemented under D-306; physical-implementation acceptance
+measurements are implemented under D-306; placement and timing repair are
+implemented under build D-312. Post-CTS/routed physical-implementation acceptance
 remains open. Existing simulation evidence does not complete
 all milestone acceptance requirements.
 
@@ -281,7 +282,7 @@ shall not silently enable a deferred feature.
 | FPU adapter/configuration qualification, core debug integration, dynamic prediction, physical validation and remaining feature acceptance | [Architecture follow-ups](uqu_spec.arch.md#21-implementation-follow-ups-and-deferred-scope) |
 | External memory guarantees, optional IP/DM integration, reset conditioning and deferred XIF features | [Interface follow-ups](uqu_spec.interfaces.md#12-integration-follow-ups) |
 | Broader reference coverage, formal toolchain/binding/proofs, coverage targets and CI implementation | [Verification follow-ups](uqu_spec.verif.md#4-verification-follow-ups) |
-| Additional simulator backends, physical ORFS targets, tool/PDK pins and provisioned environments | [Build follow-ups](uqu_spec.build.md#8-build-follow-ups) |
+| Additional simulator backends, post-placement ORFS targets, tool/PDK pins and provisioned environments | [Build follow-ups](uqu_spec.build.md#8-build-follow-ups) |
 | Tool-compatible parsing of imported SystemVerilog and backend-specific latch timing | [RTL style guide](uqu_spec.style.md) |
 
 The proposed reproducibility/architectural-commitment principles and directory

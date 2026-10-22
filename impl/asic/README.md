@@ -22,13 +22,15 @@ flows shall use the shared report format. Factor out technology collateral when
 multiple flows need it; tool/PDK provisioning remains external. The current
 platform adapters contain ORFS exports and are therefore flow specific.
 
-## ORFS synthesis
+## ORFS synthesis and placement
 
 `make synth` invokes externally provisioned **OpenROAD-flow-scripts (ORFS)**.
 ORFS owns synthesis, ABC technology mapping and OpenROAD netlist loading.
 The project supplies source selection, configuration, constraints, structural
 checks and report metadata. It does not install tools, build dependencies,
 launch containers or modify the ORFS checkout.
+`make impl` starts from the same RTL/configuration and continues through ORFS
+floorplanning, global/detailed placement and post-placement timing repair.
 
 ```sh
 export ORFS_ROOT=/path/to/OpenROAD-flow-scripts
@@ -41,6 +43,8 @@ export YOSYS_PLUGIN_PATH=/path/to/plugin-directory
 make synth ASIC_FLOW=orfs CONFIG=rv32i TOP=core PLATFORM=sky130hd
 make synth CONFIG=rv32i_zfinx TOP=fpu PLATFORM=sky130hd
 make synth CONFIG=rv32i_zfinx TOP=core PLATFORM=sky130hd
+make impl CONFIG=rv32i TOP=core PLATFORM=ihp-sg13g2 RESET_INPUT_DELAY_NS=1
+make impl CONFIG=rv32i_zfinx TOP=core PLATFORM=ihp-sg13g2 RESET_INPUT_DELAY_NS=1
 make report
 ```
 
@@ -59,9 +63,22 @@ The generated SDC is a **standalone evaluation profile**, using generic port
 delays, slew and load assumptions. It does not model a particular SRAM or
 coprocessor. The SoC owns final integrated timing; see the
 [interface timing policy](../../doc/uqu_spec.build.md#41-interface-timing-scope).
-Integration-supplied SDC selection and separate internal/interface critical-path
-summaries are agreed follow-ups, not current Make options. Detailed SRAM/XIF
-budgets remain deferred until their integrations are selected.
+Supply `SDC=/absolute/path/system.sdc` to `make synth` or `make impl` to replace
+the generated constraints. Omit `RESET_INPUT_DELAY_NS` in that case; put reset
+timing in the supplied file. `CLOCK_PERIOD_NS` must match its single ideal clock's
+period. Clock naming is flexible. The source is used in place, preserving Tcl
+includes anchored to its original path. Retain its original snapshot/hash and
+the resolved constraints emitted by STA. External Tcl dependencies are the
+integrator's responsibility and are not recursively discovered by this runner.
+Detailed SRAM/XIF budgets remain deferred until their integrations are selected.
+
+Implementation defaults to a fixed `DIE_AREA="0 0 1240 1240"` and
+`CORE_AREA="20 20 1220 1220"`, in micrometers, with `PLACE_DENSITY=0.65`.
+These are evaluation settings, independent of hardware YAML. The footprint
+matches the earlier IHP experiment, but pins use ORFS's automatic placement.
+Record actual geometry/pins as artifacts; do not attribute differences from
+the experiment solely to RTL changes. Timing/routability-driven placement and
+`TNS_END_PERCENT=100` are explicit. The default footprint is not an area optimum.
 
 `ORFS_ROOT` must contain `flow/Makefile`. If unset, an environment-provided
 `orfs --flow-dir` launcher must print the absolute directory containing the
@@ -137,9 +154,8 @@ placement policy in `report.json`. These are implementation-flow settings;
 hardware YAML and RTL `MUA_` parameters remain independent.
 
 `make synth` stops before floorplanning, so its mapped area still includes ABC's
-buffers. The removal and placement settings apply when continuing the generated
-external-design configuration into physical implementation. The declared
-placement policy in a synthesis record does not mean placement was executed.
+buffers. The removal and placement settings apply in `make impl`. The declared
+placement policy in a synthesis-only record does not mean placement was executed.
 The placement comparison helper uses the same physical settings. Wire-load
 estimates disabled remains an explicit investigation case, outside the baseline.
 The [IHP comparison](orfs/investigations/ihp-placement.md) motivates this policy;
@@ -150,12 +166,21 @@ the result covers one configuration and corner before CTS and routing.
 Each run has a fresh directory:
 
 ```text
-build/uquintus-<hw>/orfs_<platform>/synth-<top>-<timestamp>-<id>/
+build/uquintus-<hw>/orfs_<platform>/<synth|impl>-<top>-<timestamp>-<id>/
   config.yml, parameters.json, config.mk, constraints.sdc, sources.f
   include/uqu_config.vh, Bender.lock, bender_sources.json
   abc_speed.script                            # Exact qualified upstream ABC script
   synthesis.log, frontend.log                 # Frontend log when using Slang
   report.json, cells.json
+  mapped_metrics.json
+  timing/mapped_preplacement/                  # Scope reports and resolved SDC
+  timing/placed_pre_cts/                       # Implementation runs only
+    summary.json, paths.tsv, metrics.tsv, clock.txt
+    full_max.rpt, reg_to_reg_max.rpt, input_to_reg_max.rpt, ...
+    constraints.resolved.sdc, coverage.rpt, electrical.rpt
+  physical/                                   # Implementation runs only
+    cells.json, cells.tsv, geometry.tsv, pins.tsv
+    uqu_placed.v, uqu_placed.def, placement_violations.txt
   logs/<platform>/<module>/base/1_synth.json
   reports/<platform>/<module>/base/             # Checks, area and timing paths
   results/<platform>/<module>/base/             # RTLIL, mapped Verilog/JSON, ODB, SDC
@@ -163,15 +188,16 @@ build/uquintus-<hw>/orfs_<platform>/synth-<top>-<timestamp>-<id>/
 
 `make report` collects these records into `build/report/synthesis/index.html`.
 Large artifacts remain available at the recorded build paths when they exceed
-the portable report's bundling limit. The production target stops at synthesis;
-the [controlled placement experiment](orfs/investigations/ihp-placement.md) also reports
-two placed results. CTS and routing remain open.
+the portable report's bundling limit. `make synth` stops at mapping;
+`make impl` stops after placement and timing repair, before CTS and routing.
+The [controlled placement experiment](orfs/investigations/ihp-placement.md)
+remains a separate historical comparison.
 The portable collector only rechecks files inside the repository. External
 ORFS/platform files retain their recorded hashes, but make the current-input
 badge `unknown`; this is separate from the successful synthesis outcome.
 
-**Passed means mapping, structural checks, netlist loading and reporting passed.**
-It does not require positive timing slack. A negative worst setup slack records
+**Synthesis passed means mapping, structural checks, netlist loading and reporting passed.**
+For synthesis-only runs, positive timing slack is not required. A negative worst setup slack records
 a missed clock target; it must remain visible. Timing uses cell delays and port
 loads before placement, with ideal interconnect and clocking, not extracted
 wire parasitics. Cell area is the sum of mapped cell areas, not die/core area.
@@ -189,6 +215,15 @@ this ABC script maps specifically toward that period. Preserve the script
 revision when comparing results or clock targets.
 The [benchmarking specification](../../doc/uqu_spec.bench.md) defines `T_min`,
 estimated maximum frequency, timing scope and reset-arrival assumptions.
+Implementation passing additionally requires legal placement, nonnegative
+setup/hold slack and zero reported slew, capacitance and fanout violations.
+Failures retain measured metrics and diagnostics. Clocking remains ideal and
+wire RC is placement estimated; this is not post-CTS or routed signoff.
+Physical records distinguish Liberty logic area, LEF master area and physical-only
+cells. Both flows retain setup/hold reports for all constrained paths, internal
+register-to-register paths, and three interface path classes. Their endpoints
+and slacks appear in the HTML run page. Missing path classes are explicit;
+internal-only slacks are not converted into a replacement Fmax.
 ORFS's raw report includes default-activity power estimates; this flow does not
 publish them as qualified power measurements. Physical timing, area, power,
 DRC/LVS and post-synthesis functional equivalence remain separate qualification.
@@ -204,3 +239,31 @@ mapping-area difference caused by these wire-load estimates. The experiment
 supports keeping wire-load estimates enabled in the baseline. Its
 [placement follow-up](orfs/investigations/ihp-placement.md) shows how removing synthesis
 buffers and repairing against placement-based RC eliminates most of that gap.
+
+## Current IHP placement baseline — 2026-10-22
+
+Current constant-`HART_ID` RTL, IHP SG13G2 typical 1.20 V / 25°C, 20 ns target,
+standalone profile with `RESET_INPUT_DELAY_NS=1`, default footprint/density and
+automatic pin placement. Clock is ideal; RC is placement estimated.
+
+| Configuration | Liberty cell area (µm²) | Buffers | Setup slack (ns) | Hold slack (ns) | Estimated Fmax (MHz) |
+|---|---:|---:|---:|---:|---:|
+| RV32I | 314,007.47 | 2,302 | +4.470 | +0.168 | 64.39 |
+| RV32I + Zfinx | 559,646.99 | 4,648 | +3.930 | +0.171 | 62.23 |
+
+Both pass placement legality and report zero slew, capacitance and fanout
+violations. The full-interface critical path starts at `fence_ack_i` and ends
+at a fetch-buffer data register. Internal worst setup slack is +7.395 ns for
+RV32I and +5.860 ns for Zfinx; these are diagnostics, not alternate frequency
+claims. The latter path starts at an FPU sum register and ends in the fetch buffer.
+
+Retained runs:
+
+- [RV32I](../../build/uquintus-rv32i/orfs_ihp-sg13g2/impl-core-20261022T080203Z-e5ce2de1/report.json)
+- [Zfinx](../../build/uquintus-rv32i_zfinx/orfs_ihp-sg13g2/impl-core-20261022T080238Z-898c1106/report.json)
+- [Supplied-SDC check](../../build/uquintus-rv32i/orfs_ihp-sg13g2/impl-core-20261022T080458Z-11a56261/report.json): same RV32I result with equivalent delays and a caller-selected `integration_clk` clock name.
+
+These are new standalone-core placements, not integrated SoC or routed results.
+Their changed pin placement and RTL prevent attributing differences from the
+historical experiment solely to hart-ID constant propagation. The failed initial
+Zfinx attempt without an installed Slang search path remains in report history.

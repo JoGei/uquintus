@@ -359,6 +359,7 @@ and Bender sources as simulation. Supply `ORFS_ROOT`, `YOSYS_EXE` and
 make synth ASIC_FLOW=orfs CONFIG=rv32i TOP=core PLATFORM=sky130hd
 make synth CONFIG=rv32i_zfinx TOP=fpu PLATFORM=sky130hd
 make synth CONFIG=rv32i_zfinx TOP=core PLATFORM=ihp-sg13g2
+make impl CONFIG=rv32i_zfinx TOP=core PLATFORM=ihp-sg13g2 RESET_INPUT_DELAY_NS=1
 make report
 ```
 
@@ -368,6 +369,9 @@ checks. Passing synthesis does not establish timing closure. The
 baseline enables ABC wire-load estimates and configures synthesis-buffer removal
 before timing-driven placement; each run retains the policy and ABC script hash.
 The [IHP placement comparison](impl/asic/orfs/investigations/ihp-placement.md) also provides
-two controlled placed results; CTS, routing and extracted power/timing remain open.
+two controlled placed results. `make impl` now runs current RTL through placement
+and timing repair, with scoped critical-path tables in the report. Supply
+`SDC=<file>` for caller-provided constraints; omit the reset-delay override in
+that case. CTS, routing and extracted power/timing remain open.
 The [benchmarking specification](doc/uqu_spec.bench.md) defines `T_min` and
 estimated maximum frequency with their measurement assumptions.
