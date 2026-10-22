@@ -326,6 +326,78 @@ repair, before CTS and routing. `TOP` defaults to `core`; `CLOCK_PERIOD_NS=20`
 and `JOBS=4` are flow settings. `SDC=<file>` selects supplied integration
 constraints in either target. Formal and post-placement commands remain open.
 
+### 2.1. Generated hardware configuration label
+
+**Status:** Label convention agreed; generation and report integration pending
+
+In addition to the YAML preset name, the build shall derive a descriptive
+hardware configuration label from the validated parameter values. The YAML
+shall remain the source of truth; the label shall not be parsed as configuration
+input. Preset names and the `build/uquintus-<hw>/<target>/` layout shall retain
+their existing meanings. Reports and artifact metadata shall expose the label
+alongside the preset name and complete parameter fingerprint.
+
+Labels shall use lowercase tokens and the following fixed field order. Square
+brackets denote optional fields; braces denote alternatives. An optional
+feature's token shall appear only when that feature is enabled. Selectors for
+disabled features shall be omitted even though their values remain mandatory
+in the YAML and included in the complete parameter fingerprint.
+Microarchitecture selections shall use `mua-<feature>:<selection>`, with `+`
+joining combined selections and `_` separating fields. The optional enabled-only
+`mua-opret` flag shall retain its short form.
+
+| Field | Label form | Parameter selection |
+| --- | --- | --- |
+| ISA | `uqu_rv32{i,e}[m][c]_zicsr[_zifencei][_zfinx]` | `ISA_E` chooses `e` instead of `i`; the remaining optional tokens follow their corresponding ISA parameters. Zicsr is always present. |
+| Coprocessor | `[_xif-{2rs,3rs}[-dw]]` | `XIF`, `XIF_NUM_RS`, `XIF_DUALWRITE`. |
+| User mode | `[_umode]` | `ISA_UMODE`. |
+| Physical memory protection | `[_pmp]` | `ISA_PMP`. |
+| Debug | `[_dbg]` | `DEBUG`. |
+| General-purpose register file | `_mua-gpr:{ff,latch}` | `MUA_REGFILE_IMPL`. |
+| Forwarding | `_mua-fw:none` or `_mua-fw:[ex2de+][mem2de+][mem2ex+][wb2ex+]wb2de` | Master `MUA_FORWARDING`, followed by enabled individual forwarding paths in the displayed order and the fixed WB-to-DE path. |
+| DE operand retention | `[_mua-opret]` | `MUA_DE_OPERAND_RETENTION`; this describes operand retention rather than an instruction buffer. |
+| Compressed handling | `[_mua-c:{decompr-if,decompr-de,decode}]` | Present only for `ISA_C=1`; `MUA_C_IMPL` and, for decompression, `MUA_C_DECOMPRESS_STAGE`. |
+| Branch prediction | `_mua-bp:{none,stnt}` | `MUA_BRANCH_PREDICTOR`: `none` or `static_not_taken`. |
+| Instruction buffer | `_mua-ifbuf:<words>` | `MUA_IF_BUFFER_WORDS`. |
+| Multiplier | `[_mua-mul:{iter,para,para+stages2}]` | Present only for `ISA_M=1`; `MUA_MUL`: `iterative`, `parallel`, or `parallel+stages+2`. |
+| Divider | `[_mua-div:iter]` | Present only for `ISA_M=1`; the currently supported `MUA_DIV` choice is `iterative`. |
+| Shared iterative arithmetic | `[_mua-mdu:unroll<factor>]` | `MUA_MULDIV_ITERUNROLL`, when M is enabled and at least one MUL/DIV implementation is iterative. |
+| FPU implementation | `[_mua-fpu:<backend>+pipe-<placement>+fma<N>+divsqrt<N>+noncomp<N>+conv<N>]` | Present only for `ISA_ZFINX=1`; `MUA_FPU_DIVSQRT`, `MUA_FPU_PIPE_CONFIG`, then the four `MUA_FPU_PIPE_REGS_*` counts in the displayed order. Use the validated YAML labels for backend and placement. |
+
+`mua-fw:none` shall mean that the master forwarding switch is disabled,
+irrespective of the inactive individual path settings. With the master enabled,
+WB-to-DE forwarding shall always be listed explicitly as `wb2de`. Consequently,
+disabling all four individually configurable paths shall produce
+`mua-fw:wb2de`, distinct from `mua-fw:none`.
+
+Direct compressed decoding shall use `mua-c:decode`; the inactive decompressor
+placement shall not appear. MUL and DIV shall share the single
+`mua-mdu:unroll<factor>` field; it shall not imply independently configurable
+unroll factors. Factor 32 remains an unrolled iterative implementation rather
+than a separate parallel-divider selector. Future ISA or implementation
+choices shall extend this convention when supported; reserving a parameter
+shall not make that feature selectable or qualify it for reporting as enabled.
+
+For the current `config/rv32i.yml`, the label shall be:
+
+```text
+uqu_rv32i_zicsr_umode_mua-gpr:ff_mua-fw:ex2de+mem2de+mem2ex+wb2ex+wb2de_mua-bp:none_mua-ifbuf:2
+```
+
+Enabling C with decompression in DE shall insert `c` in the ISA token and
+`_mua-c:decompr-de` after the optional operand-retention field. Enabling M with
+iterative MUL/DIV and factor eight shall append the arithmetic fields
+`_mua-mul:iter_mua-div:iter_mua-mdu:unroll8`, before any FPU field.
+
+The descriptive label shall not replace the complete parameter fingerprint as
+configuration identity. Inactive settings and compile-time integration
+identity such as `HART_ID` may differ without changing the label. The existing
+fingerprint over the complete parameter snapshot shall distinguish these
+configurations. Artifact filenames shall use the preset name and/or a compact
+fingerprint rather than require the potentially long label as a directory or
+filename component. Simulator, compiler, technology, timing constraints and
+benchmark execution mode shall remain separate report context.
+
 ## 3. Selectable simulation backend
 
 **Status:** Verilator integration implemented; additional backends open
