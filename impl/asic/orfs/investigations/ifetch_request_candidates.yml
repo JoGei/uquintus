@@ -1,0 +1,5 @@
+# RV32IMC, fixed BP16/BTB16; halfwords of target instruction data per entry.
+- [16, 16, 0]
+- [16, 16, 2]
+- [16, 16, 4]
+- [16, 16, 6]

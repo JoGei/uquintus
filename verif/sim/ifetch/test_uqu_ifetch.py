@@ -34,10 +34,8 @@ class IfetchTest(uvm_test):
              ('req_ready','busy','res_valid','res_addr','res_data','res_error','imem_req','imem_addr')}
         if not o['res_valid']:
             assert (o['res_addr'],o['res_data'],o['res_error']) == (0,0,0)
-        if not o['imem_req']:
-            assert o['imem_addr'] == 0
-        else:
-            assert o['busy']
+        if o['imem_req']:
+            assert o['busy'] or i['req_valid']
             assert o['imem_addr'] & 3 == 0
         if o['res_valid']:
             assert o['busy']
@@ -58,14 +56,18 @@ class IfetchTest(uvm_test):
 
     async def reset(self):
         r = await self.cycle(rst_n=0)
-        assert not any(r.values())
+        assert not any(value for name,value in r.items() if name!='imem_addr')
         r = await self.cycle()
         assert r['req_ready'] and not r['busy']
 
     async def accept(self, address, denied=False, permit=True, grant_high=False):
         r = await self.cycle(req_valid=1, req_addr=address, req_access_fault=int(denied),
                              request_permit=int(permit), imem_gnt=int(grant_high))
-        assert r['req_ready'] and not r['busy'] and not r['imem_req'] and not r['res_valid']
+        assert r['req_ready'] and not r['busy'] and not r['res_valid']
+        assert r['imem_req'] == (permit and not denied)
+        if r['imem_req']:
+            assert r['imem_addr'] == word_address(address)
+        return bool(r['imem_req'] and grant_high)
 
     async def grant(self, address, delay=0, flush=False):
         for index in range(delay+1):
@@ -94,15 +96,16 @@ class IfetchTest(uvm_test):
 
     async def operation(self, address, data=0x12345678, denied=False, error=False,
                         grant_delay=0, response_delay=0, hold=0, permit_wait=0, grant_high=False):
-        await self.accept(address, denied, not permit_wait, grant_high)
+        granted = await self.accept(address, denied, not permit_wait, grant_high)
         if not denied:
             if permit_wait:
                 for _ in range(permit_wait):
                     r = await self.cycle(request_permit=0, imem_gnt=1, req_access_fault=1)
                     assert r['busy'] and not r['imem_req'] and not r['res_valid']
                 r = await self.cycle(request_permit=1, req_access_fault=1)
-                assert not r['imem_req'] and not r['res_valid']
-            await self.grant(address, grant_delay)
+                assert r['imem_req'] and r['imem_addr'] == word_address(address) and not r['res_valid']
+            if not granted:
+                await self.grant(address, grant_delay)
             await self.respond(data, error, response_delay)
         await self.consume(completion(address,data,denied,error),hold)
 
@@ -190,6 +193,8 @@ class StreamingTest(IfetchTest):
         else:
             raise AssertionError('stream did not drain')
         if not random_wait:
+            assert grants[0] == accepts[0] == 0
+            assert results[0] == 2  # Next-cycle response, then registered delivery.
             for name, events in [('accept', accepts), ('grant', grants), ('result', results)]:
                 assert len(events)==count and all(b-a==1 for a,b in zip(events,events[1:])), (name,events)
 
@@ -205,13 +210,14 @@ class PipelinedFlushTest(IfetchTest):
         self.raise_objection()
         for phase in ('pending','return','held_request','full_results','denied_queued','reset'):
             await self.reset()
-            await self.cycle(req_valid=1,req_addr=0x1000)
-            r = await self.cycle(req_valid=1,req_addr=0x1004,imem_gnt=1)
+            r = await self.cycle(req_valid=1,req_addr=0x1000,imem_gnt=1)
             assert r['imem_req'] and r['imem_addr']==0x1000
-            r = await self.cycle(req_valid=1,req_addr=0x1008,
-                req_access_fault=int(phase=='denied_queued'), imem_gnt=1,
-                imem_rvalid=1,imem_rdata=0xaaaaaaaa,imem_err=0)
+            r = await self.cycle(req_valid=1,req_addr=0x1004,imem_gnt=1,
+                                 imem_rvalid=1,imem_rdata=0xaaaaaaaa,imem_err=0)
             assert r['imem_req'] and r['imem_addr']==0x1004
+            r = await self.cycle(req_valid=1,req_addr=0x1008,
+                req_access_fault=int(phase=='denied_queued'), imem_gnt=1)
+            assert not r['imem_req']
             # A is registered, B is outstanding, C is queued: all three
             # logical credits are occupied. Exercise every flush ownership.
             if phase=='pending':

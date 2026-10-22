@@ -21,3 +21,4 @@ tests:
   - throughput
   - idata
   - idata_latency
+  - fresh_fetch_latency

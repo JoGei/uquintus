@@ -164,3 +164,12 @@ with replay enabled cancels frontend work and refetches the current PC.
 under stalls/table replacement, refill continuation order, first/second-word
 live denials and changed code after invalidation. The same case supports all
 compressed strategies and one-halfword/non-power-of-two capacities.
+
+
+The fetch engine bypasses an empty request slot, allowing immediate OBI grant
+on a fresh request. The redirect target remains registered in IF. With no stale
+transaction, immediate grants and next-cycle responses, `fresh_fetch_latency`
+checks target grant in cycle 1 and IF/DE availability in cycle 4 after redirect,
+including a compressed halfword target. Response slots and word FIFO remain
+registered. `idata_latency` checks the corresponding shorter refill behind replay;
+throughput remains one fetched word per cycle after startup.

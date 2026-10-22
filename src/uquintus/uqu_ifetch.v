@@ -1,6 +1,6 @@
 `default_nettype none
 
-// Registered request, one granted OBI transaction, and two registered results.
+// Combinational request bypass, one granted transaction, two registered results.
 // A response may retire on the same edge as the following request is granted.
 // The core supplies the completed PMP denial decision at native acceptance.
 module uqu_ifetch (
@@ -49,11 +49,20 @@ module uqu_ifetch (
     wire [2:0] count_after_response = {1'b0,result_count_q} - {2'b00,res_fire} +
                                     {2'b00,response_push};
     wire response_room = count_after_response < 3'd2;
-    wire may_present = request_armed_q && !flush_i && response_room && (!pending_q || response);
-    wire grant_fire = imem_req_o && imem_gnt_i;
+    wire may_present = (request_armed_q || request_permit_i) && !flush_i && response_room && (!pending_q || response);
+    wire queued_request = rst_ni && request_valid_q && !request_fault_q &&
+                          (request_presented_q || may_present);
+    // An empty request slot bypasses directly to OBI. Native readiness stays
+    // independent of the live protection decision and bus grant on this path.
+    wire direct_request = rst_ni && !flush_i && !request_valid_q && req_valid_i &&
+                          !req_access_fault_i && request_permit_i && response_room &&
+                          (!pending_q || response);
+    wire queued_grant = queued_request && imem_gnt_i;
+    wire direct_grant = direct_request && imem_gnt_i;
+    wire grant_fire = queued_grant || direct_grant;
     wire denied_done = request_valid_q && request_fault_q && !pending_q &&
                        !flush_i && response_room;
-    wire request_done = grant_fire || denied_done;
+    wire request_done = queued_grant || denied_done;
     wire req_fire = req_valid_i && req_ready_o;
     // Preserve the original next-cycle completion for an idle denied request.
     // Otherwise it queues behind earlier work, preserving response order.
@@ -74,9 +83,10 @@ module uqu_ifetch (
     assign res_data_o = res_valid_o && !res_error_o ? result_data_q[result_head_q] : 32'd0;
     // No response-data bypass. Only response validity participates in turnover.
     // Flush may cancel private work, but never withdraw a presented request.
-    assign imem_req_o = rst_ni && request_valid_q && !request_fault_q &&
-                        (request_presented_q || may_present);
-    assign imem_addr_o = imem_req_o ? request_addr_q : 32'd0;
+    assign imem_req_o = queued_request || direct_request;
+    // Payload is irrelevant while idle; avoid a request-control mux at the
+    // address endpoint. Presented requests use their retained address.
+    assign imem_addr_o = request_valid_q ? request_addr_q : {req_addr_i[31:2],2'b00};
 
     always @(posedge clk_i) begin
         if (!rst_ni) begin
@@ -94,8 +104,8 @@ module uqu_ifetch (
             if (flush_i && pending_q) pending_killed_q <= 1'b1;
             if (grant_fire) begin
                 pending_q <= 1'b1;
-                pending_addr_q <= request_addr_q;
-                pending_killed_q <= request_killed_q || flush_i;
+                pending_addr_q <= request_valid_q ? request_addr_q : {req_addr_i[31:2],2'b00};
+                pending_killed_q <= (request_valid_q && request_killed_q) || flush_i;
             end
 
             if (request_valid_q && !request_armed_q && request_permit_i)
@@ -119,13 +129,13 @@ module uqu_ifetch (
                     request_presented_q <= 1'b0;
                 end
             end else if (req_fire) begin
-                request_valid_q <= !denied_direct;
+                request_valid_q <= !denied_direct && !direct_grant;
                 request_addr_q <= {req_addr_i[31:2],2'b00};
                 request_fault_q <= req_access_fault_i;
                 request_armed_q <= request_permit_i;
                 request_killed_q <= 1'b0;
-                // In an idle engine the captured request is presented during
-                // the next cycle, even if that cycle introduces a flush.
+                // A bypassed ungranted request becomes retained immediately.
+                // Permission/capacity release also preserves presentation through flush.
                 request_presented_q <= !req_access_fault_i && request_permit_i &&
                                        !pending_after && (count_after_push < 3'd2);
             end

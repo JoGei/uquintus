@@ -434,10 +434,32 @@ class IdataLatencyTest(IdataTest):
             if o['valid']: times.append(tick)
             if len(times)==depth+4: break
         assert times[:depth]==list(range(1,depth+1)), times
-        assert times[depth]==max(5,depth+1), times
+        assert times[depth]==max(4,depth+1), times
         self.drop_objection()
 
 
 @cocotb.test(timeout_time=1000,timeout_unit='us')
 async def idata_latency(dut):
     await uvm_root().run_test('IdataLatencyTest')
+
+
+class FreshFetchLatencyTest(IfStageTest):
+    async def run_phase(self):
+        self.raise_objection()
+        self.response_latency = 1
+        # No stale bus work and no target replay: test the actual cold refill.
+        for target in ((0x8000,0x9002) if self.c else (0x8000,0x9000)):
+            await self.reset()
+            await self.cycle(redirect_valid=1,redirect_addr=target,fetch_enable=0,grant=1)
+            for tick in range(1,5):
+                o = await self.cycle(grant=1,ready=1)
+                if tick==1:
+                    assert o['imem_req'] and o['imem_addr']==target&~3
+                assert bool(o['valid']) == (tick==4), (tick,o)
+            assert self.delivered[-1][0] == target
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def fresh_fetch_latency(dut):
+    await uvm_root().run_test('FreshFetchLatencyTest')

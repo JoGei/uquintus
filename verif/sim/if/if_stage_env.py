@@ -135,6 +135,12 @@ class IfStageTest(uvm_test):
         allowed = query[1] not in self.denied and not (self.deny_user and not i['priv_m'])
         d.pmp_allow_i.value = int(allowed)
         await Timer(1,units='ns')
+        # New requests can now bypass to OBI in this cycle. Sample the bus
+        # after protection settles; an initially assumed allow is not a grant.
+        req,addr = int(d.imem_req_o.value),int(d.imem_addr_o.value)
+        gnt = int(bool(gnt and req))
+        d.imem_gnt_i.value = gnt
+        await Timer(1,units='ns')
         names = ('valid','pc','instr','original_instr','compressed','next_pc','predicted_next_pc',
                  'exception_valid','exception_cause','exception_tval','misaligned',
                  'fetch_busy','pmp_valid','pmp_addr','pmp_size','pmp_priv_m')

@@ -120,6 +120,13 @@ an upper bound on grant or response latency, and shall not prohibit completion
 of an older transaction in the cycle a different transaction is granted when
 the outstanding-request and capacity rules permit.
 
+Both request engines shall present a permitted new OBI request combinationally
+when transaction/response capacity is available. A delayed grant shall retain
+request/address (and data controls for dmem) until acceptance. The fetch engine
+may accept native addresses into its private holding slot before bus grant;
+MEM advances its instruction to WB on data-bus grant. Payload while `req=0`
+is unspecified and does not require an idle-zero mask.
+
 For native data accesses, MEM owns request validation/presentation and transfers
 the instruction to WB on grant. WB owns response completion and precise fault
 entry. A successful WB response may overlap a different MEM request/grant;

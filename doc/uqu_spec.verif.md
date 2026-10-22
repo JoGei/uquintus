@@ -317,6 +317,15 @@ sampling requests so response/request turnover is modeled without an artificial
 bubble. Native/checked benchmark qualification shall retain exact timer and
 BPU-counter agreement after fetch-engine changes.
 
+The `fresh_fetch_latency` test additionally requires first-cycle target grant
+and cycle-4 instruction availability after an empty-frontend redirect with
+next-cycle memory responses. Leaf tests require initial native acceptance and
+OBI grant to coincide, preserve stable delayed requests across flush, reject
+protection-denied bus requests, and retain one outstanding transaction plus
+bounded registered completion storage. The IF testbench must resolve protection
+before sampling the bus; an assumed intermediate allow is not an accepted grant.
+
+
 The [pipeline-controller tests](../verif/sim/pipeline_ctrl/README.md) shall
 separately exercise stage movement, age-qualified fault barriers, older-safety
 memory permission, live IRQ masks/priority, serial barriers, accepted redirects

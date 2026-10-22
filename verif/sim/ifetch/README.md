@@ -1,7 +1,7 @@
 # Instruction-word fetch engine
 
 [uqu_ifetch.v](../../../src/uquintus/uqu_ifetch.v) is the IF-owned, single-word
-OBI transaction engine. It has a private request register, one granted
+OBI transaction engine. It has a combinational request bypass, a private holding register, one granted
 transaction, and two registered completion slots, independent of the
 fetched-word buffer, [instruction aligner](../if_aligner/README.md) and
 parent-owned IF/DE register.
@@ -42,7 +42,7 @@ address, size, read/write access and effective privilege. Configuration/address
 CSRs connect only to that core-owned checker. Neither transaction engine
 instantiates it or carries privilege attributes on OBI.
 
-The denial decision must be ready before request acceptance and is latched
+The denial decision must be ready before request presentation/acceptance and is latched
 with that request. Later changes to query inputs cannot alter its outcome.
 Core control remains responsible for serialization and invalidation when
 architectural protection/privilege state changes. Permission to start work is
@@ -63,12 +63,26 @@ The native bus is read-only: `imem_req_o`, `imem_addr_o[31:0]`,
 Full-OBI constant write controls belong in the wrapper. There is no response
 backpressure, ID, retry or internal timeout.
 
-On private acceptance, an allowed and permitted request presents its captured
-address in the following cycle. Otherwise it waits privately until an active
-edge observes permission. Once presented, request and address remain stable
-until grant regardless of permission changes, stalls or flush. The response
-must arrive at least one cycle after grant, following the native OBI profile.
-Grant may already be high when a request is presented.
+An allowed, permitted request bypasses an empty private holding slot and
+presents its aligned address to OBI immediately, provided completion capacity
+is reserved and the prior granted transaction has completed or is responding.
+A preasserted grant accepts that request on the same edge as native acceptance;
+the engine does not enqueue a duplicate. If grant is delayed, the request/address
+is retained in the private slot. Accepted requests that initially lack permission
+or bus capacity queue there and present when eligible; permission release does
+not itself require an extra clock edge.
+
+Once presented, request and address remain stable until grant regardless of
+permission changes, stalls or flush. The response must arrive at least one
+cycle after grant. The request-side policy matches the LSU's immediate OBI
+presentation and persistent held requests; native frontend acceptance may still
+queue work privately before grant. This does not change the LSU's MEM-to-WB
+ownership boundary.
+
+`imem_addr_o` selects the queued address or the live aligned input address.
+There is no request-controlled idle-zero mask: idle payload is unspecified.
+Removing request capture from the fast path exposes address generation,
+protection and capacity/request qualification to interface timing constraints.
 
 Every live response is captured at the active edge regardless of consumer
 readiness. Result validity follows in the next cycle; there is no combinational
@@ -83,8 +97,8 @@ path from `imem_rvalid_i` to request presentation that integration timing must c
 
 With continuous input/output readiness, permission, immediate grants and
 one-cycle responses, requests, grants and registered results sustain one word
-per cycle after startup. Initial latency still includes request capture, bus
-response registration and result transfer. Slow memory reduces throughput;
+per cycle after startup. Initial latency includes bus response registration and result transfer,
+with no mandatory request-capture cycle on the bypass path. Slow memory reduces throughput;
 full completion storage applies backpressure before starting another bus request.
 No response relies on a future consumer-ready promise.
 
@@ -127,9 +141,9 @@ have no reset; validity prevents their use until initialized.
 - `control`: flush at every phase and on grant/response edges, repeated killed
   drains, replacement bus-work ordering, reset/recovery and long waits without
   timeout/retry. Common checks enforce stable presented requests/results and
-  safe invalid outputs on every cycle.
+  zero invalid result fields on every cycle; idle bus address is unconstrained.
 - `streaming`: 256 back-to-back words with an explicit one-word-per-cycle
-  acceptance/grant/result check, then 1,024 pipelined words with independent
+  acceptance/grant/result check and same-cycle initial acceptance/grant, then 1,024 pipelined words with independent
   grant/response/consumer waits, mixed PMP denials and bus errors. The scoreboard
   checks ordering, data, bounded storage and at most one granted outstanding
   transaction.
@@ -141,9 +155,8 @@ have no reset; validity prevents their use until initialized.
 The [shared-PMP fixture](../ifetch_pmp/README.md) connects one real core-owned
 checker to both real engines. Standalone and fixture lint use Verilog-2005.
 Payload storage is unreset; only control is reset. The registered-result
-contract and presented-request persistence remain unchanged. Physical area and
-timing costs of the additional completion storage require fresh implementation
-measurements.
+contract and presented-request persistence remain unchanged. The [request-bypass characterization](../../../impl/asic/orfs/investigations/ifetch-request-bypass.md)
+records measured CPI/area/timing tradeoffs and their physical-flow limits.
 The [word buffer](../if_buffer/README.md) and
 [prefetch fixture](../if_prefetch/README.md) add real fetch/buffer/aligner
 integration with capacity reservation, fault containment and redirect draining.

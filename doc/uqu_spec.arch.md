@@ -3100,8 +3100,8 @@ The [decompressor/strategy guide](../verif/sim/decompressor/README.md),
 
 `src/uquintus/uqu_ifetch.v` is the IF-owned, read-only word transaction engine.
 Its [component guide](../verif/sim/ifetch/README.md) defines exact ports and
-timing. It owns a private request register, one granted transaction and two
-registered completion slots, not the prefetch buffer, instruction aligner or
+timing. It owns a private request holding register with a combinational bypass,
+one granted transaction and two registered completion slots, not the prefetch buffer, instruction aligner or
 core-parent IF/DE register. It has no ISA, prediction,
 PMP or compressed-decode parameters.
 
@@ -3115,6 +3115,22 @@ The MEM parent shall independently use the other checker port for LSU address,
 size, R/W access and effective privilege. PMP configuration/address state shall
 connect only to the core-owned checker; neither engine shall instantiate PMP
 or expose privilege attributes on the memory bus.
+
+With the request slot empty, an allowed request shall reach OBI in its first
+eligible cycle, without a mandatory request-register edge. Permission, protection
+and reserved completion capacity must be available before presentation; an older
+outstanding transaction must have completed or be responding. Immediate grant
+shall create one pending transaction without duplicating it in the request slot.
+A delayed grant shall retain the presented request/address. Other accepted work
+may queue privately until permission/capacity is available. Native frontend
+acceptance remains distinct from OBI grant and from instruction retirement.
+
+This aligns imem and dmem request presentation: both support combinational
+request/grant and retain stalled payloads through ordinary flush. IF keeps its
+registered redirect/fetch pointer, registered response slots and downstream word
+FIFO. The idle imem address is unspecified and shall not be forced to zero by
+request masking. Interface timing shall account for the new combinational
+address/protection/request path.
 
 A denied request shall produce a registered error word without asserting the
 bus. An allowed request may wait privately for `request_permit_i`, separately
@@ -3242,6 +3258,18 @@ and continuous delivery, IF shall sustain one fetched word per cycle after
 startup. Initial fetch latency and variable-latency memory behavior remain
 separate from this throughput requirement. A response-valid-to-request control
 path is permitted for turnover and shall be covered by integration timing.
+
+For an empty frontend immediately after a redirect, with permission, immediate
+grant, a next-cycle response and no stale transaction to drain, the target
+request shall be granted in cycle 1 after the redirect. Response capture occurs
+in cycle 2, transfer into the word FIFO in cycle 3, and a one-word instruction
+is available for IF/DE acceptance in cycle 4. This removes one cycle relative
+to mandatory request capture. A crossing 32-bit compressed-mode instruction may
+need another word; memory stalls and old-path draining can extend refill.
+BTB replay may hide some or all refill latency, so its halfword budget should
+be measured again rather than reduced unconditionally.
+The [request-bypass study](../impl/asic/orfs/investigations/ifetch-request-bypass.md)
+records the controlled RV32IMC comparison and Sky130 halfword-budget results.
 
 The fetch address shall advance by four only on native acceptance; the
 instruction PC shall advance only on accepted instruction transfer. Consumer
@@ -3992,3 +4020,4 @@ later decisions determine the active contract.
 | D-304 | Instantiate the pinned CVFPU in a blocking plain-Verilog Zfinx adapter, translate normalized operations, sample imported reset, cancel on flush and carry results/status to retirement. Default to qualified TH32, retain THMULTI and reject PULP while its known flag failures remain. | Complete actual scalar floating-point execution with explicit backend limits, no extra architectural stages or FP register file, and independent arithmetic/lifecycle checks. | Implemented adapter, EX/core, component exact-arithmetic oracle and RVFI FP CSR observations; Section 3.3 and verification Section 2.9; incorrect exponent-based UF filtering removed under D-305; physical qualification and PULP remain open |
 | D-305 | Add independent Spike Zfinx ELF execution and observe actual third operands/effective rounding in a simulation companion. Preserve IEEE boundary-underflow status and correct the exact-arithmetic oracle using unbounded-exponent tininess. | Check the ISA through an external model and expose common assumptions shared by native RTL/oracles. | Implemented; verification Section 2.10; architectural certification and formal FP models remain open |
 | D-315 | Issue native data requests combinationally in MEM, transfer ownership to WB on grant, and complete loads/stores or raise precise bus faults in WB; allow successful response/request overlap while preserving registered-only DE/EX load forwarding. | Remove mandatory request and completion bubbles without speculative memory effects, extra pipeline boundaries or a store buffer. | Implemented LSU/MEM/WB/core, response-aware RVFI and component/parent/core regressions; Sections 3.8–3.10 |
+| D-316 | Bypass an empty IF request holding slot so permitted fetches can be granted in their first eligible cycle; capture stalled requests, preserve registered responses and remove idle address masking. | Align imem/dmem request presentation and reduce cold/redirect refill by one cycle without changing sustained bandwidth or outstanding limits. | Implemented engine, production IF/core regressions and BTB halfword characterization; Sections 15.2 and 15.4 |
