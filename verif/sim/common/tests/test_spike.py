@@ -95,7 +95,7 @@ class SpikeTests(unittest.TestCase):
     def test_unsupported_events_are_rejected_not_skipped(self):
         reset = dict(type='reset', epoch=0)
         for records in ([reset, instruction(trap=1) | dict(cause=5)], [reset, dict(type='interrupt')],
-                [reset, instruction(insn=0xc0002573)],
+                [reset, instruction(insn=0xc0102573)],
                 [reset, reset, instruction()], [reset]):
             with self.subTest(records=records), self.assertRaises(ValueError):
                 spike.validate_profile(records, self.config, self.image)

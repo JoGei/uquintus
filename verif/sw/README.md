@@ -14,7 +14,8 @@ Programs:
 | `smoke` | Initialized data, zeroed BSS, constants read through the data port from the executable segment, dependent loops, calls/stack, FENCE, and M arithmetic when selected. |
 | `reference_csr` | Deterministic CSR register/immediate write, set, clear and read forms, plus hart ID 5; compatible with the initial Spike reference profile. |
 | `traps` | Declared illegal/ECALL/EBREAK and alignment traps, MRET, optional M/U transitions, destination/RAM sentinels and flushed-store checks; RV32I register set required. |
-| `interrupts` | ELF-declared software/timer/external IRQs, masking/priority, memory/division stalls, direct/vectored entry, MRET and optional U mode; RV32I register set required. |
+| `interrupts` | ELF-declared software/timer/external IRQs, masking/priority, masked MIP reads/ignored writes, memory/division stalls, direct/vectored entry, MRET and optional U mode; RV32I register set required. |
+| `counters` | Frozen/live counter aliases, CSR forms, rollover, inhibit/write precedence, load/DIV stalls, trap exclusion and optional U-mode permissions; RV32I register set required. |
 | `fail` | Deliberately return 7 to exercise software failure reporting. |
 | `hang` | Deliberately loop forever to exercise the testbench watchdog. |
 

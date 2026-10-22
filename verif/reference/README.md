@@ -52,7 +52,7 @@ zero-filled segment tails. Startup must initialize GPRs before reading them;
 the checker does not accept Spike's zeroed reset GPRs as evidence for unreset
 core registers. RAM holes are initially zero. ELF `fromhost` services are rejected.
 
-Profile `spike-commit-rv32-v3` uses a bounded debugger command file: a read-only
+Profile `spike-commit-rv32-v4` uses a bounded debugger command file: a read-only
 state snapshot, then one `run 1` attempt and another snapshot at each step.
 Snapshots contain PC, privilege and the supported CSRs directly from Spike.
 This observes implicit trap/MRET state changes without reconstructing them from
@@ -104,11 +104,13 @@ values match exactly. A direct MTVAL read after such a breakpoint is rejected
 if the values differ; clear MTVAL first or take another exception that replaces
 it. The adapter does not rewrite GPR results or allow divergent control flow.
 
-Other CSRs and SYSTEM operations, including counter reads, are rejected.
+Counter and MIP accesses use the sampled-input policy below. `mcountinhibit`
+and optional `mcounteren` are also supported. Other CSRs and SYSTEM operations,
+including TIME and WFI, are rejected.
 Multiple reset epochs, PMP, FPU, atomics, XIF, debug,
 host I/O and memory outside this RAM are not supported by this first profile.
 Encountering them fails explicitly rather than silently skipping observations.
-Full CSR/WARL, bus/PMP faults and cycle-dependent counters remain follow-ups under the
+Full CSR/WARL and bus/PMP faults remain follow-ups under the
 broader Spike verification requirement. Native regressions continue checking
 those core features independently; this adapter is not architectural certification
 or formal proof.
@@ -142,14 +144,12 @@ retirement. Input evidence must match both the copied ELF plan and RVFI boundary
 
 Cycle timing differs between implementations. Spike's external inputs remain
 zero during ordinary instruction replay, allowing already-admitted native
-instructions to finish before delivery. Architectural MIP reads are explicitly
-unsupported by this profile; it does not rewrite pending-register/GPR reads to
-hide that timing difference. Native MIP is nevertheless checked against driven
-pins every cycle, including masked periods. WFI and counter reconciliation remain
-outside this initial IRQ profile.
+instructions to finish before delivery. Profile v4 separately supplies the
+software-visible MIP sample as described below. Native MIP still matches driven
+pins every cycle, including masked periods. WFI remains outside this profile.
 
-When checking an IRQ plan or a program accessing MIE, a small host-side
-[`spike_irq.cc`](spike_irq.cc) device drives only Spike's external input bits
+When checking an IRQ plan or a program accessing MIE, MIP or counters, a small host-side
+[`spike_irq.cc`](spike_irq.cc) device drives Spike's external input bits
 through the same API used by its platform devices. The debugger loads from a
 verification-only device at `0x50000000` to set the three levels. Each load
 acknowledgement is checked. Target software is restricted to native RAM and
@@ -172,11 +172,80 @@ U mode is enabled. It records causes in RAM and checks data/results, preserving
 the existing RAM and GPR oracles. Run it like the trap program with
 `make sw SW=interrupts` and the corresponding ELF path.
 
+## Clock counters and sampled MIP
+
+Spike models instruction semantics, not this pipeline's clock timing. We therefore
+use two checks rather than compare the two simulators' own cycle counts:
+
+1. On every native active edge, compare the actual 64-bit `mcycle`, `minstret`
+   and inhibit state against the independent Python CSR model, before and after
+   the edge. Check synchronous reset too. Count clock edges during stalls and
+   drains, count only successful retirement for `minstret`, apply the previous
+   inhibit bits on a control write's edge, and give an explicit half write
+   precedence over the counter's entire increment. Arithmetic wraps at 64 bits.
+2. Before each corresponding Spike event, supply that verified model pre-state
+   as a reference input. Spike executes the original instruction with its normal
+   CSR implementation, permission checks, register operands and read/modify/write
+   semantics. Compare resulting GPRs, channel masks, full pre-state, written half
+   and preserved half. Never replace the GPR or expected instruction result.
+
+Every ELF run retains `timing.json`: reset edge, checked active-edge count and
+ordered instruction/trap/IRQ samples with model pre/post counters and pin levels.
+Replay recomputes counter progression from edge gaps, retirement and explicit
+writes, including inhibition, before accepting the samples. Counter inputs are
+not copied from RVFI destination results. This verifies native counter accounting;
+it does **not** establish cycle accuracy of Spike or prove pipeline performance.
+Reset-to-zero is our implementation contract, although the ISA permits arbitrary
+counter reset values. See the [machine counter rules](https://docs.riscv.org/reference/isa/priv/machine.html)
+and [CSR read/write precedence](https://docs.riscv.org/reference/isa/unpriv/zicsr.html).
+
+For MIP, reconstruct the input pins at each event's clock from the ELF-bound
+assertion/acknowledgement evidence. The software CSR view receives that sample;
+Spike's interrupt-selection input receives only the separately aligned delivery
+mask. This permits an older instruction to read pending bits while native work
+drains without causing premature reference delivery. The CSR view preserves
+Spike's privilege checks and the native hardware-owned, write-ignored pending
+bits. Spike still executes CSRRW/CSRRS/CSRRC and their immediate forms; the checker
+does not patch their GPR results. Actual delivery still uses Spike's interrupt
+mechanism and independently checked native eligibility/drain policy.
+
+The qualified SDK device consumes `spike-inputs.txt` through host-only debugger
+loads at `0x50000100`. Each ordered row contains five hexadecimal fields:
+sample-valid, 64-bit cycle, 64-bit instret, CSR-visible MIP, delivery mask.
+Bootstrap/lookahead rows do not seed counters. Every load returns a checked
+sequence acknowledgement; sample-mode debugger snapshots observe actual state
+both after supplying inputs and after executing the event. Counter seeding uses
+the SDK counter write API followed by `bump(0)` to finish its write bookkeeping;
+normal target CSR accessors and permission logic remain installed. The MIP CSR
+view is a local platform adapter, distinct from Spike's pending-input storage.
+Neither helper modifies architectural PC, privilege, target instructions or GPRs.
+
+The reference ISA string additionally enables `zicntr` because this Spike build
+gates counter aliases and inhibit bits on that facility. This is a reference
+configuration detail, not a new core ISA claim: TIME remains unsupported and
+is rejected explicitly. Full arbitrary counter-control WARL compatibility is
+not claimed; unsupported behavior produces a mismatch rather than being ignored.
+
+`SW=counters` covers frozen/live low/high machine and user aliases, all six CSR
+forms, read-only faults, 32/64-bit cycle rollover, instret rollover, live-write
+precedence, memory stalls, optional DIV, trap exclusion and U-mode counter-enable
+permissions. It requires the full integer register set. `SW=interrupts` also
+checks pending MIP under global/source masking and ignored writes.
+
+```sh
+make sw SW=counters CONFIG=rv32im PYTHON=.venv/bin/python
+make test COMPONENT=core_elf CONFIG=rv32im REFERENCE=spike \
+  ELF=build/uquintus-rv32im/sw/counters/program.elf PYTHON=.venv/bin/python
+```
+
 ## Evidence and checker tests
 
 Each differential ELF run retains `spike.json`, `spike.log`,
 `spike-process.log` (state snapshots), `spike-debug.cmd`, the copied ELF and
 `rvfi.jsonl`. IRQ runs also retain `interrupts.json` and device build evidence.
+Sampled-input runs additionally retain `timing.json`, `spike-inputs.txt` and the
+device build evidence. Summaries/reporting include checked clock edges and
+counter/MIP access counts, alongside the instruction/trap/IRQ counts.
 The JSON records pass/fail, compared instruction/trap, interrupt and MRET
 counts, observed modes or the first mismatching field, index, expected/actual
 values and both full observations. Raw traces preserve surrounding context.

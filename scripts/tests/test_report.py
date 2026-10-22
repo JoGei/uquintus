@@ -114,9 +114,12 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
         (path / 'spike.json').write_text(json.dumps(dict(status='passed', compared_instructions=12,
             compared_traps=2, compared_mrets=3, compared_interrupts=4,
+            checked_counter_cycles=100, compared_counter_accesses=6, compared_mip_accesses=7,
             profile='test', tool=metadata['reference'])))
         (path / 'spike-debug.cmd').write_text('run 1\nquit\n')
         (path / 'interrupts.json').write_text('{}')
+        (path / 'timing.json').write_text('{}')
+        (path / 'spike-inputs.txt').write_text('1 0 0 0 0\n')
         (path / 'spike.log').write_text('reference observation')
         record = report.collect(self.build, self.root)['records'][0]
         self.assertEqual(record['status'], 'passed')
@@ -126,7 +129,12 @@ class ReportTests(unittest.TestCase):
         metrics={m['name']:m['value'] for m in record['metrics']}
         self.assertEqual((metrics['spike_compared_traps'],metrics['spike_compared_mrets']),(2,3))
         self.assertEqual(metrics['spike_compared_interrupts'],4)
+        self.assertEqual(metrics['spike_checked_counter_cycles'],100)
+        self.assertEqual(metrics['spike_compared_counter_accesses'],6)
+        self.assertEqual(metrics['spike_compared_mip_accesses'],7)
         self.assertTrue(any(a['path']=='interrupts.json' for a in record['artifacts']))
+        self.assertTrue(any(a['path']=='timing.json' for a in record['artifacts']))
+        self.assertTrue(any(a['path']=='spike-inputs.txt' for a in record['artifacts']))
         self.assertIn('Spike aaaaaaaa', report.run_table([record]))
 
     def test_reference_profiles_do_not_replace_each_others_results(self):

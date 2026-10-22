@@ -16,6 +16,7 @@ from rvfi_trace import read_trace
 from rvfi_csrs import CSR_CATALOG, CSRObservation
 from csregfile_model import INPUTS
 from interrupts import check_interrupt_cycle
+from timing import counter_state, check_counters
 
 MASK = 0xffffffff
 BOOT = 0x1000
@@ -87,6 +88,8 @@ class CoreTest(uvm_test):
         self.rvfi_records = []
         self.csr_observer = CSRObservation(self.params)
         self.csr_records = []
+        self.timing = dict(schema_version=1, status='running', reset_cycle=None,
+                           checked_cycles=0, events=[])
 
     def put(self, addr, values):
         for entry in values:
@@ -367,7 +370,14 @@ class CoreTest(uvm_test):
             ci.update(csr_valid=1, csr_commit=o['wb_retire'],csr_addr=instr >> 20,
                 csr_op=op,csr_src=rs if op & 4 else self.value(rs),
                 csr_src_zero=int(rs==0),csr_rd_zero=int((instr >> 7)&31==0),csr_instr=instr)
-        expected_csrs=self.csr_observer.step(ci,bool(o['wb_retire'] or o['wb_exception_fire'] or o['trap_valid']))
+        event = bool(o['wb_retire'] or o['wb_exception_fire'] or o['trap_valid'])
+        counter_before = counter_state(self.csr_observer.model)
+        def actual_counters():
+            csr = self.core.u_wb.u_csregfile
+            return dict(mcycle=int(csr.mcycle_q.value), minstret=int(csr.minstret_q.value),
+                        mcountinhibit=int(csr.mcountinhibit.value))
+        if rst: check_counters(actual_counters(), counter_before)
+        expected_csrs=self.csr_observer.step(ci,event)
         if o['wb_retire'] and ci['csr_valid']:
             self.csr_overrides[o['wb_pc_q']]=self.csr_observer.read_result
         if rst:
@@ -402,6 +412,17 @@ class CoreTest(uvm_test):
             self.pending = dict(imem=None,dmem=None)
         d.clk_i.value = 1
         await Timer(1, units='ns')
+        counter_after = counter_state(self.csr_observer.model)
+        check_counters(actual_counters(), counter_after)
+        if rst:
+            self.timing['checked_cycles'] += 1
+            if event:
+                self.timing['events'].append(dict(index=len(self.timing['events']),
+                    cycle=self.cycles, type='interrupt' if o['trap_valid'] else 'instruction',
+                    pc=o['trap_pc'] if o['trap_valid'] else o['wb_pc_q'],
+                    before=counter_before, after=counter_after, mip=irq))
+        else:
+            self.timing.update(reset_cycle=self.cycles, checked_cycles=0, events=[])
         rvfi = self.check_rvfi(o, rst)
         observed_csrs={}
         for name in CSR_CATALOG:

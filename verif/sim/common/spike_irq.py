@@ -13,9 +13,9 @@ def build_device(directory, info):
     root=Path(os.environ.get('SPIKE_ROOT') or Path(info['resolved_executable']).parent.parent)
     include,library=root/'include',root/'lib/libriscv.so'
     if not (include/'riscv/sim.h').is_file() or not library.is_file():
-        raise ValueError('interrupt reference requires matching Spike headers and libriscv.so; set SPIKE_ROOT')
+        raise ValueError('sampled-state/IRQ reference requires matching Spike headers and libriscv.so; set SPIKE_ROOT')
     cxx=shutil.which(os.environ.get('CXX','c++'))
-    if not cxx: raise ValueError('interrupt reference requires an external host C++ compiler (CXX)')
+    if not cxx: raise ValueError('sampled-state/IRQ reference requires an external host C++ compiler (CXX)')
     inputs=[SOURCE,library,*sorted((include/'riscv').rglob('*.h')),*sorted((include/'fesvr').rglob('*.h'))]
     hashes={str(p.resolve()):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs}
     destination=directory/'spike-irq.so'

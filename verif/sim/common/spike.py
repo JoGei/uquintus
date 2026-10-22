@@ -16,19 +16,22 @@ from elf_image import load_elf
 from rvfi_trace import read_trace
 from toolchain import isa_abi
 from interrupts import interrupt_plan, replay_masks, pending_interrupt
+from timing import COUNTERS, SAMPLED_CSRS, replay_samples
 
 ROOT = Path(__file__).resolve().parents[3]
 LOCK = ROOT / 'verif/reference/spike.lock.json'
 MASK = 0xffffffff
 RAM_BASE, RAM_SIZE = 0x80000000, 0x10000
 CSR_NAMES = {0x300: 'mstatus', 0x304: 'mie', 0x305: 'mtvec', 0x340: 'mscratch', 0x341: 'mepc',
-             0x342: 'mcause', 0x343: 'mtval', 0xf14: 'mhartid'}
+             0x342: 'mcause', 0x343: 'mtval', 0xf14: 'mhartid',
+             0x306: 'mcounteren', 0x320: 'mcountinhibit', 0x344: 'mip', **COUNTERS}
 BOOT_INSNS = [0x297, 0x02028593, 0xf1402573, 0x0182a283, 0x00028067]
 TRAP_CAUSES = {'trap_instruction_address_misaligned': 0, 'trap_illegal_instruction': 2,
                'trap_breakpoint': 3, 'trap_load_address_misaligned': 4,
                'trap_store_address_misaligned': 6, 'trap_user_ecall': 8,
                'trap_machine_ecall': 11}
-SNAPSHOT_CSRS = tuple(CSR_NAMES.values())
+SNAPSHOT_CSRS = (*(name for name in dict.fromkeys(CSR_NAMES.values()) if name!='mcounteren'),
+                 'mcycleh', 'minstreth')
 MSTATUS_MASK = 0x221888
 
 
@@ -147,22 +150,32 @@ def irq_index(mask):
     return ((mask >> 3)&1) | (((mask >> 7)&1)<<1) | (((mask >> 11)&1)<<2)
 
 
-def debug_commands(steps, masks=None):
+def debug_commands(steps, masks=None, sampled=False):
     snapshot = ['pc 0', 'priv 0', *('reg 0 '+name for name in SNAPSHOT_CSRS)]
-    commands=list(snapshot)
+    commands=[] if sampled else list(snapshot)
     if masks is not None and len(masks)!=steps: raise ValueError('IRQ replay step count mismatch')
     for index in range(steps):
-        if masks is not None: commands.append(f'mem {0x50000000+8*irq_index(masks[index]):x}')
+        if sampled:
+            commands += ['mem 50000100', *snapshot]
+        elif masks is not None: commands.append(f'mem {0x50000000+8*irq_index(masks[index]):x}')
         commands += ['run 1',*snapshot]
     return '\n'.join([*commands,'quit'])+'\n'
 
 
-def read_snapshots(path, steps, masks=None):
+def read_snapshots(path, steps, masks=None, sampled=False):
     lines = Path(path).read_text().splitlines()
     warning = "warning: tohost and fromhost symbols not in ELF; can't communicate with target"
     if lines and lines[0] == warning: lines.pop(0)
     width = len(SNAPSHOT_CSRS) + 2
-    if masks is not None:
+    if sampled:
+        if len(lines)!=steps*(2*width+1): raise ValueError('missing sampled reference inputs/states')
+        clean=[]
+        for index in range(steps):
+            offset=index*(2*width+1)
+            if lines[offset]!=f'0x{index+1:08x}': raise ValueError('Spike sampled input acknowledgement mismatch')
+            clean += lines[offset+1:offset+1+2*width]
+        lines=clean
+    elif masks is not None:
         if len(lines)!=(steps+1)*width+steps: raise ValueError('missing IRQ device acknowledgements/snapshots')
         clean=lines[:width]
         position=width
@@ -171,7 +184,7 @@ def read_snapshots(path, steps, masks=None):
             clean += lines[position+1:position+1+width]
             position+=width+1
         lines=clean
-    if len(lines) != (steps+1)*width:
+    if len(lines) != (steps*2 if sampled else steps+1)*width:
         raise ValueError('missing/extra Spike debugger state observations')
     states = []
     for offset in range(0, len(lines), width):
@@ -180,14 +193,18 @@ def read_snapshots(path, steps, masks=None):
             raise ValueError('unrecognized Spike debugger state format')
         states.append(dict(pc=int(values[0], 16), mode=3 if values[1]=='M' else 0,
                            csrs={name:int(value,16) for name,value in zip(SNAPSHOT_CSRS, values[2:])}))
-    return states
+    for state in states:
+        for name in ('mcycle','minstret'):
+            state['csrs'][name] |= state['csrs'][name+'h'] << 32
+    return list(zip(states[::2],states[1::2])) if sampled else states
 
 
 def attach_snapshots(commits, states):
-    if len(states) != len(commits)+1:
+    sampled=bool(states and isinstance(states[0],tuple))
+    if len(states) != len(commits)+(0 if sampled else 1):
         raise ValueError('Spike instruction/trap count differs from debugger steps')
     for index, row in enumerate(commits):
-        before, after = states[index:index+2]
+        before, after = states[index] if sampled else states[index:index+2]
         if row['pc'] != before['pc'] or row['mode'] not in (None, before['mode']):
             raise ValueError('Spike event and debugger pre-state disagree')
         row.update(mode=before['mode'], before=before, after=after)
@@ -260,7 +277,7 @@ def validate_profile(records, config, image):
         insn = record['rvfi_insn']
         if insn & 127 == 0x73:
             if insn not in (0x73, 0x100073, 0x30200073) and (not insn >> 12 & 7 or insn >> 20 not in CSR_NAMES):
-                raise ValueError(f'Spike initial profile rejects counter/implementation-dependent CSR or SYSTEM instruction {insn:#x}')
+                raise ValueError(f'Spike profile rejects unsupported CSR or SYSTEM instruction {insn:#x}')
         instructions.append(record)
     if not instructions: raise ValueError('no RVFI instructions to compare')
     return instructions
@@ -338,10 +355,12 @@ def compare(instructions, commits, image):
             for address in (0x310, 0x7a5):
                 if address in effects and effects.pop(address) != 0:
                     raise ValueError('nonzero model-only MRET CSR effect')
-        expected_csrs = {CSR_NAMES[a]: value & (MSTATUS_MASK if a==0x300 else MASK) for a, value in effects.items() if a in CSR_NAMES}
+        expected_csrs = {CSR_NAMES[a]: (value & (MSTATUS_MASK if a==0x300 else MASK)) <<
+                         (32 if a in COUNTERS and a & 0x80 else 0)
+                         for a, value in effects.items() if a in CSR_NAMES}
         if len(expected_csrs) != len(effects): raise ValueError('unsupported Spike CSR effect')
         actual_csrs = {name: value['wdata'] & value['wmask'] for name, value in actual['csrs'].items() if value['wmask']}
-        before = reference.get('before', {}).get('csrs', csr_state)
+        before = dict(csr_state, **reference.get('before', {}).get('csrs', {}))
         after = reference.get('after', {}).get('csrs')
         if trapped:
             if after is None: raise ValueError('trap comparison requires independent Spike state snapshots')
@@ -375,7 +394,11 @@ def compare(instructions, commits, image):
             if name=='mtval' and breakpoint_mtval and read and before['mtval'] != 0:
                 raise ValueError('clear mtval before reading after breakpoint: native/Spike permitted values differ')
             if name=='mtval' and write: breakpoint_mtval = False
-            channels = {name:(MASK if read else 0, MASK if write else 0)} if read or write else {}
+            shift = 32 if address in COUNTERS and address & 0x80 else 0
+            mask = MASK << shift
+            channels = {name:(mask if read else 0, mask if write else 0)} if read or write else {}
+            if write and name in ('mcycle','minstret') and after is not None:
+                equal(index, 'counter_preserved_half:'+name, after[name], actual['csrs'][name]['wdata'])
         else:
             channels = {}
         equal(index, 'csr_write', expected_csrs, actual_csrs)
@@ -385,7 +408,7 @@ def compare(instructions, commits, image):
             equal(index, 'csr_rmask:'+name, read, channel['rmask'])
             equal(index, 'csr_wmask:'+name, write, channel['wmask'])
             if read:
-                value = before[name] & (MSTATUS_MASK if name=='mstatus' else MASK)
+                value = before[name] & (MSTATUS_MASK if name=='mstatus' else (1<<64)-1 if name in ('mcycle','minstret') else MASK)
                 equal(index, 'csr_read:'+name, value, channel['rdata'])
         csr_state.update(expected_csrs)
         if trapped:
@@ -431,13 +454,16 @@ def check_run(directory, config, info, timeout=30):
     """Preserve raw log, process diagnostics and first-mismatch evidence."""
     directory = Path(directory)
     result = dict(status='running', profile=info['profile'], tool=info,
-                  policy='IRQ delivery at independently checked native boundaries; no mip/counter reads; breakpoint mtval native=0, Spike=0|PC',
+                  policy='Native clock/retirement counters checked per edge; sampled counter/MIP inputs, independent Spike instruction semantics; aligned IRQ delivery; breakpoint mtval native=0, Spike=0|PC',
                   artifacts=['spike.log', 'spike-process.log', 'spike-debug.cmd', 'rvfi.jsonl'])
     try:
         image = load_elf(directory / 'program.elf')
         records = read_trace(directory / 'rvfi.jsonl')
         instructions = validate_profile(records, config, image)
         plan=interrupt_plan(image,config)
+        sampled=any(r['type']=='instruction' and r['rvfi_insn'] & 127==0x73 and
+                    r['rvfi_insn'] >> 20 in SAMPLED_CSRS for r in instructions)
+        audit=None
         masks=None
         if plan:
             audit=json.loads((directory/'interrupts.json').read_text())
@@ -445,11 +471,28 @@ def check_run(directory, config, info, timeout=30):
         elif any(r['type']=='interrupt' for r in instructions):
             raise ValueError('interrupt trace requires an ELF-bound stimulus plan')
         elif any(r['type']=='instruction' and r['rvfi_insn'] & 127==0x73 and
-                 r['rvfi_insn'] >> 20==0x304 for r in instructions):
+                 r['rvfi_insn'] >> 20 in (0x304,0x344) for r in instructions):
             # Isolate all three external inputs from Spike's default CLINT
             # when the program can enable them, even for a no-IRQ test.
             masks=[0]*(len(instructions)+6)
+        if sampled:
+            if audit is None:
+                audit=json.loads((directory/'interrupts.json').read_text())
+                replay_masks(records,audit,plan)
+            timing=json.loads((directory/'timing.json').read_text())
+            samples=replay_samples(records,timing,audit)
+            masks=masks or [0]*(len(instructions)+6)
+            inputs=[None]*5+samples+[None]
+            (directory/'spike-inputs.txt').write_text(''.join(
+                f'{int(sample is not None):x} {(sample or {}).get("mcycle",0):x} '
+                f'{(sample or {}).get("minstret",0):x} {(sample or {}).get("mip",0):x} {mask:x}\n'
+                for sample,mask in zip(inputs,masks)))
+            result['artifacts'] += ['timing.json','interrupts.json','spike-inputs.txt']
+            result['checked_counter_cycles']=timing['checked_cycles']
         march, _ = isa_abi(config)
+        # This Spike build gates its counter aliases and inhibit mask on Zicntr.
+        # Enable the reference facility; TIME remains rejected by our profile.
+        march += '_zicntr'
         command = [info['executable'], '--isa=' + march,
                    '--priv=' + ('mu' if config['ISA_UMODE'] else 'm'), '--pmpregions=0',
                    '--hartids=5', f'--pc={image.entry:#x}', f'-m{RAM_BASE:#x}:{RAM_SIZE:#x}',
@@ -459,15 +502,21 @@ def check_run(directory, config, info, timeout=30):
         if masks is not None:
             from spike_irq import build_device
             device=build_device(directory,info)
-            command[-1:-1]=['--extlib='+str(device),'--device=uqu_irq']
+            command[-1:-1]=['--extlib='+str(device),'--device=uqu_irq'+
+                           (','+str(directory/'spike-inputs.txt') if sampled else '')]
         steps = len(instructions)+6
-        (directory / 'spike-debug.cmd').write_text(debug_commands(steps,masks))
+        (directory / 'spike-debug.cmd').write_text(debug_commands(steps,masks,sampled))
         result['elf_sha256'] = hashlib.sha256((directory / 'program.elf').read_bytes()).hexdigest()
         with (directory / 'spike-process.log').open('w') as output:
             process = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
         if process.returncode: raise ValueError(f'Spike exited with {process.returncode}; see spike-process.log')
         commits = parse_commits(directory / 'spike.log')
-        commits = attach_snapshots(commits, read_snapshots(directory / 'spike-process.log', steps,masks))
+        commits = attach_snapshots(commits, read_snapshots(directory / 'spike-process.log', steps,masks,sampled))
+        if sampled:
+            for row,sample in zip(commits[5:],samples):
+                for name in ('mcycle','minstret','mip'):
+                    if row['before']['csrs'][name] != sample[name]:
+                        raise ValueError('Spike did not consume sampled input: '+name)
         if masks is not None:
             for row,mask in zip(commits,masks): row['irq_mask']=mask
         count = compare(instructions, commits, image)
@@ -476,6 +525,8 @@ def check_run(directory, config, info, timeout=30):
                       compared_traps=sum(r.get('rvfi_trap',0) for r in instructions),
                       compared_interrupts=sum(r['type']=='interrupt' for r in instructions),
                       compared_mrets=sum(r.get('rvfi_insn')==0x30200073 and not r['rvfi_trap'] for r in instructions),
+                      compared_counter_accesses=sum(r['type']=='instruction' and r['rvfi_insn'] & 127==0x73 and r['rvfi_insn'] >> 20 in COUNTERS for r in instructions),
+                      compared_mip_accesses=sum(r['type']=='instruction' and r['rvfi_insn'] & 127==0x73 and r['rvfi_insn'] >> 20==0x344 for r in instructions),
                       observed_modes=sorted({r['rvfi_mode'] for r in instructions if r['type']=='instruction'}))
     except BaseException as error:
         result.update(status='failed', detail=str(error))

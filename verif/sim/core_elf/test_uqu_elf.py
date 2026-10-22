@@ -108,6 +108,8 @@ class ELFTest(CoreTest):
                 'interrupts': self.interrupts.evidence(),
             }, indent=2) + '\n')
             Path('interrupts.json').write_text(json.dumps(self.interrupts.evidence(),indent=2)+'\n')
+            self.timing['status'] = status
+            Path('timing.json').write_text(json.dumps(self.timing,indent=2)+'\n')
             self.drop_objection()
 
 

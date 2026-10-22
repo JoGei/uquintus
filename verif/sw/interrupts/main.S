@@ -19,6 +19,12 @@ main:
 .global irq_global_masked
 irq_global_masked:
     addi zero,zero,0
+    csrr t0,mip
+    li t1,8
+    bne t0,t1,fail
+    csrw mip,zero          /* Hardware-owned sources cannot be cleared by CSR. */
+    csrr t0,mip
+    bne t0,t1,fail
     li t1,12
 1:  addi t1,t1,-1
     bnez t1,1b
@@ -36,6 +42,14 @@ global_done:
 .global irq_source_masked
 irq_source_masked:
     addi zero,zero,0
+    csrr t0,mip
+    li t1,128
+    bne t0,t1,fail
+    csrrc t0,mip,t1
+    li t1,128
+    bne t0,t1,fail
+    csrr t0,mip
+    bne t0,t1,fail
     li t1,12
 2:  addi t1,t1,-1
     bnez t1,2b

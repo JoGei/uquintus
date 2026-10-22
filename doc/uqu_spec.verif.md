@@ -558,9 +558,9 @@ register sentinel and RAM guard against faulting and younger flushed effects,
 including the sequential path after MRET. Cover M-only and M/U execution, both
 IALIGN settings, 16-bit illegal/EBREAK instructions when C is enabled, and a
 return from U ECALL into M mode. Report observed trap/MRET counts and modes.
-Counter/other implementation-dependent CSR accesses, PMP, host services and
+Other unsupported implementation-dependent CSR accesses, PMP, host services and
 unsupported features shall still fail explicitly. Broader bus/PMP fault
-coverage, CSR/WARL coverage and cycle-sensitive read reconciliation remain
+coverage and full CSR/WARL coverage remain
 follow-ups. The initial interrupt synchronization profile is defined below.
 
 Profile v3 shall support ELF-bound level-sensitive machine software, timer and
@@ -590,8 +590,40 @@ actual trap state. Compare saved PC, cause, direct/vectored target, privilege,
 implicit CSR effects and handler/return behavior. IRQ entry shall not invent an
 instruction or increment RVFI order. The reference inputs shall remain low during
 ordinary replay so admitted native instructions may finish before aligned delivery.
-MIP reads shall remain unsupported by differential checking until their temporal
-policy is defined; native MIP shall still match pins every cycle.
+Profile v4 shall reconcile MIP reads with event-clock pin samples as defined below;
+native MIP shall still match pins every cycle.
+
+For counters, compare actual native 64-bit `mcycle`, `minstret` and inhibit state
+against the independent clock/retirement CSR model before and after every active
+edge, including stalls, plus reset post-state. Check previous-edge inhibition,
+32/64-bit rollover, explicit half-write precedence, successful retirement only,
+and counter-enable/alias permissions. Preserve reset edge, checked-edge count and
+event pre/post model values in `timing.json`; replay shall recompute progression
+from clock gaps and explicit instructions before accepting any sample.
+
+Supply the verified counter pre-state to Spike before each original event,
+preserving its CSR implementation, privilege checks and instruction execution.
+Compare resulting GPRs and full counter CSR channels, including the preserved
+half of explicit writes. Native cycle timing shall be verified against native
+clock edges, not Spike's autonomous counter increments. This policy shall not
+claim that Spike models the pipeline timing or measures its performance.
+
+Reconstruct software-visible MIP from declared pin assertion/acknowledgement
+clocks, separately from the reference delivery mask. A verification-only CSR
+view may expose this sample while retaining original privilege checks and the
+native hardware-owned, write-ignored pending bits. Actual interrupt selection
+shall continue using Spike's own input storage and trap mechanism at the checked
+delivery boundary. Do not rewrite GPR results, instructions, PC or privilege.
+
+Retain ordered counter/MIP inputs in `spike-inputs.txt`, verify sequence
+acknowledgements, and sample actual Spike pre/post state around each attempt.
+Record native-oracle/reference input hashes and report checked-edge/counter/MIP
+metrics. The reference may enable Zicntr to expose this build's counter facility;
+TIME shall remain rejected and no additional core ISA feature is implied.
+`SW=counters` shall exercise these contracts, including memory/multi-cycle stalls,
+synchronous trap exclusion and optional U-mode permissions. `SW=interrupts` shall
+exercise masked pending reads and ignored MIP writes. Full CSR/WARL coverage and
+WFI remain follow-ups.
 
 A verification-only Spike device may use its platform external-input API via
 bounded debugger commands. This helper shall not add target instructions or
@@ -685,4 +717,5 @@ later decisions determine the active contract.
 | D-296 | Integrate checksum/commit-pinned riscv-tests without submodules, using adapted bare-metal instruction tests, explicit ISA/misalignment exclusions, independent ELF runs, compatible simulator-build reuse and compiler family/version/target discovery from RISCV_CC, RISCV or PATH. | Add reproducible external instruction coverage while preserving the chosen core behavior, externally supplied tools and honest cross-configuration reporting. | Initial RV32I/M/C adapter implemented; Section 2.7; build contract in build Section 1.2; initial Spike checking in D-297; other ISA/privileged families and architectural certification remain separate |
 | D-297 | Add optional external Spike differential checking for native ELF/riscv-tests runs, with an exact qualified binary pin, strict bounded commit-log parsing, original instruction/PC/GPR/source/memory checks, deterministic CSR checks and retained first-mismatch/JUnit/report evidence. | Add the selected independent ISA reference without silently ignoring unsupported traps, interrupts, counters or implementation-dependent state; preserve external tools and native timing/error checks. | Initial profile implemented; Section 2.8; full CSR/trap/interrupt coverage and source-revision pin remain follow-ups |
 | D-298 | Add ELF-bound ordered expected-trap declarations and Spike v2 synchronous-trap/MRET comparison using independent read-only state snapshots; test M-only/M-U transitions, illegal/ECALL/EBREAK and alignment faults, implicit CSRs, suppressed effects and explicit breakpoint-MTVAL reconciliation. | Verify precise exception behavior end to end while preserving strict no-trap defaults and distinguishing permitted implementation choices from architectural mismatches. | Implemented; Sections 2.6 and 2.8; broader CSR/bus/PMP/interrupt synchronization remains open |
-| D-299 | Add ELF-bound deterministic IRQ stimuli, independent native masking/priority/drain checks and Spike v3 delivery alignment through a qualified verification device; retain full input/entry evidence and check architectural state without inventing retirement. | Compare asynchronous behavior at valid instruction boundaries while checking native timing independently; keep platform MMIO controllers outside the core and SDK/tool provenance explicit. | Implemented initial software/timer/external IRQ profile; Section 2.8; MIP reads, WFI and counter reconciliation remain follow-ups |
+| D-299 | Add ELF-bound deterministic IRQ stimuli, independent native masking/priority/drain checks and Spike v3 delivery alignment through a qualified verification device; retain full input/entry evidence and check architectural state without inventing retirement. | Compare asynchronous behavior at valid instruction boundaries while checking native timing independently; keep platform MMIO controllers outside the core and SDK/tool provenance explicit. | Implemented initial software/timer/external IRQ profile; Section 2.8; MIP/counters extended by D-300; WFI remains open |
+| D-300 | Check native counters on every clock edge and use verified model pre-state plus sampled MIP inputs for Spike v4 CSR execution; retain validated timing/replay evidence and counter/MIP metrics. | Verify native timing independently while comparing instruction semantics across different execution timing; preserve original target instructions/results and independently checked interrupt delivery. | Implemented; Section 2.8; counter software/IRQ regressions and corruption checks; full CSR/WARL and WFI remain follow-ups |

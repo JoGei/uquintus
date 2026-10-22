@@ -76,6 +76,14 @@ expiry and checker errors produce a nonzero Make exit and retain artifacts.
 full checker diagnostics. These runs are software regressions, not formal proofs
 or completed architectural certification.
 
+`timing.json` records the reset edge, checked active-edge count and model counter
+pre/post state plus MIP pins at each architectural event. The native environment
+checks actual counters before/after every active edge, including memory and EX
+stalls, not just at CSR accesses. `SW=counters` exercises inhibit/write precedence,
+machine/user aliases, rollover, trap exclusion and optional U-mode permissions.
+Spike uses the [sampled-input policy](../../reference/README.md#clock-counters-and-sampled-mip)
+to compare CSR semantics without assuming matching pipeline cycle timing.
+
 ## Negative fixtures
 
 These commands are expected to fail:

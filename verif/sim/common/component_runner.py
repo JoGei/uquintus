@@ -243,11 +243,13 @@ def main(argv=None, shared_build=None):
         extra_env.update(UQU_ELF=str(program), UQU_MAX_CYCLES=str(args.max_cycles))
     if reference_info:
         metadata['reference'] = reference_info
-        metadata['input_scope'] = 'HDL, headers, recorded software sources and reference adapter/pin'
+        metadata['input_scope'] = 'HDL, headers, recorded software sources, native oracle and reference adapter/pin'
         metadata.setdefault('context', {})['reference'] = 'spike:' + reference_info['executable_sha256']
         metadata['context']['reference_profile'] = reference_info['profile']
         for path in (ROOT / 'verif/sim/common/spike.py', ROOT / 'verif/reference/spike.lock.json',
-                     ROOT / 'verif/sim/common/interrupts.py', ROOT / 'verif/sim/common/spike_irq.py',
+                     ROOT / 'verif/sim/common/interrupts.py', ROOT / 'verif/sim/common/timing.py', ROOT / 'verif/sim/common/spike_irq.py',
+                     ROOT / 'verif/sim/common/csregfile_model.py', ROOT / 'verif/sim/common/rvfi_csrs.py',
+                     ROOT / 'verif/sim/core/core_env.py', ROOT / 'verif/sim/core_elf/test_uqu_elf.py',
                      ROOT / 'verif/reference/spike_irq.cc'):
             metadata['source_sha256'][str(path.relative_to(ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
