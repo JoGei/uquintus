@@ -57,12 +57,12 @@ flowchart TB
             end
             EX_MEM["EX / MEM<br/>registers"]
             subgraph MEM["MEM · memory"]
-                LSU["LSU<br/>Registered load result"]
+                LSU["LSU request<br/>Validate · present · advance on grant"]
             end
             MEM_WB["MEM / WB<br/>registers"]
             subgraph WB["WB · writeback"]
                 direction TB
-                COMMIT["Commit · GPR writes<br/>CSR storage / access<br/>Trap entry · MRET"]
+                COMMIT["Memory response / faults<br/>Commit · GPR writes<br/>CSR storage / access<br/>Trap entry · MRET"]
                 RESULT["Optional XIF<br/>Commit / result<br/>Optional paired writes"]
                 COMMIT ~~~ RESULT
             end
@@ -84,7 +84,7 @@ flowchart TB
     end
 
     IMEM <-->|"imem · read-only OBI · IF"| CORE
-    CORE <-->|"dmem · read / write OBI · MEM"| DMEM
+    CORE <-->|"dmem · OBI · MEM request / WB response"| DMEM
 
     classDef base stroke:#3b82f6,stroke-width:2px
     classDef optional stroke:#d97706,stroke-width:2px,stroke-dasharray:5 3

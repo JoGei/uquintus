@@ -17,8 +17,8 @@ module uqu_rvfi (
     input wire [31:0] ex_rs1_rdata_i,
     input wire [31:0] ex_rs2_rdata_i,
     input wire mem_enable_i,
-    input wire mem_response_i,
-    input wire [31:0] mem_response_data_i,
+    input wire wb_response_i,
+    input wire [31:0] wb_response_data_i,
     input wire mem_fire_i,
     input wire mem_lsu_i,
     input wire mem_we_i,
@@ -69,7 +69,6 @@ module uqu_rvfi (
     reg [31:0] ex_rs1_data_q, ex_rs2_data_q;
     reg [4:0] mem_rs1_addr_q, mem_rs2_addr_q;
     reg [31:0] mem_rs1_data_q, mem_rs2_data_q;
-    reg [31:0] mem_read_q;
     reg [4:0] wb_rs1_addr_q, wb_rs2_addr_q;
     reg [31:0] wb_rs1_data_q, wb_rs2_data_q;
     reg wb_lsu_q, wb_mem_we_q;
@@ -104,7 +103,7 @@ module uqu_rvfi (
     assign rvfi_mem_addr = rvfi_valid && wb_lsu_q ? wb_mem_addr_q : 32'd0;
     assign rvfi_mem_rmask = successful_memory && !wb_mem_we_q ? wb_mask_q : 4'd0;
     assign rvfi_mem_wmask = successful_memory && wb_mem_we_q ? wb_mask_q : 4'd0;
-    assign rvfi_mem_rdata = (|rvfi_mem_rmask) ? wb_mem_read_q : 32'd0;
+    assign rvfi_mem_rdata = (|rvfi_mem_rmask) ? (wb_response_i ? wb_response_data_i : wb_mem_read_q) : 32'd0;
     assign rvfi_mem_wdata = (|rvfi_mem_wmask) ? wb_mem_write_q : 32'd0;
     assign rvfi_mem_fault = rvfi_valid && (fetch_fault || data_fault);
     assign rvfi_mem_fault_rmask = rvfi_valid && data_fault && !wb_mem_we_q ? wb_mask_q : 4'd0;
@@ -133,8 +132,8 @@ module uqu_rvfi (
             mem_rs1_data_q <= ex_used_i[0] ? ex_rs1_rdata_i : ex_rs1_data_q;
             mem_rs2_data_q <= ex_used_i[1] ? ex_rs2_rdata_i : ex_rs2_data_q;
         end
-        if (!rst_ni || mem_enable_i) mem_read_q <= 32'd0;
-        else if (mem_response_i) mem_read_q <= mem_response_data_i;
+        if (!rst_ni || mem_fire_i) wb_mem_read_q <= 32'd0;
+        else if (wb_response_i) wb_mem_read_q <= wb_response_data_i;
         if (rst_ni && mem_fire_i) begin
             wb_rs1_addr_q <= mem_rs1_addr_q;
             wb_rs2_addr_q <= mem_rs2_addr_q;
@@ -144,7 +143,6 @@ module uqu_rvfi (
             wb_mem_we_q <= mem_we_i;
             wb_mask_q <= mem_mask << mem_addr_i[1:0];
             wb_mem_addr_q <= {mem_addr_i[31:2],2'b00};
-            wb_mem_read_q <= mem_read_q;
             wb_mem_write_q <= mem_wdata_i << mem_shift;
         end
     end

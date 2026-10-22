@@ -39,7 +39,7 @@ class ParentTest(uvm_test):
         for field in FIELDS:
             getattr(d, 'in_'+field+'_i').value = (incoming or token())[field]
         for field in GLOBALS:
-            if field not in ('valid', 'ready', 'priv_m'):
+            if field not in ('valid', 'ready', 'priv_m', 'lsu') and not field.startswith('lsu_res_'):
                 getattr(d, 'rst_ni' if field == 'rst_n' else field+'_i').value = g[field]
         d.commit_ready_i.value = ready
         probes = (self.rng.randrange(32), self.rng.randrange(32))
@@ -47,7 +47,7 @@ class ParentTest(uvm_test):
         await Timer(1, units='ns')
         expected, _ = self.model.evaluate(item, g)
         for name, value in expected.items():
-            if value is None:
+            if value is None or name == 'lsu_res_ready':
                 continue
             port = 'wb_'+name+'_o' if name in ('valid', 'ready') else name+'_o'
             assert int(getattr(d, port).value) == value, (name, value, item, g)

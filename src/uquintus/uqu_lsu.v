@@ -1,11 +1,12 @@
 `default_nettype none
 
-// Blocking native load/store unit owned by MEM. Private transaction and
-// completion state do not replace the parent's EX/MEM or MEM/WB registers.
+// MEM owns request presentation; WB consumes the independent response channel.
+// A stalled OBI request and an unconsumed response each retain their payload.
 module uqu_lsu (
     input  wire        clk_i,
     input  wire        rst_ni,
     input  wire        flush_i,
+    input  wire        res_flush_i,
     input  wire        req_valid_i,
     output wire        req_ready_o,
     input  wire        req_we_i,
@@ -15,7 +16,11 @@ module uqu_lsu (
     input  wire [31:0] req_instr_i,
     input  wire        req_access_fault_i,
     input  wire        request_permit_i,
+    output wire        req_exception_valid_o,
+    output wire [4:0]  req_exception_cause_o,
+    output wire [31:0] req_exception_tval_o,
     output wire        busy_o,
+    output wire        res_registered_o,
     output wire        res_valid_o,
     input  wire        res_ready_i,
     output wire [31:0] res_data_o,
@@ -33,32 +38,25 @@ module uqu_lsu (
     input  wire [31:0] dmem_rdata_i,
     input  wire        dmem_err_i
 );
-    localparam [2:0] ST_IDLE = 3'd0;
-    localparam [2:0] ST_PERMISSION = 3'd1;
-    localparam [2:0] ST_REQUEST = 3'd2;
-    localparam [2:0] ST_RESPONSE = 3'd3;
-    localparam [2:0] ST_RESULT = 3'd4;
     localparam [4:0] CAUSE_ILLEGAL_INSTRUCTION = 5'd2;
     localparam [4:0] CAUSE_LOAD_MISALIGNED = 5'd4;
     localparam [4:0] CAUSE_LOAD_ACCESS = 5'd5;
     localparam [4:0] CAUSE_STORE_MISALIGNED = 5'd6;
     localparam [4:0] CAUSE_STORE_ACCESS = 5'd7;
 
-    reg [2:0] state_q;
-    reg killed_q;
+    reg held_q, held_killed_q;
+    reg held_we_q;
+    reg [2:0] held_op_q;
+    reg [31:0] held_addr_q, held_wdata_q;
+    reg [3:0] held_be_q;
+    reg pending_q, killed_q;
     reg we_q;
     reg [2:0] op_q;
     reg [31:0] addr_q;
-    reg [31:0] wdata_q;
-    reg [3:0] be_q;
+    reg response_buffer_valid_q;
     reg [31:0] result_q;
-    reg exception_q;
-    reg [4:0] cause_q;
-    reg [31:0] tval_q;
+    reg error_q;
 
-    wire req_fire = req_valid_i && req_ready_o;
-    wire res_fire = res_valid_o && res_ready_i;
-    wire grant_fire = dmem_req_o && dmem_gnt_i;
     // Operation bits are the instruction's funct3, qualified by load/store.
     wire op_valid = (req_op_i == 3'b000) || (req_op_i == 3'b001) ||
         (req_op_i == 3'b010) || (!req_we_i &&
@@ -78,21 +76,44 @@ module uqu_lsu (
     wire [31:0] selected_data = dmem_rdata_i >> response_shift;
     reg [31:0] load_result;
 
-    assign req_ready_o = rst_ni && !flush_i && (state_q == ST_IDLE);
-    assign busy_o = rst_ni && (state_q != ST_IDLE);
-    assign res_valid_o = rst_ni && !flush_i && (state_q == ST_RESULT);
-    assign res_data_o = res_valid_o ? result_q : 32'd0;
-    assign res_exception_valid_o = res_valid_o && exception_q;
-    assign res_exception_cause_o = res_exception_valid_o ? cause_q : 5'd0;
-    assign res_exception_tval_o = res_exception_valid_o ? tval_q : 32'd0;
+    wire response_present = pending_q &&
+                            (response_buffer_valid_q || dmem_rvalid_i);
+    wire response_error = response_buffer_valid_q ? error_q : dmem_err_i;
+    wire res_fire = res_valid_o && res_ready_i;
+    wire pending_done = response_present &&
+                        (killed_q || res_flush_i || res_fire);
+    // Successful completion may overlap the next grant. Faults contain all
+    // younger effects even if the parent incorrectly leaves permission high.
+    wire capacity = !pending_q || (pending_done && !response_error);
+    wire start_request = req_valid_i && !flush_i && !local_fault &&
+                         request_permit_i && capacity;
+    wire grant_fire = dmem_req_o && dmem_gnt_i;
+    wire request_killed = held_q && (held_killed_q || flush_i);
 
-    // Once presented, OBI request and payload persist even through flush.
-    // Only reset may abandon transaction tracking under system integration rules.
-    assign dmem_req_o = rst_ni && (state_q == ST_REQUEST);
-    assign dmem_we_o = dmem_req_o && we_q;
-    assign dmem_addr_o = dmem_req_o ? {addr_q[31:2], 2'b00} : 32'd0;
-    assign dmem_wdata_o = dmem_req_o ? wdata_q : 32'd0;
-    assign dmem_be_o = dmem_req_o ? be_q : 4'd0;
+    assign req_exception_valid_o = rst_ni && !flush_i && req_valid_i &&
+                                   !held_q && local_fault;
+    assign req_exception_cause_o = req_exception_valid_o ? local_cause : 5'd0;
+    assign req_exception_tval_o = req_exception_valid_o ? local_tval : 32'd0;
+    assign req_ready_o = grant_fire && !request_killed;
+    assign busy_o = rst_ni && (held_q || pending_q);
+    assign res_valid_o = rst_ni && !res_flush_i && !killed_q && response_present;
+    assign res_registered_o = res_valid_o && response_buffer_valid_q;
+    assign res_data_o = !res_valid_o || response_error || we_q ? 32'd0 :
+                        response_buffer_valid_q ? result_q : load_result;
+    assign res_exception_valid_o = res_valid_o && response_error;
+    assign res_exception_cause_o = !res_exception_valid_o ? 5'd0 :
+                                  we_q ? CAUSE_STORE_ACCESS : CAUSE_LOAD_ACCESS;
+    assign res_exception_tval_o = res_exception_valid_o ? addr_q : 32'd0;
+
+    // The initial request is combinational; capture only when grant is delayed.
+    // Once presented, request and payload persist through cancellation.
+    assign dmem_req_o = rst_ni && (held_q || start_request);
+    assign dmem_we_o = held_q ? held_we_q : req_we_i;
+    assign dmem_addr_o = held_q ? {held_addr_q[31:2], 2'b00} :
+                                           {req_addr_i[31:2], 2'b00};
+    assign dmem_wdata_o = held_q ? held_wdata_q :
+                         req_we_i ? (req_wdata_i << request_shift) : 32'd0;
+    assign dmem_be_o = held_q ? held_be_q : request_be;
 
     always @* begin
         load_result = 32'd0;
@@ -108,66 +129,44 @@ module uqu_lsu (
 
     always @(posedge clk_i) begin
         if (!rst_ni) begin
-            state_q <= ST_IDLE;
+            held_q <= 1'b0;
+            held_killed_q <= 1'b0;
+            pending_q <= 1'b0;
             killed_q <= 1'b0;
+            response_buffer_valid_q <= 1'b0;
         end else begin
-            if (flush_i && (state_q != ST_IDLE)) begin
-                killed_q <= 1'b1;
+            if (dmem_req_o && !dmem_gnt_i && !held_q) begin
+                held_q <= 1'b1;
+                held_killed_q <= 1'b0;
+                held_we_q <= req_we_i;
+                held_op_q <= req_op_i;
+                held_addr_q <= req_addr_i;
+                held_wdata_q <= dmem_wdata_o;
+                held_be_q <= request_be;
             end
-            case (state_q)
-                ST_IDLE: begin
-                    if (req_fire) begin
-                        killed_q <= 1'b0;
-                        we_q <= req_we_i;
-                        op_q <= req_op_i;
-                        addr_q <= req_addr_i;
-                        wdata_q <= req_we_i ? (req_wdata_i << request_shift) : 32'd0;
-                        be_q <= request_be;
-                        if (local_fault) begin
-                            result_q <= 32'd0;
-                            exception_q <= 1'b1;
-                            cause_q <= local_cause;
-                            tval_q <= local_tval;
-                            state_q <= ST_RESULT;
-                        end else begin
-                            state_q <= request_permit_i ? ST_REQUEST : ST_PERMISSION;
-                        end
-                    end
-                end
-                ST_PERMISSION: begin
-                    if (flush_i) begin
-                        state_q <= ST_IDLE;
-                    end else if (request_permit_i) begin
-                        state_q <= ST_REQUEST;
-                    end
-                end
-                ST_REQUEST: begin
-                    if (grant_fire) begin
-                        state_q <= ST_RESPONSE;
-                    end
-                end
-                ST_RESPONSE: begin
-                    if (dmem_rvalid_i) begin
-                        if (killed_q || flush_i) begin
-                            state_q <= ST_IDLE;
-                        end else begin
-                            // Capture before exposing data/status to MEM or any
-                            // forwarding consumer; no combinational OBI bypass.
-                            result_q <= we_q || dmem_err_i ? 32'd0 : load_result;
-                            exception_q <= dmem_err_i;
-                            cause_q <= we_q ? CAUSE_STORE_ACCESS : CAUSE_LOAD_ACCESS;
-                            tval_q <= addr_q;
-                            state_q <= ST_RESULT;
-                        end
-                    end
-                end
-                ST_RESULT: begin
-                    if (flush_i || res_fire) begin
-                        state_q <= ST_IDLE;
-                    end
-                end
-                default: state_q <= ST_IDLE;
-            endcase
+            if (held_q && flush_i) held_killed_q <= 1'b1;
+            if (pending_q && res_flush_i) killed_q <= 1'b1;
+            if (pending_q && !response_buffer_valid_q && dmem_rvalid_i &&
+                !pending_done) begin
+                response_buffer_valid_q <= 1'b1;
+                result_q <= load_result;
+                error_q <= dmem_err_i;
+            end
+            if (pending_done) begin
+                pending_q <= 1'b0;
+                response_buffer_valid_q <= 1'b0;
+                killed_q <= 1'b0;
+            end
+            if (grant_fire) begin
+                held_q <= 1'b0;
+                held_killed_q <= 1'b0;
+                pending_q <= 1'b1;
+                killed_q <= request_killed;
+                response_buffer_valid_q <= 1'b0;
+                we_q <= held_q ? held_we_q : req_we_i;
+                op_q <= held_q ? held_op_q : req_op_i;
+                addr_q <= held_q ? held_addr_q : req_addr_i;
+            end
         end
     end
 endmodule

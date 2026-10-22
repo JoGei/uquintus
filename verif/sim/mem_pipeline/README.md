@@ -22,18 +22,22 @@ protection. The test uses one unlocked read/write NAPOT region at 0x1000–0x1ff
 its independent reference checks complete coverage, M-mode bypass, and U-mode
 default denial. Both enabled and disabled configurations pass the same suites:
 
+- `turnover`: 24 alternating loads/stores with next-cycle responses sustain
+  one grant and one WB completion per clock after pipeline fill.
 - `pipeline`: 64 pass-through tokens at one transfer per cycle, then 512 mixed
   load/store/pass/fault tokens under independent input, bus, permission, and WB
   stalls. A FIFO scoreboard checks order, data, flags, faults, load readiness,
-  and exact PC/instruction/destination association. Native issue counting proves
-  one request per memory instruction. Byte-memory results freeze at grant so
+  and exact PC/instruction/destination association. Bus grant counting proves
+  one request per nonfaulting memory instruction. Byte-memory results freeze at grant so
   subsequent stores cannot change an older load's expected value.
-- `drain_flush`: older WB work drains while MEM waits for global permission;
-  a MEM-only flush preserves older WB and an already presented store request;
-  a replacement load waits while the killed store drains, its error is discarded,
-  and the replacement receives its own response with correct identity. Reset
-  and subsequent pipeline recovery are also checked. The model allows the
-  killed store's external write to take effect at grant.
+- `drain_flush`: an older load waits in WB while a younger store is held in
+  MEM. A MEM-only flush preserves that older response and discards the younger
+  token. A separately presented store request survives cancellation through
+  grant/response; its killed error cannot leak into later tokens.
+
+The fixture models WB completion by consuming the independent LSU response
+channel with the retained MEM/WB identity. Actual architectural WB/CSR behavior
+is tested separately and in the controller-parent/core regressions.
 
 This is a MEM integration fixture, not a full core or architectural WB/retirement
 implementation. See the [stage interface guide](../mem/README.md).

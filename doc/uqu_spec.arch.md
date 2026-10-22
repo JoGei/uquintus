@@ -269,14 +269,17 @@ The pipeline stages shall be arranged in this order:
 | IF | Fetch | Fetch instructions through the instruction memory interface. |
 | ID | Decode | Decode instructions, read source registers, resolve conditional branches, and calculate `JAL`/`JALR` jump targets. |
 | EX | Execute | Perform arithmetic and logic operations and calculate effective addresses for memory accesses. |
-| MEM | Memory | Perform load and store accesses through the data memory interface. |
-| WB | Write back | Write instruction results to the register file when required. |
+| MEM | Memory | Check and issue load/store requests; advance on grant. |
+| WB | Write back | Await memory responses, handle faults and retire/write results. |
 
-The MEM stage shall be blocking: a native load or store shall remain in MEM
-until its data memory transaction completes. Younger instructions shall stall
-behind it. Custom shared-LSU access shall be deferred under [interfaces, Section 5.1](uqu_spec.interfaces.md#51-initial-standard-only-scope-and-deferred-memory-features);
-initial XIF offloads shall pass through MEM without requesting LSU work and
-shall wait for their standard result completion at WB.
+MEM shall present a permitted native load/store request combinationally and
+advance on grant. WB shall retain that instruction until its response arrives;
+stores shall also wait for a response before retirement. A successful older WB
+response may overlap a younger MEM request and grant, sustaining one memory
+operation per cycle with next-cycle responses and no other stalls. An older
+fault or unresolved completion shall block younger memory effects. Custom
+shared-LSU access remains deferred under [interfaces, Section 5.1](uqu_spec.interfaces.md#51-initial-standard-only-scope-and-deferred-memory-features);
+initial XIF offloads pass through MEM and await their standard results in WB.
 
 Base integer ALU operations shall complete in one EX execution cycle once their
 operands are available. This shall include addition/subtraction, bitwise logic,
@@ -1020,97 +1023,73 @@ remain separate implementation work.
 
 ### 3.8. MEM-owned load/store unit
 
-`src/uquintus/uqu_lsu.v` implements the blocking native LSU for the MEM stage.
-The LSU owns one access's private request/response tracking and registered
-completion; pipeline EX/MEM and MEM/WB storage remains outside the unit.
-The MEM stage in Section 3.9 issues each access once, associates its completion
-with the parent-held instruction, and transfers result/exception metadata
-onward without repeating the transaction.
+`src/uquintus/uqu_lsu.v` owns data-bus request/response tracking. The LSU remains
+instantiated in MEM; its independent response channel is routed by the core to
+WB. EX/MEM and MEM/WB payload/validity registers remain parent-owned.
 
-The unit accepts a native valid/ready request carrying load/store selection,
-instruction funct3, effective address, store data, original instruction, and an
-internal access-denial indication. A separate `request_permit_i` gates external
-request presentation until older instructions are safe under Section 9.2.
-Access-denial checks shall be complete at native acceptance. Invalid normalized
-control, misalignment, or access denial shall complete with exception metadata
-without issuing OBI. Misalignment shall take priority over access denial.
+A legal, aligned, permitted request with reserved WB capacity shall assert OBI
+request in the same cycle it is presented by MEM. Grant shall acknowledge the
+native request and transfer instruction ownership to WB at that edge. A stalled
+request shall capture and retain its payload until grant, including through
+permission changes or request-side flush. The bus address is word-aligned;
+original effective address, operation and offset remain associated with the
+response for byte extraction/sign extension and precise fault reporting.
 
-The native OBI data port shall preserve the declarations and transaction rules
-in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories).
-The LSU registers its request before presentation, aligns only the bus address,
-places byte enables/store data, and retains the original effective address.
-Granted loads and stores shall wait for completion. Bus data/error shall be
-captured regardless of pipeline stalls; selected/extended load results and
-exceptions shall be exposed only after that capture. This provides registered
-load-result storage under Section 4 without an external-response bypass.
+Illegal normalized controls, misalignment and access denial shall report local
+request exceptions in that priority order without issuing OBI. MEM transfers
+these exceptions directly to WB; no response is expected for a local fault.
+The core-owned PMP supplies denial before first request presentation.
 
-An owning flush before OBI request presentation may cancel the private access.
-Once request is presented, flush shall not withdraw it, including before grant.
-The LSU shall finish the grant/response obligation and discard a killed access's
-completion without raising a stale exception. Held native completions may be
-discarded immediately. `busy_o` shall account for transaction and completion
-storage, including killed bus work. Reset may clear this tracking only under
-the coordinated system-reset contract. There shall be no bus timeout or retry.
+There is one accepted outstanding transaction. A successful response consumed
+by WB may overlap the next request/grant. A fault response shall suppress a
+younger request immediately. External response backpressure is not supported:
+if WB cannot consume a response, LSU storage captures its selected result and
+status once and holds them until consumption. `res_registered_o` distinguishes
+this buffered response from the live external response. Stores return zero
+data and still require completion acknowledgement. No timeout/retry is added.
 
-The [LSU component guide](../verif/sim/lsu/README.md) defines ports, fault priority,
-request permission, byte lanes, completion timing, and verification. PMP integration,
-full-core pipeline control, fences, custom memory operations, atomics, integrity,
-and non-OBI bus adapters remain separate implementation work.
+`flush_i` cancels the MEM-side request owner, without revoking an older accepted
+WB transaction. A presented canceled request shall finish grant/response and
+discard its result. `res_flush_i` explicitly cancels accepted response ownership
+and drains any remaining bus obligation. The core never flushes its own oldest
+WB memory operation; it waits for completion before trap/debug/interrupt entry.
+`busy_o` includes held requests, pending responses and buffered completions,
+including killed work. Reset abandonment requires coordinated system reset.
+
+See the [LSU guide](../verif/sim/lsu/README.md) for the exact ports and tests.
 
 ### 3.9. MEM stage and parent-owned pipeline storage
 
-`src/uquintus/uqu_stage_mem.v` owns the LSU and one local request-issued bit.
-The stage's parent shall own both EX/MEM and MEM/WB registers, their validity,
-instruction identity/PC/destinations, and retained payloads. MEM shall not
-duplicate these boundary registers or own the core-wide PMP/CSR blocks.
-The [MEM component guide](../verif/sim/mem/README.md) defines its ports and tests.
+`src/uquintus/uqu_stage_mem.v` owns one LSU and private issue/cancellation control,
+without duplicating pipeline-boundary payloads or the core-owned PMP block.
+The parent retains EX/MEM inputs until `valid_o && ready_i`, then captures the
+instruction's identity and pending-memory marker in MEM/WB. Before initially
+presenting OBI, MEM requires both precise-effect permission and WB capacity.
+If a previously presented request is granted after capacity is withdrawn, a
+local issued bit prevents reissue until the parent can accept the token.
 
-`valid_i` describes the live parent-held EX/MEM instruction. `ready_o` permits
-filling an empty slot or replacing its current instruction when
-`valid_o && ready_i` transfers it to MEM/WB. The parent shall retain the input
-payload while held; `ready_i` describes MEM/WB capacity. A native LSU request
-may be accepted while WB is blocked, but this shall not release EX/MEM or
-permit repeated issue. The LSU shall retain completion until MEM transfers it.
-Non-memory tokens, including arithmetic/FPU results and CSR/XIF/fence tokens,
-shall pass through without LSU side effects. Existing exceptions take priority
-and shall issue neither LSU work nor a PMP query.
+Pass-through tokens and existing exceptions need no LSU transaction. Incoming
+exceptions suppress PMP queries and take priority over local LSU exceptions.
+MEM's combinational PMP query supplies effective address, access size, read/write
+requirement and effective privilege. The core resolves MPRV/MPP and returns
+permission; MEM stores no PMP configuration.
 
-MEM shall expose a combinational protection query containing original effective
-address, log2 access size, read/write requirement, and effective data privilege.
-The parent shall connect it to the MEM port of its one shared PMP block and
-return permission as `pmp_allow_i`. The parent resolves MPRV/MPP; MEM shall not
-receive or store PMP configuration. LSU acceptance captures denial, independently
-of the controller's precise-effect `request_permit_i`. No denied native access
-shall reach OBI, and misalignment shall retain priority over permission denial.
+MEM output for a granted memory token is its effective-address metadata, never
+a load-result producer. `load_result_valid_o` remains tied low; the core excludes
+all MEM LSU tokens from destination forwarding. Memory response data, error,
+cause, tval, registered-status and valid/ready travel through the independent
+`lsu_res_*` channel to WB. Memory tokens propagate no FP flag update.
 
-Successful load data becomes available only from registered LSU completion.
-`load_result_valid_o` qualifies a live successful load result independently of
-WB readiness. The parent/hazard block still determines destination, instruction
-class, youngest-writer priority, and configured forwarding eligibility; stage
-completion alone shall not identify a forwardable CSR/XIF result. Memory
-operations and exceptions shall not propagate floating-point flag updates.
-Pass-through FPU flags remain per-instruction metadata until qualified WB accrual.
+A MEM-only flush leaves older WB response ownership intact. A canceled request
+already presented to the bus must drain; an accepted-but-not-transferred MEM
+request is canceled through private registered control. A replacement memory
+request waits for capacity; independent non-memory/exception tokens may still
+advance. Killed responses cannot become replacement results. `lsu_busy_o`
+remains visible to fence and drain control even with no live MEM token.
 
-An owning MEM flush suppresses transfers/new issue and clears local issue
-tracking, while the LSU cancels or drains according to Section 3.8.
-`lsu_busy_o` shall remain visible even after EX/MEM validity is cleared. An empty
-EX/MEM slot may fill during killed bus work, but its replacement instruction
-shall wait for that work to drain before any completion or new LSU acceptance,
-including for non-memory/exception tokens. The killed response/error shall
-never become the replacement's result. This conservative blocking shall not
-prevent an older MEM/WB instruction from draining. A MEM-only flush shall not
-clear that older parent register. Reset may abandon bus tracking only under
-the existing coordinated system-reset contract.
-
-The [MEM parent-register fixture](../verif/sim/mem_pipeline/README.md) verifies
-the actual stage with external EX/MEM and MEM/WB registers and a parent-owned
-PMP block, including both PMP configurations. Standalone and fixture tests cover
-variable-latency transactions, faults, order/identity, WB backpressure, killed
-transaction draining, and recovery. Development Yosys checks confirm only one
-top-level tracking state bit plus one LSU, no boundary payload/PMP storage in
-MEM, and no combinational OBI-response bypass or flush withdrawal of request.
-Full-core WB/controller/fence and hazard/forwarding integration is implemented
-in Section 3.13; external fence actions remain system-specific.
+The [MEM guide](../verif/sim/mem/README.md) and
+[parent fixture](../verif/sim/mem_pipeline/README.md) cover grants, response
+routing, local faults, WB backpressure, order/identity and age-qualified flushes.
 
 ### 3.10. WB stage, commitment, and owned CSR state
 
@@ -1121,6 +1100,19 @@ bit records that commit permission has been sent for the current WB token;
 otherwise all state belongs to the CSR unit. The core parent shall own MEM/WB, the GPR file, current privilege,
 global arbitration/serialization, redirects, and the one shared PMP block.
 The [WB component guide](../verif/sim/wb/README.md) defines the initial bindings.
+
+A pending-memory token sets `lsu_i` and waits for `lsu_res_valid_i`. Successful
+load data may feed the architectural GPR write at the response/retirement edge;
+a successful store retires at that edge without a destination write. Error
+responses report load/store access-fault with the original address and WB PC,
+without normal write or retirement. `lsu_res_ready_o` depends on WB ownership
+and retirement authorization, independently of response validity/data.
+
+Raw external load data shall not feed DE/EX operand forwarding. WB advertises
+memory `result_valid_o` only when `lsu_res_registered_i` indicates a buffered
+response. If the raw response retires immediately, consumers wait until the
+written value is visible from the GPR file on the following cycle. The response
+may therefore retire without being advertised as a combinational bypass.
 
 `kind_i[2:0]` selects ordinary result/token (`0`), native CSR (`1`), MRET (`2`),
 XIF (`3`), DRET (`4`), or EBREAK (`5`). Disabled XIF/DRET classes are illegal. A live token may wait in
@@ -1510,7 +1502,8 @@ stalls shall supply the same correct value through register-file reads.
 
 A native load shall become available for register-operand forwarding only
 after its successful response data and completion status have been captured
-in core registers. No direct combinational bypass from the external OBI
+in core registers. A successful raw response may write the GPR file at its
+retirement edge; that write is distinct from forwarding. No direct combinational bypass from the external OBI
 response into dependent operand data or readiness shall be required or
 permitted. A failed response shall follow the precise exception path and
 shall not produce a forwardable load result.
@@ -3954,7 +3947,7 @@ later decisions determine the active contract.
 | D-220 | Add independent boolean `MUA_FORWARD_MEM_TO_EX`, defaulting to one and subordinate to `MUA_FORWARDING`; forward available MEM results to EX consumers or use another valid operand route or dependency stalls when the path is disabled. | Support adjacent dependent native ALU operations without requiring the combinational EX-to-DE path, while allowing experiments with MEM-to-EX bypass disabled. | Agreed; registered load-result rule defined by D-223; stall retention defined by D-224 |
 | D-221 | Add independent boolean `MUA_FORWARD_WB_TO_EX`, defaulting to one and subordinate to `MUA_FORWARDING`; forward available WB results to EX consumers with the existing youngest-writer and validity checks, or use another valid route or dependency stalls when disabled. | Supply operands whose producers have advanced beyond MEM without requiring earlier DE forwarding, while retaining independent path configuration. | Agreed; stall retention defined by D-224 |
 | D-222 | Resolve native integer store data through the configured operand forwarding/hazard logic in EX and retain it with the effective address before transfer to MEM; require no late store-data forwarding or register-dependency wait in MEM. | Keep register dependency resolution out of the MEM-stage LSU while preserving ordinary byte-lane and bus handling. | Agreed |
-| D-223 | Require successful native load responses to be captured in core registers before their data becomes forwardable; forward the correct selected/extended value through enabled paths, with no direct external-response bypass and no fixed load-use stall count. | Separate external response timing from dependent computation while preserving variable-latency memory and precise faults. | Implemented registered LSU/MEM completion and core forwarding qualification; Sections 3.8–3.9 and 3.13 |
+| D-223 | Require successful native load responses to be captured in core registers before their data becomes forwardable; forward the correct selected/extended value through enabled paths, with no direct external-response bypass and no fixed load-use stall count. | Separate external response timing from dependent computation while preserving variable-latency memory and precise faults. | Implemented WB response completion, registered-only forwarding and GPR visibility; Sections 3.8–3.9 and 3.13 |
 | D-224 | Retain correctly resolved operands needed by a stalled consumer, or its completed result, while older producers drain; allow necessary local capture without advancing or reissuing the held instruction, and invalidate retained validity on owning flush/reset. | Prevent a stalled consumer from losing a forwarded value when its producer leaves the forwarding stage. | DE source-retention requirement superseded by selectable policy D-275; executing-consumer/result retention and protocol stability remain required |
 | D-225 | Finalize nonfaulting branch/JAL/JALR resolution and any DE redirect only with the instruction's accepted DE-to-EX transfer, required operands ready, and central arbitration permitting it; wait while held and perform the action once. | Keep DE control flow simple without bookkeeping for an early redirect from a stalled branch. | Agreed; existing prediction, precise-fault, and XIF issue contracts preserved |
 | D-226 | Default both `MUA_FORWARD_EX_TO_DE` and `MUA_FORWARD_MEM_TO_DE` to one, retaining their independent disable controls and the `MUA_FORWARDING` master switch. | Enable all currently selectable operand-forwarding paths in the default configuration while preserving timing and stall experiments. | Agreed |
@@ -3998,3 +3991,4 @@ later decisions determine the active contract.
 | D-302 | Select CVFPU/FPnew for scalar Zfinx integration and propagate four per-group pipeline-register counts, one placement selector and one divide/square-root selector through complete hardware YAML, core, EX and FPU. | Explore internal timing/area choices without changing ISA coverage, five-stage boundaries or the blocking EX handshake contract. | Implemented; Section 3.3.2; dependency pin under D-303; execution and simulation qualification under D-304 |
 | D-304 | Instantiate the pinned CVFPU in a blocking plain-Verilog Zfinx adapter, translate normalized operations, sample imported reset, cancel on flush and carry results/status to retirement. Default to qualified TH32, retain THMULTI and reject PULP while its known flag failures remain. | Complete actual scalar floating-point execution with explicit backend limits, no extra architectural stages or FP register file, and independent arithmetic/lifecycle checks. | Implemented adapter, EX/core, component exact-arithmetic oracle and RVFI FP CSR observations; Section 3.3 and verification Section 2.9; incorrect exponent-based UF filtering removed under D-305; physical qualification and PULP remain open |
 | D-305 | Add independent Spike Zfinx ELF execution and observe actual third operands/effective rounding in a simulation companion. Preserve IEEE boundary-underflow status and correct the exact-arithmetic oracle using unbounded-exponent tininess. | Check the ISA through an external model and expose common assumptions shared by native RTL/oracles. | Implemented; verification Section 2.10; architectural certification and formal FP models remain open |
+| D-315 | Issue native data requests combinationally in MEM, transfer ownership to WB on grant, and complete loads/stores or raise precise bus faults in WB; allow successful response/request overlap while preserving registered-only DE/EX load forwarding. | Remove mandatory request and completion bubbles without speculative memory effects, extra pipeline boundaries or a store buffer. | Implemented LSU/MEM/WB/core, response-aware RVFI and component/parent/core regressions; Sections 3.8–3.10 |

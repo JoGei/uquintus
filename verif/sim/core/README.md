@@ -74,8 +74,10 @@ register, PC, immediate or zero as decoded. Store data is resolved in EX.
 An operand admitted under a next-cycle bypass guarantee is captured once it
 becomes ready if EX is held; it cannot disappear when its producer drains.
 No LSU effective address or uncommitted CSR placeholder is forwarded as a
-register result. A load becomes forwardable only from the registered successful
-MEM response. CSR results become available at successful WB commit.
+register result. MEM issues a load/store and advances on grant; WB owns its response and
+completion. A raw load response can write the GPR file at retirement, but
+becomes available to dependent operands only after registration: through a
+buffered WB response or the updated GPR file. CSR results become available at successful WB commit.
 
 WB faults and MRET redirect through the controller. WB is not flushed by its
 own accepted event; its boundary is cleared by accepted transfer. Younger

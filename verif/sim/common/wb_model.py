@@ -5,7 +5,8 @@ from csregfile_model import CSRModel, INPUTS
 FIELDS = ('kind', 'result', 'rd_we', 'rd', 'pc', 'instr', 'csr_addr', 'csr_op',
           'csr_src', 'csr_src_zero', 'fflags_valid', 'fflags', 'exception_valid',
           'exception_cause', 'exception_tval', 'xif_id')
-GLOBALS = dict(rst_n=1, flush=0, valid=1, ready=1, priv_m=1, hart_id=0xCAFEBABE,
+GLOBALS = dict(lsu=0, lsu_res_valid=0, lsu_res_registered=0, lsu_res_data=0,
+               lsu_res_exception_valid=0, lsu_res_exception_cause=0, lsu_res_exception_tval=0, rst_n=1, flush=0, valid=1, ready=1, priv_m=1, hart_id=0xCAFEBABE,
                irq_software=0, irq_timer=0, irq_external=0, trap=0,
                trap_pc=0, trap_interrupt=0, trap_cause=0, trap_tval=0,
                debug_mode=0, debug_enter=0, debug_pc=0, debug_cause=3,
@@ -59,6 +60,8 @@ class WBModel:
             fault = 2, item['instr']
         elif cr['exception_valid']:
             fault = cr['exception_cause'], cr['exception_tval']
+        elif g['lsu'] and g['lsu_res_valid'] and g['lsu_res_exception_valid']:
+            fault = g['lsu_res_exception_cause'], g['lsu_res_exception_tval']
         elif item['kind'] == 5 and not debug_break:
             fault = 3, 0
         else:
@@ -74,6 +77,7 @@ class WBModel:
                       ((self.committed or notify) and g['xif_result_valid'] and
                        g['xif_result_id'] == item['xif_id'] and
                        g['xif_result_hartid'] == g['hart_id'] and packet_ok))
+        completion = completion and (not g['lsu'] or g['lsu_res_valid'])
         valid = live and not external_trap and not external_debug and completion
         accepted = bool(valid and g['ready'])
         retired = bool(accepted and fault is None and not debug_break)
@@ -81,10 +85,11 @@ class WBModel:
         local_debug = bool(accepted and fault is None and debug_break)
         dest = (bool(g['xif_result_we'] & 1) and g['xif_result_rd'] != 0) if xif else (destination and item['rd'] != 0)
         rd = g['xif_result_rd'] if xif else item['rd']
-        value = (g['xif_result_data'] & 0xFFFFFFFF) if xif else cr['rdata'] if item['kind'] == 1 else item['result']
-        forward = bool(valid and fault is None and dest and (item['kind'] != 1 or retired))
+        value = (g['xif_result_data'] & 0xFFFFFFFF) if xif else cr['rdata'] if item['kind'] == 1 else g['lsu_res_data'] if g['lsu'] else item['result']
+        forward = bool(valid and fault is None and dest and (item['kind'] != 1 or retired) and
+                       (not g['lsu'] or g['lsu_res_registered']))
         commit = bool(self.p['XIF'] and g['rst_n'] and (notify or g['xif_kill_valid']))
-        result = dict(valid=int(valid), ready=int(g['rst_n'] and not g['flush'] and not external_trap and not external_debug and
+        result = dict(lsu_res_ready=int(live and g['lsu'] and not external_trap and not external_debug and g['ready']), valid=int(valid), ready=int(g['rst_n'] and not g['flush'] and not external_trap and not external_debug and
                                                 (not g['valid'] or accepted)),
                       retire=int(retired), exception_fire=int(exception_fire), mret=int(retired and item['kind'] == 2),
                       dret=int(retired and item['kind'] == 4), debug_enter=int(external_debug or (local_debug and not debug)),

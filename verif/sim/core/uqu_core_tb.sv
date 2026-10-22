@@ -293,8 +293,9 @@ module uqu_core_tb #(
         .ex_rs1_rdata_i(u_core.ex_rs[0]),
         .ex_rs2_rdata_i(u_core.ex_rs[1]),
         .mem_enable_i(u_core.mem_enable),
-        .mem_response_i(dmem_rvalid_i && u_core.u_mem.issued_q && !u_core.mem_flush),
-        .mem_response_data_i(dmem_rdata_i),
+        .wb_response_i(dmem_rvalid_i && u_core.wb_valid_q && u_core.wb_lsu_q &&
+                       !u_core.u_mem.u_lsu.response_buffer_valid_q),
+        .wb_response_data_i(dmem_rdata_i),
         .mem_fire_i(u_core.mem_fire),
         .mem_lsu_i(u_core.mem_lsu_q),
         .mem_we_i(u_core.mem_we_q),

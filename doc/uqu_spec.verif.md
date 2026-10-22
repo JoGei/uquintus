@@ -89,6 +89,14 @@ hide operand-selection errors. Raw load responses shall remain distinguishable
 from the extended GPR result. The initial memory profile shall use aligned
 addresses/lane masks and the RVFI memory-fault fields.
 
+For the MEM-request/WB-response split, the collector shall associate the raw
+memory word with the WB owner, including a response that retires on its arrival
+edge and a response buffered under WB backpressure. Simultaneous older response
+and younger MEM grant must not exchange their memory data, addresses or PC.
+Component/parent regressions shall check consecutive load/store grants with
+next-cycle responses, error suppression of younger effects, and MEM-only flush
+preservation of older WB response ownership.
+
 Simulation shall compare RVFI with independent execution expectations and check
 the saved trace against sampled records. Reset epochs shall distinguish repeated
 order values after reset. The collector shall contain no simulation I/O or

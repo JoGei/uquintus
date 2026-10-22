@@ -33,10 +33,11 @@ fence acknowledgements and canceled tokens are recorded separately.
 - `flow`: 128 native/load/store tokens under randomized EX completion, WB
   commitment, older-safety proof and memory timing. Exact in-order retirement
   and data are checked. A separate load waits behind unproven WB, then issues
-  after safety proof while WB is still held and retains its returned result.
+  after the older token retires and WB capacity becomes available; its own
+  response remains buffered under commitment stalls.
 - `faults`: a real illegal CSR access discovered at WB kills a younger store
-  before any bus request; a real MEM access fault cancels held younger EX/DE
-  work while older WB continues, without losing the fault token or issuing
+  before any bus request; a real WB memory-response fault cancels younger MEM/EX/DE
+  work while its own trap retirement is held, without losing the fault token or issuing
   the younger store.
 - `interrupts`: actual CSR writes install `mtvec`, `mie` and MIE. Drain waits
   for an older instruction, then preempts a DE fault at its exact PC. An older

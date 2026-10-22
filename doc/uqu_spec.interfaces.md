@@ -120,6 +120,14 @@ an upper bound on grant or response latency, and shall not prohibit completion
 of an older transaction in the cycle a different transaction is granted when
 the outstanding-request and capacity rules permit.
 
+For native data accesses, MEM owns request validation/presentation and transfers
+the instruction to WB on grant. WB owns response completion and precise fault
+entry. A successful WB response may overlap a different MEM request/grant;
+an older response error shall block that younger request immediately. WB may
+write a successful load into the GPR file at the response edge. DE/EX operand
+forwarding shall use registered data only; a blocked WB response is captured
+by the LSU, independently of pipeline advancement.
+
 This limit applies to the core-facing ports; external caches and memory systems
 may perform multiple downstream transactions internally. Multiple outstanding
 instruction fetches may be considered as a later optimization.

@@ -49,7 +49,7 @@ class CorePMPTest(uvm_test):
     async def reset(self):
         await self.cycle(rst_n=0)
         r = await self.cycle()
-        assert r['if_ready'] and r['mem_ready']
+        assert r['if_ready'] and not r['mem_busy']
 
     async def pair(self, configs, addresses, if_addr=0x1002, mem_addr=0x1030,
                    if_machine=False, mem_machine=False, write=False,
@@ -62,7 +62,13 @@ class CorePMPTest(uvm_test):
             mem_valid=1,mem_addr=mem_addr,mem_priv_m=int(mem_machine),
             mem_we=int(write),mem_wdata=0xCAFEBABE)
         assert (r['if_allow'],r['mem_allow']) == (if_allowed,mem_allowed)
-        assert r['if_ready'] and r['mem_ready']
+        assert r['if_ready']
+        assert r['dmem_req'] == mem_allowed
+        assert r['mem_result_valid'] == (not mem_allowed)
+        if not mem_allowed:
+            assert r['mem_exception_valid']
+            assert r['mem_exception_cause'] == (7 if write else 5)
+            assert r['mem_exception_tval'] == mem_addr
         # Different live addresses/permissions must not change captured decisions.
         self.configure([0]*16,[0]*16)
         r = await self.cycle(imem_gnt=int(if_allowed),dmem_gnt=int(mem_allowed))
@@ -75,26 +81,26 @@ class CorePMPTest(uvm_test):
             assert (r['dmem_addr'],r['dmem_we'],r['dmem_be']) == (mem_addr,int(write),15)
             assert r['dmem_wdata'] == (0xCAFEBABE if write else 0)
         else:
-            assert r['mem_result_valid'] and r['mem_exception_valid']
+            assert not r['mem_result_valid'] and not r['mem_busy']
         r = await self.cycle(imem_rvalid=int(if_allowed),imem_rdata=0x11223344,imem_err=int(if_error),
                              dmem_rvalid=int(mem_allowed),dmem_rdata=0xAABBCCDD,dmem_err=int(mem_error))
         assert r['if_result_valid'] == (not if_allowed)
-        assert r['mem_result_valid'] == (not mem_allowed)
+        assert r['mem_result_valid'] == mem_allowed
         if_expected = completion(if_addr,0x11223344,not if_allowed,if_error)
         mem_failed = not mem_allowed or mem_error
         for index in range(4):
             r = await self.cycle(if_result_ready=int(index==3),mem_result_ready=int(index==0))
             assert r['if_result_valid']
             assert (r['if_result_addr'],r['if_result_data'],r['if_result_error']) == if_expected
-            if index==0:
+            if index==0 and mem_allowed:
                 assert r['mem_result_valid'] and r['mem_exception_valid'] == mem_failed
                 assert r['mem_result_data'] == (0 if write or mem_failed else 0xAABBCCDD)
                 assert r['mem_exception_cause'] == ((7 if write else 5) if mem_failed else 0)
                 assert r['mem_exception_tval'] == (mem_addr if mem_failed else 0)
             else:
-                assert r['mem_ready'] and not r['mem_busy'] and not r['mem_result_valid']
+                assert not r['mem_busy'] and not r['mem_result_valid']
         r = await self.cycle()
-        assert r['if_ready'] and r['mem_ready'] and not r['if_busy'] and not r['mem_busy']
+        assert r['if_ready'] and not r['if_busy'] and not r['mem_busy']
 
 
 class PermissionsTest(CorePMPTest):
@@ -131,16 +137,16 @@ class ConcurrentTest(CorePMPTest):
         addresses = [napot(0x1000,0x1000),napot(0x2000,0x1000)]+[0]*14
         self.configure(configs,addresses)
         r = await self.cycle(if_valid=1,if_addr=0x1002,mem_valid=1,mem_addr=0x2000)
-        assert r['if_ready'] and r['mem_ready'] and r['if_allow'] and r['mem_allow']
+        assert r['if_ready'] and r['dmem_req'] and r['if_allow'] and r['mem_allow']
         r = await self.cycle(dmem_gnt=1)
         assert r['imem_req'] and r['imem_addr']==0x1000 and r['dmem_req']
         r = await self.cycle(dmem_rvalid=1,dmem_rdata=0x12345678,dmem_err=0)
-        assert r['imem_req'] and not r['mem_result_valid']
+        assert r['imem_req'] and r['mem_result_valid']
         r = await self.cycle(mem_result_ready=1)
         assert r['imem_req'] and r['mem_result_valid'] and r['mem_result_data']==0x12345678
         # The LSU can accept another access while IF still waits for its first grant.
         r = await self.cycle(mem_valid=1,mem_addr=0x2004,mem_we=1,mem_wdata=0xCAFEBABE)
-        assert r['imem_req'] and r['imem_addr']==0x1000 and r['mem_ready'] and r['mem_allow']
+        assert r['imem_req'] and r['imem_addr']==0x1000 and r['dmem_req'] and r['mem_allow']
         r = await self.cycle(dmem_gnt=1)
         assert r['imem_req'] and r['dmem_req'] and r['dmem_we'] and r['dmem_addr']==0x2004
         assert r['dmem_wdata']==0xCAFEBABE and r['dmem_be']==15
@@ -151,7 +157,7 @@ class ConcurrentTest(CorePMPTest):
         r = await self.cycle(imem_rvalid=1,imem_err=1,mem_result_ready=1)
         assert not r['if_result_valid'] and r['mem_result_valid'] and not r['mem_exception_valid']
         r = await self.cycle(if_valid=1,if_addr=0x1004)
-        assert r['if_ready'] and r['mem_ready'] and not r['if_result_valid']
+        assert r['if_ready'] and not r['mem_busy'] and not r['if_result_valid']
         r = await self.cycle(imem_gnt=1)
         assert r['imem_req'] and r['imem_addr']==0x1004
         await self.cycle(imem_rvalid=1,imem_rdata=0x87654321,imem_err=0)

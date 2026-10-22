@@ -23,6 +23,14 @@ module uqu_stage_wb #(
     output wire         ready_o,
     output wire         valid_o,
     input  wire         ready_i,
+    input  wire         lsu_i,
+    input  wire         lsu_res_valid_i,
+    input  wire         lsu_res_registered_i,
+    input  wire [31:0]  lsu_res_data_i,
+    input  wire         lsu_res_exception_valid_i,
+    input  wire [4:0]   lsu_res_exception_cause_i,
+    input  wire [31:0]  lsu_res_exception_tval_i,
+    output wire         lsu_res_ready_o,
     input  wire [2:0]   kind_i,
     input  wire [31:0]  result_i,
     input  wire         rd_we_i,
@@ -129,7 +137,8 @@ module uqu_stage_wb #(
     wire csr_exception;
     wire [4:0] csr_cause;
     wire [31:0] csr_tval;
-    wire fault = exception_valid_i || illegal_control || csr_exception ||
+    wire memory_fault = lsu_i && lsu_res_valid_i && lsu_res_exception_valid_i;
+    wire fault = memory_fault || exception_valid_i || illegal_control || csr_exception ||
                  ((kind_i == KIND_EBREAK) && !debug_break);
     wire accepted_trap = rst_ni && trap_i && !debug_mode && !external_debug;
     wire blocked_event = accepted_trap || external_debug;
@@ -148,14 +157,15 @@ module uqu_stage_wb #(
                         ((xif_result_rd_i == rd_i) &&
                          ((ISA_E == 0) || !xif_result_rd_i[4]) &&
                          (!xif_pair || !xif_result_rd_i[0])));
-    wire completion = !is_xif || fault ||
-                      (xif_committed && xif_result_match && xif_packet_ok);
+    wire completion = (!lsu_i || lsu_res_valid_i) &&
+                      (!is_xif || fault ||
+                       (xif_committed && xif_result_match && xif_packet_ok));
     wire destination_nonzero = is_xif ?
         (xif_result_we_i[0] && (xif_result_rd_i != 5'd0)) :
         (destination_used && (rd_i != 5'd0));
     wire [4:0] selected_rd = is_xif ? xif_result_rd_i : rd_i;
     wire [31:0] selected_result = is_xif ? xif_result_data_i[31:0] :
-                                 (kind_i == KIND_CSR) ? csr_rdata : result_i;
+                                 (kind_i == KIND_CSR) ? csr_rdata : lsu_i ? lsu_res_data_i : result_i;
     wire wb_notify = (XIF == 1) && rst_ni && valid_i && is_xif && !xif_commit_sent &&
                      (flush_i || (!blocked_event && (!fault || ready_i)));
     wire wb_kill = flush_i || fault;
@@ -175,6 +185,8 @@ module uqu_stage_wb #(
     assign xif_result_ready_o = active && is_xif && !fault && !blocked_event &&
                                 xif_committed && ready_i;
 
+    assign lsu_res_ready_o = active && lsu_i && !blocked_event && ready_i;
+
     assign valid_o = active && !blocked_event && completion;
     assign ready_o = enabled && !blocked_event && (!valid_i || (valid_o && ready_i));
     assign retire_o = wb_fire && !fault && !debug_break;
@@ -189,13 +201,16 @@ module uqu_stage_wb #(
     assign exception_valid_o = active && fault;
     assign exception_cause_o = !exception_valid_o ? 5'd0 :
         exception_valid_i ? exception_cause_i : illegal_control ? CAUSE_ILLEGAL_INSTRUCTION :
+        memory_fault ? lsu_res_exception_cause_i :
         (kind_i == KIND_EBREAK) ? 5'd3 : csr_cause;
     assign exception_tval_o = !exception_valid_o ? 32'd0 :
         exception_valid_i ? exception_tval_i : illegal_control ? instr_i :
+        memory_fault ? lsu_res_exception_tval_i :
         (kind_i == KIND_EBREAK) ? 32'd0 : csr_tval;
     assign exception_pc_o = exception_valid_o ? pc_i : 32'd0;
     assign result_valid_o = valid_o && !fault && destination_nonzero &&
-                            ((kind_i != KIND_CSR) || retire_o);
+                            ((kind_i != KIND_CSR) || retire_o) &&
+                            (!lsu_i || lsu_res_registered_i);
     assign result_o = result_valid_o ? selected_result : 32'd0;
     assign we0_o = retire_o && destination_nonzero;
     assign waddr0_o = we0_o ? selected_rd : 5'd0;

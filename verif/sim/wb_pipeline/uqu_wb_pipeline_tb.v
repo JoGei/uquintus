@@ -174,6 +174,8 @@ module uqu_wb_pipeline_tb #(
         .XIF(XIF), .XIF_DUALWRITE(XIF_DUALWRITE),
         .DEBUG(DEBUG)
     ) u_wb (
+        .lsu_i(1'b0), .lsu_res_valid_i(1'b0), .lsu_res_registered_i(1'b0), .lsu_res_data_i(32'd0),
+        .lsu_res_exception_valid_i(1'b0), .lsu_res_exception_cause_i(5'd0), .lsu_res_exception_tval_i(32'd0), .lsu_res_ready_o(),
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
         .valid_i(memwb_valid_q), .ready_o(wb_ready_o), .valid_o(wb_valid_o), .ready_i(commit_ready_i),
         .priv_m_i(priv_m_q),

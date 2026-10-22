@@ -55,6 +55,10 @@ module uqu_mem_pipeline_tb #(
 );
     reg exmem_valid_q;
     reg memwb_valid_q;
+    reg memwb_lsu_q, memwb_we_q;
+    wire res_valid, res_error;
+    wire [31:0] res_data, res_tval;
+    wire [4:0] res_cause;
     reg                    exmem_lsu_q;
     reg                    exmem_we_q;
     reg          [2:0]     exmem_op_q;
@@ -81,7 +85,7 @@ module uqu_mem_pipeline_tb #(
     reg          [4:0]     memwb_rd_q;
     wire mem_ready;
     wire mem_valid;
-    wire memwb_ready = !memwb_valid_q || out_ready_i;
+    wire memwb_ready = !memwb_valid_q || (out_valid_o && out_ready_i);
     wire         [31:0]    mem_result;
     wire                   mem_fflags_valid;
     wire         [4:0]     mem_fflags;
@@ -97,17 +101,19 @@ module uqu_mem_pipeline_tb #(
     wire pmp_allow;
 
     assign in_ready_o = rst_ni && !flush_i && mem_ready;
-    assign out_valid_o = rst_ni && memwb_valid_q;
+    assign out_valid_o = rst_ni && memwb_valid_q && (!memwb_lsu_q || res_valid);
     assign mem_valid_o = rst_ni && exmem_valid_q;
     assign mem_pc_o = exmem_pc_q;
     assign mem_fire_o = mem_valid && memwb_ready;
-    assign out_result_o = memwb_result_q;
+    assign out_result_o = out_exception_valid_o ? 32'd0 : memwb_lsu_q ? res_data : memwb_result_q;
     assign out_fflags_valid_o = memwb_fflags_valid_q;
     assign out_fflags_o = memwb_fflags_q;
-    assign out_exception_valid_o = memwb_exception_valid_q;
-    assign out_exception_cause_o = memwb_exception_cause_q;
-    assign out_exception_tval_o = memwb_exception_tval_q;
-    assign out_load_result_valid_o = memwb_load_result_valid_q;
+    assign out_exception_valid_o = memwb_exception_valid_q || (memwb_lsu_q && res_valid && res_error);
+    assign out_exception_cause_o = memwb_exception_valid_q ? memwb_exception_cause_q :
+                                   (memwb_lsu_q && res_error) ? res_cause : 5'd0;
+    assign out_exception_tval_o = memwb_exception_valid_q ? memwb_exception_tval_q :
+                                  (memwb_lsu_q && res_error) ? res_tval : 32'd0;
+    assign out_load_result_valid_o = out_valid_o && memwb_lsu_q && !memwb_we_q && !out_exception_valid_o;
     assign out_pc_o = memwb_pc_q;
     assign out_instr_o = memwb_instr_q;
     assign out_rd_o = memwb_rd_q;
@@ -140,6 +146,8 @@ module uqu_mem_pipeline_tb #(
             memwb_valid_q <= mem_valid;
             if (mem_valid) begin
                 memwb_result_q <= mem_result;
+                memwb_lsu_q <= exmem_lsu_q && !mem_exception_valid;
+                memwb_we_q <= exmem_we_q;
                 memwb_fflags_valid_q <= mem_fflags_valid;
                 memwb_fflags_q <= mem_fflags;
                 memwb_exception_valid_q <= mem_exception_valid;
@@ -168,7 +176,10 @@ module uqu_mem_pipeline_tb #(
         .exception_valid_i(exmem_exception_valid_q),
         .exception_cause_i(exmem_exception_cause_q),
         .exception_tval_i(exmem_exception_tval_q),
-        .request_permit_i(request_permit_i), .lsu_busy_o(lsu_busy_o),
+        .lsu_res_flush_i(1'b0), .lsu_res_ready_i(memwb_valid_q && memwb_lsu_q && out_ready_i),
+        .lsu_res_valid_o(res_valid), .lsu_res_registered_o(), .lsu_res_data_o(res_data),
+        .lsu_res_exception_valid_o(res_error), .lsu_res_exception_cause_o(res_cause), .lsu_res_exception_tval_o(res_tval),
+        .request_permit_i(request_permit_i && (!memwb_valid_q || (out_valid_o && !out_exception_valid_o))), .lsu_busy_o(lsu_busy_o),
         .pmp_valid_o(pmp_valid), .pmp_addr_o(pmp_addr), .pmp_size_o(pmp_size),
         .pmp_access_o(pmp_access), .pmp_priv_m_o(pmp_priv_m), .pmp_allow_i(pmp_allow),
         .result_o(mem_result),

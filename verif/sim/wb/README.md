@@ -31,6 +31,23 @@ ordinary destination writes, CSR updates and committed flags belong to the same
 retirement edge. x0 never writes; actual E destinations x16..x31 fault without
 aliasing; unused rd fields do not fault.
 
+## Memory completion
+
+`lsu_i` marks an accepted data transaction whose identity resides in MEM/WB.
+WB waits for `lsu_res_valid_i`; `lsu_res_ready_o` depends on ownership and
+retirement authorization, independently of response data/validity. A successful
+load selects `lsu_res_data_i` for its GPR write; a store retires without writing.
+The `lsu_res_exception_*` inputs instead cause precise trap entry using the
+retained WB PC and original effective address, with no ordinary retirement.
+
+A raw response may write the architectural register file at its retirement
+edge. `result_valid_o` remains low until `lsu_res_registered_i` indicates a
+buffered response. Consumers therefore use registered forwarding or read the
+GPR after load retirement; no external response feeds dependent DE/EX logic.
+The LSU captures a response if WB cannot consume it. Parent cancellation must
+also cancel LSU response ownership; the core never cancels its oldest WB memory
+transaction and routes younger MEM flushes separately.
+
 ## Results and exceptions
 
 | Ports | Meaning |

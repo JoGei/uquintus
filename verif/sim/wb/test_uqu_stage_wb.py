@@ -409,3 +409,37 @@ async def xif(_dut):
 @cocotb.test(timeout_time=1000, timeout_unit='us')
 async def debug(_dut):
     await uvm_root().run_test(DebugTest)
+
+
+class MemoryTest(WBTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.initialize()
+        for store in (False, True):
+            item = token(rd_we=int(not store), result=0x1000, pc=0x9000)
+            for _ in range(4):
+                r = await self.cycle(item, lsu=1)
+                assert not r['valid'] and not r['retire'] and not r['result_valid']
+            # Raw bus response can retire/write at this edge, never bypass.
+            r = await self.cycle(item, lsu=1, lsu_res_valid=1, lsu_res_data=0xDEADBEEF)
+            assert r['retire'] and not r['result_valid']
+            assert r['wdata0'] == (0 if store else 0xDEADBEEF)
+            # A response held by the LSU becomes a registered forwarding source.
+            for ready in (0, 0, 1):
+                r = await self.cycle(item, lsu=1, lsu_res_valid=1, lsu_res_registered=1,
+                                     lsu_res_data=0x89ABCDEF, ready=ready)
+                assert r['result_valid'] == int(not store)
+            r = await self.cycle(item, lsu=1, lsu_res_valid=1, lsu_res_exception_valid=1,
+                lsu_res_exception_cause=7 if store else 5, lsu_res_exception_tval=0x1000, ready=0)
+            assert r['exception_valid'] and not r['exception_fire'] and not r['we0']
+            r = await self.cycle(item, lsu=1, lsu_res_valid=1, lsu_res_registered=1,
+                lsu_res_exception_valid=1, lsu_res_exception_cause=7 if store else 5,
+                lsu_res_exception_tval=0x1000)
+            assert r['exception_fire'] and not r['retire']
+            assert self.model.csr.words[0x341] == 0x9000
+        self.drop_objection()
+
+
+@cocotb.test()
+async def memory(_dut):
+    await uvm_root().run_test(MemoryTest)

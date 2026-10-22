@@ -71,6 +71,11 @@ class ParentTest(uvm_test):
             d.dmem_rdata_i.value = data
             d.dmem_err_i.value = error
         await Timer(1,units='ns')
+        bus = tuple(int(getattr(d,'dmem_'+name+'_o').value) for name in ('req','we','addr','wdata','be'))
+        granted = bool(bus[0] and int(d.dmem_gnt_i.value))
+        if returning:
+            assert self.slots[3] is not None
+            self.slots[3]['expected_data'] = self.response[1]
         names = ('occupied','advance','clear','in_ready','in_fire','de_pc','ex_pc','mem_pc','wb_pc',
                  'retire','exception_fire','exception_cause','exception_tval','write','write_data',
                  'trap_valid','trap_pc','trap_cause','drain_accept','drain_pc','redirect_valid',
@@ -112,8 +117,6 @@ class ParentTest(uvm_test):
         else:
             # Memory responses are captured even when the WB slot is stalled.
             if returning:
-                assert self.slots[2] is not None
-                self.slots[2]['expected_data'] = self.response[1]
                 self.response = None
             elif self.response is not None and self.response[0]>0:
                 delay,data,error = self.response
@@ -195,17 +198,20 @@ class FlowTest(ParentTest):
         else:
             raise AssertionError('randomized pipeline did not drain')
         assert not self.faults and not self.canceled
-        # Unproven older WB holds a MEM load privately; proof may release the bus
-        # while WB itself is still held, then responses survive that hold.
+        # MEM cannot reserve WB while an older WB token is held, even with
+        # effect permission. After grant, response capture survives WB stalls.
         await self.send(packet(0x3000),commit_enable=0,wb_effect_safe=0)
         await self.send(packet(0x3004,lsu=1,data=0x5000),commit_enable=0,wb_effect_safe=0)
         await self.until(lambda o:o['occupied']&12==12,commit_enable=0,wb_effect_safe=0)
         for _ in range(8):
-            o = await self.cycle(commit_enable=0,wb_effect_safe=0)
+            o = await self.cycle(commit_enable=0,wb_effect_safe=1)
             assert not o['dmem_req']
-        await self.until(lambda o:bool(o['dmem_req']),commit_enable=0,wb_effect_safe=1)
-        await self.until(lambda o:self.response is None,commit_enable=0)
-        assert 0x3000 not in self.retired
+        await self.until(lambda o:self.response is not None,respond=0)
+        assert 0x3000 in self.retired and 0x3004 not in self.retired
+        await self.cycle(commit_enable=0,respond=1)
+        for _ in range(4):
+            o = await self.cycle(commit_enable=0)
+            assert not o['write'] and 0x3004 not in self.retired
         await self.until(lambda o:0x3004 in self.retired)
         self.drop_objection()
 
@@ -220,19 +226,18 @@ class FaultsTest(ParentTest):
         await self.until(lambda o:bool(self.faults))
         assert self.faults==[(0x1000,2,0xFFF010F3)] and not self.accesses
         assert 0x1004 in self.canceled and 0x1004 not in self.retired
-        # Real MEM access fault with older WB stalled and younger EX held.
+        # A WB-owned memory fault suppresses a younger MEM store and flushes
+        # EX/DE immediately, even while fault retirement is held.
         await self.reset()
         self.errors.add(0x6000)
-        await self.send(packet(0x2000),commit_enable=0)
-        await self.send(packet(0x2004,lsu=1,data=0x6000),commit_enable=0,respond=0)
-        await self.until(lambda o:o['occupied']&12==12,commit_enable=0,respond=0)
-        await self.send(packet(0x2008),commit_enable=0,ex_done=0,respond=0)
-        await self.send(packet(0x200C,lsu=1,we=1,data=0x6004,store_data=0xBAD),
-                        commit_enable=0,ex_done=0,respond=0)
-        await self.until(lambda o:self.response is not None,commit_enable=0,ex_done=0,respond=0)
-        await self.cycle(commit_enable=0,ex_done=0,respond=1)
-        o = await self.until(lambda o:o['clear']&3==3,commit_enable=0,ex_done=0)
-        assert o['occupied']&12==12 and not self.faults[-1][0]==0x2004
+        await self.send(packet(0x2000))
+        await self.send(packet(0x2004,lsu=1,data=0x6000),respond=0)
+        await self.until(lambda o:self.response is not None,respond=0)
+        await self.send(packet(0x2008,lsu=1,we=1,data=0x6004,store_data=0xBAD),respond=0)
+        await self.send(packet(0x200C),respond=0)
+        await self.until(lambda o:o['occupied']&4,respond=0)
+        o = await self.cycle(commit_enable=0,respond=1)
+        assert o['clear']&7==7 and not o['exception_fire'] and not o['dmem_req']
         await self.until(lambda o:any(p==0x2004 for p,_,_ in self.faults))
         assert self.faults[-1]==(0x2004,5,0x6000)
         assert 0x2000 in self.retired and 0x2008 in self.canceled and 0x200C in self.canceled

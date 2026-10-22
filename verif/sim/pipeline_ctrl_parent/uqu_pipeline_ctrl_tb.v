@@ -105,6 +105,9 @@ module uqu_pipeline_ctrl_tb #(
     wire lsu_busy, mem_request_permit, wb_mret;
     wire [31:0] mip;
     wire [31:0] wb_target = exception_fire_o ? {mtvec_o[31:2],2'b00} : mepc_o;
+    wire res_valid, res_registered, res_exception, res_ready;
+    wire [31:0] res_data, res_tval;
+    wire [4:0] res_cause;
     integer k;
 
     assign occupied_o = valid_q;
@@ -124,7 +127,7 @@ module uqu_pipeline_ctrl_tb #(
         .mem_exception_i(mem_fault), .wb_exception_i(wb_fault),
         .ex_serialize_i(serial_q[1]), .mem_serialize_i(serial_q[2]), .wb_serialize_i(serial_q[3]),
         .de_system_i(system_q[0]), .ex_system_i(system_q[1]), .mem_system_i(system_q[2]), .wb_system_i(system_q[3]),
-        .de_admit_i(de_admit_i), .commit_enable_i(commit_enable_i), .wb_effect_safe_i(wb_effect_safe_i),
+        .de_admit_i(de_admit_i), .commit_enable_i(commit_enable_i), .wb_effect_safe_i(wb_effect_safe_i && wb_complete && !wb_fault),
         .de_redirect_i(branch_q[0]), .de_redirect_addr_i(next_pc_q[0]),
         .wb_redirect_valid_i(exception_fire_o || wb_mret), .wb_redirect_addr_i(wb_target),
         .wb_next_pc_i(next_pc_q[3]), .de_pc_i(pc_q[0]), .resume_pc_i(resume_pc_q),
@@ -155,6 +158,9 @@ module uqu_pipeline_ctrl_tb #(
         .store_data_i(store_data_q[2]), .instr_i(instr_q[2]), .priv_m_i(priv_m_q),
         .fflags_valid_i(1'b0), .fflags_i(5'd0), .exception_valid_i(fault_q[2]),
         .exception_cause_i(cause_q[2]), .exception_tval_i(tval_q[2]), .request_permit_i(mem_request_permit),
+        .lsu_res_flush_i(1'b0), .lsu_res_ready_i(res_ready),
+        .lsu_res_valid_o(res_valid), .lsu_res_registered_o(res_registered), .lsu_res_data_o(res_data),
+        .lsu_res_exception_valid_o(res_exception), .lsu_res_exception_cause_o(res_cause), .lsu_res_exception_tval_o(res_tval),
         .lsu_busy_o(lsu_busy), .pmp_valid_o(), .pmp_addr_o(), .pmp_size_o(), .pmp_access_o(),
         .pmp_priv_m_o(), .pmp_allow_i(1'b1), .result_o(mem_result), .load_result_valid_o(),
         .fflags_valid_o(), .fflags_o(), .exception_valid_o(mem_fault), .exception_cause_o(mem_cause),
@@ -165,6 +171,9 @@ module uqu_pipeline_ctrl_tb #(
     uqu_stage_wb u_wb (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(1'b0),
         .valid_i(valid_q[3]), .ready_o(), .valid_o(wb_complete), .ready_i(wb_ready),
+        .lsu_i(lsu_q[3] && !fault_q[3]), .lsu_res_ready_o(res_ready),
+        .lsu_res_valid_i(res_valid), .lsu_res_registered_i(res_registered), .lsu_res_data_i(res_data),
+        .lsu_res_exception_valid_i(res_exception), .lsu_res_exception_cause_i(res_cause), .lsu_res_exception_tval_i(res_tval),
         .kind_i(kind_q[3]), .result_i(data_q[3]),
         .rd_we_i(!we_q[3] && (system_q[3] == `UQU_SYS_NONE)), .rd_i(5'd1),
         .pc_i(pc_q[3]), .instr_i(instr_q[3]), .csr_addr_i(csr_addr_q[3]), .csr_op_i(csr_op_q[3]),

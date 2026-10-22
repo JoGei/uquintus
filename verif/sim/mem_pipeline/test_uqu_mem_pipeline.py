@@ -135,27 +135,25 @@ class PipelineTest(uvm_test):
                         else:
                             job['grant_wait'] -= 1
                 elif responding:
-                    assert not int(d.u_mem.valid_o.value), 'same-cycle OBI response bypass'
                     job = None
                 else:
                     job['response_wait'] -= 1
-            if int(d.u_mem.u_lsu.req_valid_i.value) and int(d.u_mem.u_lsu.req_ready_o.value):
+            if int(d.dmem_req_o.value) and job is None:
                 pc = int(d.mem_pc_o.value)
                 item = by_pc[pc]
                 assert item['lsu'] and not item['exception_valid'] and pc not in seen_issues
                 seen_issues.add(pc)
                 assert int(d.u_mem.pmp_allow_i.value) == self.allowed(item)
-                if not local_exception(request(item, self.allowed(item))):
-                    assert job is None
-                    job = dict(item=item, granted=False, grant_wait=self.rng.randrange(5),
-                               response_wait=self.rng.randrange(7), error=item.get('error', False))
+                assert not local_exception(request(item, self.allowed(item)))
+                job = dict(item=item, granted=False, grant_wait=self.rng.randrange(5),
+                           response_wait=self.rng.randrange(7), error=item.get('error', False))
             held_output = self.outputs() if int(d.out_valid_o.value) and not int(d.out_ready_i.value) else None
             held_pc = (int(d.mem_pc_o.value) if int(d.mem_valid_o.value) and not int(d.u_mem.ready_o.value) else None)
             held_bus = self.packet() if int(d.dmem_req_o.value) and not int(d.dmem_gnt_i.value) else None
             await self.edge()
             if received == len(items) and not int(d.out_valid_o.value) and not int(d.mem_valid_o.value):
                 assert job is None and not int(d.lsu_busy_o.value)
-                assert len(seen_issues) == sum(item['lsu'] and not item['exception_valid'] for item in items)
+                assert len(seen_issues) == grants
                 assert grants == sum(item['lsu'] and not item['exception_valid'] and
                                      not local_exception(request(item, self.allowed(item))) for item in items)
                 return cycle + 1
@@ -200,66 +198,35 @@ class DrainFlushTest(PipelineTest):
         self.raise_objection()
         await self.initialize()
         d = self.dut
-        older = token(result=0x11111111, pc=0x8000)
-        victim = token(lsu=1, we=1, result=0x1000, store_data=0x22222222, pc=0x8004)
-        fresh = token(lsu=1, result=0x1000, pc=0x9000, rd=23, instr=0x12345678)
-        # First prove older WB drains while MEM waits for precise-effect permission.
+        older = token(lsu=1, result=0x1000, pc=0x8000)
+        victim = token(lsu=1, we=1, result=0x1004, pc=0x8004)
         self.drive(older)
-        await self.step(in_valid_i=1, out_ready_i=0, request_permit_i=0)
+        await self.step(in_valid_i=1, out_ready_i=1, request_permit_i=1)
         self.drive(victim)
-        await self.step()
-        await self.step(in_valid_i=0)
-        assert int(d.lsu_busy_o.value) and not int(d.dmem_req_o.value)
-        snapshot = await self.step(out_ready_i=1)
-        assert snapshot == (1, self.expected(older))
-        assert not int(d.out_valid_o.value) and int(d.lsu_busy_o.value)
-        # Cancel before presentation, then start a second scenario from empty.
-        await self.step(flush_i=1)
-        await self.step(flush_i=0)
-        assert not int(d.mem_valid_o.value) and not int(d.lsu_busy_o.value)
-        self.drive(older)
-        await self.step(in_valid_i=1, out_ready_i=0, request_permit_i=1)
-        self.drive(victim)
-        await self.step()
-        await self.step(in_valid_i=0)
-        assert int(d.out_valid_o.value) and self.outputs() == self.expected(older)
+        await self.settle()
         assert int(d.dmem_req_o.value)
-        packet = self.packet()
-        await self.step(flush_i=1)
-        assert int(d.out_valid_o.value) and self.outputs() == self.expected(older)
+        word = self.memory.grant(request(older), self.packet())
+        await self.step(dmem_gnt_i=1)  # Older load now waits in WB; younger in MEM.
+        await self.step(in_valid_i=0, dmem_gnt_i=0)
+        assert not int(d.out_valid_o.value) and not int(d.dmem_req_o.value)
+        await self.step(flush_i=1)  # Flush only the younger MEM instruction.
         assert not int(d.mem_valid_o.value) and int(d.lsu_busy_o.value)
-        assert int(d.dmem_req_o.value) and self.packet() == packet
-        # A new memory token may fill EX/MEM, but cannot issue or inherit the
-        # killed store's error response. Older MEM/WB remains intact throughout.
-        self.drive(fresh)
-        await self.step(flush_i=0, in_valid_i=1)
-        assert int(d.mem_valid_o.value) and int(d.mem_pc_o.value) == fresh['pc']
-        for _ in range(3):
-            await self.step(in_valid_i=0)
-            assert not int(d.u_mem.valid_o.value)
-            assert self.outputs() == self.expected(older)
-        word = self.memory.grant(request(victim), self.packet())
-        await self.step(dmem_gnt_i=1)
-        await self.step(dmem_gnt_i=0)
-        await self.step(dmem_rvalid_i=1, dmem_rdata_i=word, dmem_err_i=1)
+        snap = await self.step(flush_i=0, dmem_rvalid_i=1, dmem_rdata_i=word)
+        assert snap == (1, self.expected(older))
         await self.step(dmem_rvalid_i=0)
-        # The fresh load's native request was accepted after the killed response;
-        # its own OBI request now carries the fresh instruction's address.
-        assert int(d.dmem_req_o.value)
-        word = self.memory.grant(request(fresh), self.packet())
-        snapshot = await self.step(dmem_gnt_i=1, out_ready_i=1)
-        assert snapshot == (1, self.expected(older))
-        assert not int(d.out_valid_o.value)
-        await self.step(dmem_gnt_i=0, dmem_rvalid_i=1, dmem_rdata_i=word, dmem_err_i=0)
-        assert not int(d.out_valid_o.value) and int(d.u_mem.load_result_valid_o.value)
-        await self.step(dmem_rvalid_i=0)
-        assert int(d.out_valid_o.value) and self.outputs() == self.expected(fresh)
-        await self.step()
-        assert not int(d.out_valid_o.value) and not int(d.mem_valid_o.value)
-        await self.step(rst_ni=0)
-        await self.step(rst_ni=1)
+        assert not int(d.lsu_busy_o.value) and not int(d.out_valid_o.value)
+        # A request already presented before flush must finish its bus handshake.
+        self.drive(victim)
+        await self.step(in_valid_i=1)
+        await self.step(in_valid_i=0)  # Capture the request waiting for grant.
+        saved = self.packet()
+        await self.step(flush_i=1)
+        assert int(d.dmem_req_o.value) and self.packet() == saved
+        await self.step(flush_i=0, dmem_gnt_i=1)
+        await self.step(dmem_gnt_i=0, dmem_rvalid_i=1, dmem_err_i=1)
+        await self.step(dmem_rvalid_i=0, dmem_err_i=0)
+        assert not int(d.out_valid_o.value) and not int(d.lsu_busy_o.value)
         await self.stream([token(result=0xABCDEF01, pc=0xC000)])
-        self.logger.info('Parent-owned MEM registers preserve older WB and fresh identity through killed bus work')
         self.drop_objection()
 
 
@@ -271,3 +238,49 @@ async def pipeline(_dut):
 @cocotb.test(timeout_time=1000, timeout_unit='us')
 async def drain_flush(_dut):
     await uvm_root().run_test(DrainFlushTest)
+
+
+class TurnoverTest(PipelineTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.initialize()
+        d = self.dut
+        items = [token(lsu=1, we=n%2, result=0x1000+4*n,
+                       store_data=0x12340000+n, pc=0x9000+4*n) for n in range(24)]
+        sent = retired = 0
+        pending = None
+        expected = deque()
+        grant_cycles = []
+        for cycle in range(64):
+            d.in_valid_i.value = int(sent < len(items))
+            if sent < len(items):
+                self.drive(items[sent])
+            d.out_ready_i.value = 1
+            d.request_permit_i.value = 1
+            d.dmem_gnt_i.value = 1
+            d.dmem_rvalid_i.value = int(pending is not None)
+            d.dmem_rdata_i.value = pending if pending is not None else 0
+            await self.settle()
+            if int(d.out_valid_o.value):
+                assert expected and self.outputs() == expected.popleft()
+                retired += 1
+            pending = None
+            if int(d.dmem_req_o.value):
+                item = items[len(grant_cycles)]
+                pending = self.memory.grant(request(item), self.packet())
+                expected.append(self.expected(item))
+                grant_cycles.append(cycle)
+            if int(d.in_valid_i.value) and int(d.in_ready_o.value):
+                sent += 1
+            await self.edge()
+            if retired == len(items):
+                break
+        assert sent == retired == len(items)
+        assert grant_cycles == list(range(1, len(items)+1)), grant_cycles
+        assert cycle+1 == len(items)+2  # Same throughput as pass-through tokens.
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=1000, timeout_unit='us')
+async def turnover(_dut):
+    await uvm_root().run_test(TurnoverTest)

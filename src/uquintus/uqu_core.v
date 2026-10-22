@@ -228,7 +228,7 @@ module uqu_core #(
     wire wb_redirect = wb_exception_fire || wb_mret || wb_pmp_recover;
     wire [31:0] wb_target = wb_exception_fire ? {mtvec[31:2],2'b00} : wb_mret ? mepc : wb_next_pc_q;
     wire ex_forwardable = ex_complete && !ex_exception && !ex_lsu_q && (ex_kind_q == `UQU_WB_RESULT);
-    wire mem_forwardable = mem_complete && !mem_exception && (mem_kind_q == `UQU_WB_RESULT);
+    wire mem_forwardable = mem_complete && !mem_exception && !mem_lsu_q && (mem_kind_q == `UQU_WB_RESULT);
 
     uqu_pipeline_ctrl #(.ISA_ZIFENCEI(ISA_ZIFENCEI)) u_ctrl (
         .clk_i(clk_i), .rst_ni(rst_ni), .if_valid_i(if_valid),
@@ -237,7 +237,7 @@ module uqu_core #(
         .de_exception_i(de_exception), .ex_exception_i(ex_exception), .mem_exception_i(mem_exception), .wb_exception_i(wb_exception),
         .ex_serialize_i(ex_serialize_q), .mem_serialize_i(mem_serialize_q), .wb_serialize_i(wb_serialize_q),
         .de_system_i(de_system), .ex_system_i(ex_system_q), .mem_system_i(mem_system_q), .wb_system_i(wb_system_q),
-        .de_admit_i(1'b1), .commit_enable_i(1'b1), .wb_effect_safe_i(!wb_exception),
+        .de_admit_i(1'b1), .commit_enable_i(1'b1), .wb_effect_safe_i(wb_complete && !wb_exception),
         .de_redirect_i(de_redirect), .de_redirect_addr_i(de_next_pc),
         .wb_redirect_valid_i(wb_redirect), .wb_redirect_addr_i(wb_target), .wb_next_pc_i(wb_next_pc_q),
         .de_pc_i(de_pc_q), .resume_pc_i(resume_pc_q), .priv_m_i(priv_m_q),
@@ -360,11 +360,19 @@ module uqu_core #(
         .result_o(ex_result), .store_data_o(ex_store_data), .fflags_valid_o(ex_fflags_valid), .fflags_o(ex_fflags),
         .exception_valid_o(ex_exception), .exception_cause_o(ex_cause), .exception_tval_o(ex_tval)
     );
+    wire lsu_res_valid, lsu_res_registered, lsu_res_exception, lsu_res_ready;
+    wire [31:0] lsu_res_data, lsu_res_tval;
+    wire [4:0] lsu_res_cause;
+    reg wb_lsu_q;
     uqu_stage_mem u_mem (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(mem_flush), .valid_i(mem_valid_q), .ready_o(), .valid_o(mem_complete), .ready_i(mem_ready),
         .lsu_i(mem_lsu_q), .we_i(mem_we_q), .op_i(mem_op_q), .result_i(mem_data_q), .store_data_i(mem_store_data_q),
         .instr_i(mem_original_q), .priv_m_i(mem_effective_priv_m), .fflags_valid_i(mem_fflags_valid_q), .fflags_i(mem_fflags_q),
         .exception_valid_i(mem_exception_q), .exception_cause_i(mem_cause_q), .exception_tval_i(mem_tval_q), .request_permit_i(mem_request_permit),
+        .lsu_res_ready_i(lsu_res_ready), .lsu_res_flush_i(1'b0),
+        .lsu_res_valid_o(lsu_res_valid), .lsu_res_registered_o(lsu_res_registered),
+        .lsu_res_data_o(lsu_res_data), .lsu_res_exception_valid_o(lsu_res_exception),
+        .lsu_res_exception_cause_o(lsu_res_cause), .lsu_res_exception_tval_o(lsu_res_tval),
         .lsu_busy_o(lsu_busy), .pmp_valid_o(mem_pmp_valid), .pmp_addr_o(mem_pmp_addr), .pmp_size_o(mem_pmp_size),
         .pmp_access_o(mem_pmp_access), .pmp_priv_m_o(mem_pmp_priv_m), .pmp_allow_i(mem_pmp_allow),
         .result_o(mem_result), .load_result_valid_o(), .fflags_valid_o(mem_fflags_valid), .fflags_o(mem_fflags),
@@ -377,6 +385,9 @@ module uqu_core #(
         .ISA_UMODE(ISA_UMODE), .ISA_PMP(ISA_PMP), .XIF(XIF), .XIF_DUALWRITE(XIF_DUALWRITE), .DEBUG(DEBUG)
     ) u_wb (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(1'b0), .valid_i(wb_valid_q), .ready_o(), .valid_o(wb_complete), .ready_i(wb_ready),
+        .lsu_i(wb_lsu_q), .lsu_res_valid_i(lsu_res_valid), .lsu_res_registered_i(lsu_res_registered),
+        .lsu_res_data_i(lsu_res_data), .lsu_res_exception_valid_i(lsu_res_exception),
+        .lsu_res_exception_cause_i(lsu_res_cause), .lsu_res_exception_tval_i(lsu_res_tval), .lsu_res_ready_o(lsu_res_ready),
         .kind_i(wb_kind_q), .result_i(wb_data_q), .rd_we_i(wb_rd_we_q), .rd_i(wb_rd_q), .pc_i(wb_pc_q), .instr_i(wb_original_q),
         .csr_addr_i(wb_csr_addr_q), .csr_op_i(wb_csr_op_q), .csr_src_i(wb_csr_src_q), .csr_src_zero_i(wb_csr_zero_q),
         .fflags_valid_i(wb_fflags_valid_q), .fflags_i(wb_fflags_q), .exception_valid_i(wb_exception_q),
@@ -518,6 +529,7 @@ module uqu_core #(
             wb_rd_we_q <= mem_rd_we_q;
             wb_pending_q <= mem_pending_q;
             wb_data_q <= mem_result;
+            wb_lsu_q <= mem_lsu_q && !mem_exception;
             wb_csr_addr_q <= mem_csr_addr_q;
             wb_csr_op_q <= mem_csr_op_q;
             wb_csr_src_q <= mem_csr_src_q;
