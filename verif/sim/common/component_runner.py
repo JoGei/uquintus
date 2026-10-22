@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 
 import yaml
 
-from elf_image import load_elf
+from elf_image import expected_traps, load_elf
 from hw_config import load_configuration, parameters_for_component, write_header
 
 
@@ -164,6 +164,7 @@ def main(argv=None, shared_build=None):
         image = load_elf(elf_path)
         image.validate_core(parameters)
         image.tohost  # Validate completion storage before compiling the simulator.
+        declared_traps = expected_traps(image)
     elif args.elf:
         raise ValueError('ELF is only supported for tests of a requires_elf component')
     reference_info = None
@@ -216,6 +217,7 @@ def main(argv=None, shared_build=None):
         metadata['elf'] = {
             'source': str(elf_path), 'sha256': hashlib.sha256(program.read_bytes()).hexdigest(),
             'entry': image.entry, 'tohost': image.tohost, 'max_cycles': args.max_cycles,
+            'expected_traps': declared_traps,
             'segments': [{'address': s.address, 'file_size': len(s.data),
                           'memory_size': s.size, 'flags': s.flags} for s in image.segments],
         }
@@ -240,6 +242,7 @@ def main(argv=None, shared_build=None):
         metadata['reference'] = reference_info
         metadata['input_scope'] = 'HDL, headers, recorded software sources and reference adapter/pin'
         metadata.setdefault('context', {})['reference'] = 'spike:' + reference_info['executable_sha256']
+        metadata['context']['reference_profile'] = reference_info['profile']
         for path in (ROOT / 'verif/sim/common/spike.py', ROOT / 'verif/reference/spike.lock.json'):
             metadata['source_sha256'][str(path.relative_to(ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")

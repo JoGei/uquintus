@@ -42,7 +42,7 @@ INPUT_LABELS = {
 FILES = ('run.json', 'build.json', 'report.json', 'results.xml', 'execution.json',
          'config.yml', 'component.yml', 'selectors.json', 'lint.log',
          'simulation.log', 'build.log', 'program.map', 'software-build.json',
-         'spike.json', 'spike.log', 'spike-process.log')
+         'spike.json', 'spike.log', 'spike-process.log', 'spike-debug.cmd')
 
 
 def digest(value):
@@ -264,6 +264,10 @@ def normalize(path, build, root, hashes):
                       evidence.get('profile') == reference.get('profile'))
         if consistent:
             record['metrics'].append({'name': 'spike_compared_instructions', 'value': count, 'unit': 'instructions'})
+            for field, unit in (('compared_traps','traps'), ('compared_mrets','instructions')):
+                value = evidence.get(field)
+                if type(value) is int and value >= 0:
+                    record['metrics'].append({'name':'spike_'+field, 'value':value, 'unit':unit})
         if state == 'passed' and not consistent:
             record['status'] = 'error'
             record['notes'].append('Passed metadata conflicts with Spike status/count/reference identity.')
@@ -371,7 +375,8 @@ def run_table(records, depth=1):
     for r in records:
         config = r['configuration']
         reference = r['tools'].get('reference')
-        reference_label = ('Spike ' + str(reference.get('executable_sha256', 'unknown'))[:8]) if isinstance(reference, dict) else ''
+        reference_label = ('Spike ' + str(reference.get('executable_sha256', 'unknown'))[:8] +
+                           ' · ' + reference.get('profile','unknown profile')) if isinstance(reference, dict) else ''
         search = ' '.join(str(x) for x in (config['name'], config['id'], r['component'], r['target'], r['selection'], r['seed'], reference_label))
         cases = Counter(c['status'] for c in r['cases'])
         counts = ', '.join(f'{n} {s}' for s, n in sorted(cases.items())) or '—'

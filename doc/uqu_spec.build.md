@@ -103,6 +103,11 @@ or `PATH`. The [reference contract](uqu_spec.verif.md#28-initial-spike-different
 defines pinning, supported events and retained JUnit/report diagnostics. The
 default `REFERENCE=none` preserves native-only checking.
 
+Native software programs shall provide exactly one `main.c` or `main.S`.
+Both shall receive the configured `UQU_ISA_UMODE` value for conditional M/U
+scenarios. The linker shall retain the optional embedded expected-trap table
+described in [verification Section 2.6](uqu_spec.verif.md#26-elf-software-execution).
+
 ## 2. Shared core configuration and separate build targets
 
 **Status:** Agreed; YAML selected, schema and target details TBD

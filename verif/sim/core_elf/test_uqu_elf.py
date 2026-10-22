@@ -10,7 +10,7 @@ from pyuvm import uvm_root
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.core_env import CoreTest, MASK
-from elf_image import completion_code, load_elf
+from elf_image import completion_code, expected_traps, load_elf, validate_trap_sequence
 
 
 class ELFTest(CoreTest):
@@ -19,6 +19,8 @@ class ELFTest(CoreTest):
         self.image = load_elf(os.environ['UQU_ELF'])
         self.image.validate_core(self.params)
         self.tohost = self.image.tohost
+        self.expected_trap_events = expected_traps(self.image)
+        self.expected_faults = {pc: (cause, tval) for pc, cause, tval in self.expected_trap_events}
         # Both independent OBI agents see the same RAM. The oracle owns a
         # separate copy, updated only by architectural stores at retirement.
         self.memory = self.image.memory()
@@ -28,6 +30,13 @@ class ELFTest(CoreTest):
         self.exit_code = None
         self.last_retired = None
         self.max_cycles = int(os.environ['UQU_MAX_CYCLES'])
+
+    async def cycle(self, **kwargs):
+        before = len(self.faults)
+        result = await super().cycle(**kwargs)
+        if len(self.faults) != before:
+            validate_trap_sequence(self.expected_trap_events, self.faults)
+        return result
 
     def retire(self, pc, original, write, rd_actual, data_actual):
         # Keep all existing independent instruction/CSR and RVFI checks active.
@@ -56,7 +65,12 @@ class ELFTest(CoreTest):
                     f'next PC={self.pc:08x}, last retired={self.last_retired}, '
                     f'instructions={len(self.retired)}; see rvfi.jsonl')
             assert self.exit_code == 0, f'ELF reported failure code {self.exit_code}; see rvfi.jsonl'
-            assert not self.faults and not self.accesses, 'uncompleted/faulting memory operations'
+            validate_trap_sequence(self.expected_trap_events, self.faults, complete=True)
+            assert not self.accesses, 'uncompleted memory operations'
+            # RAM is modified when a store reaches the bus. Comparing the two
+            # complete sparse images catches any flushed/faulting store effect,
+            # including one that never produces an RVFI retirement record.
+            assert self.memory == self.model_memory, 'unretired store modified shared RAM'
             status = 'passed'
         except BaseException as error:
             detail = str(error)
@@ -72,6 +86,7 @@ class ELFTest(CoreTest):
                 'entry': self.image.entry, 'tohost': self.tohost,
                 'next_pc': self.pc, 'last_retired_pc': self.last_retired,
                 'max_cycles': self.max_cycles,
+                'expected_traps': self.expected_trap_events, 'observed_traps': self.faults,
             }, indent=2) + '\n')
             self.drop_objection()
 

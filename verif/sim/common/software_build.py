@@ -9,7 +9,7 @@ import sys
 
 import yaml
 
-from elf_image import load_elf
+from elf_image import expected_traps, load_elf
 from hw_config import load_configuration
 from toolchain import compiler_command, discover_compiler, identify_compiler
 
@@ -24,9 +24,11 @@ def main():
     args = parser.parse_args()
     if not re.fullmatch('[a-z][a-z0-9_]*', args.program):
         raise ValueError('program must name a directory under verif/sw/')
-    source = ROOT / 'verif/sw' / args.program / 'main.c'
-    if not source.is_file():
-        raise ValueError(f'program source not found: {source}')
+    candidates = [ROOT / 'verif/sw' / args.program / ('main'+suffix) for suffix in ('.c', '.S')]
+    sources = [p for p in candidates if p.is_file()]
+    if len(sources) != 1:
+        raise ValueError(f'program needs exactly one main.c or main.S: {candidates[0].parent}')
+    source = sources[0]
     config_path = Path(args.config)
     if not config_path.is_file():
         config_path = ROOT / 'config' / f'{args.config}.yml'
@@ -40,7 +42,7 @@ def main():
     common = ROOT / 'verif/sw/common'
     inputs = [common / 'crt0.S', source, common / 'link.ld']
     command = compiler_command(compiler)
-    command += ['-mcmodel=medany', '-mno-relax',
+    command += [f'-DUQU_ISA_UMODE={config["ISA_UMODE"]}', '-mcmodel=medany', '-mno-relax',
                 '-msmall-data-limit=0', '-ffreestanding', '-fno-builtin', '-fno-pic',
                 '-fno-stack-protector', '-ffunction-sections', '-fdata-sections',
                 '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-nostdlib',
@@ -62,7 +64,7 @@ def main():
         image = load_elf(directory / 'program.elf')
         image.validate_core(config)
         image.tohost
-        metadata.update(status='passed', elf_sha256=hashlib.sha256(
+        metadata.update(status='passed', expected_traps=expected_traps(image), elf_sha256=hashlib.sha256(
             (directory / 'program.elf').read_bytes()).hexdigest())
     except BaseException:
         metadata['status'] = 'failed'

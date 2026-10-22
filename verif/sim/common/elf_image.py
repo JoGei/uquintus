@@ -151,3 +151,38 @@ def completion_code(value):
     if not 0 < value <= 0xffffffff or not value & 1:
         raise ValueError(f'unsupported tohost value {value:#x}; host syscalls are not implemented')
     return value >> 1
+
+
+def expected_traps(image):
+    """Read optional ordered (PC, cause, tval) words embedded in the ELF.
+
+    This contract is opt-in and bound to the copied ELF bytes, not a sidecar
+    that could silently relax a previously built test.
+    """
+    start = image.symbols.get('uqu_expected_traps')
+    end = image.symbols.get('uqu_expected_traps_end')
+    if start is None and end is None:
+        return []
+    if start is None or end is None or start & 3 or not 0 < end-start <= 4096 or (end-start) % 12:
+        raise ValueError('invalid uqu_expected_traps ELF table boundaries')
+    raw = bytes(image.memory_byte(a) for a in range(start, end))
+    result, sites = [], {}
+    for pc, cause, tval in struct.iter_unpack('<III', raw):
+        if cause not in (0, 2, 3, 4, 6, 8, 11):
+            raise ValueError('unsupported declared synchronous trap cause')
+        if pc & (1 if image.flags & 1 else 3) or not any(
+                s.flags & 1 and s.address <= pc < s.address+s.size for s in image.segments):
+            raise ValueError('expected trap PC must be an aligned executable ELF address')
+        if pc in sites and sites[pc] != (cause, tval):
+            raise ValueError('conflicting expected traps for the same PC')
+        sites[pc] = cause, tval
+        result.append((pc, cause, tval))
+    return result
+
+
+def validate_trap_sequence(expected, observed, complete=False):
+    """Require the declared order/count, retaining strict no-trap defaults."""
+    if len(observed) > len(expected) or observed != expected[:len(observed)]:
+        raise ValueError(f'ELF traps differ from declaration: observed={observed}, expected={expected}')
+    if complete and observed != expected:
+        raise ValueError(f'missing declared ELF traps: observed={observed}, expected={expected}')

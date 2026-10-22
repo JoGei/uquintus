@@ -1,7 +1,8 @@
 """Bounded external Spike execution and strict native RVFI differential checks.
 
-This first profile deliberately rejects traps, interrupts, counters, PMP and
-other implementation-dependent CSRs. It never skips an unsupported event.
+Synchronous traps and MRET use read-only debugger snapshots of actual Spike
+state. Interrupts, counters and unsupported platform features remain explicit
+errors. No event is silently skipped or resynchronized.
 """
 import hashlib
 import json
@@ -19,9 +20,15 @@ ROOT = Path(__file__).resolve().parents[3]
 LOCK = ROOT / 'verif/reference/spike.lock.json'
 MASK = 0xffffffff
 RAM_BASE, RAM_SIZE = 0x80000000, 0x10000
-CSR_NAMES = {0x305: 'mtvec', 0x340: 'mscratch', 0x341: 'mepc',
+CSR_NAMES = {0x300: 'mstatus', 0x305: 'mtvec', 0x340: 'mscratch', 0x341: 'mepc',
              0x342: 'mcause', 0x343: 'mtval', 0xf14: 'mhartid'}
 BOOT_INSNS = [0x297, 0x02028593, 0xf1402573, 0x0182a283, 0x00028067]
+TRAP_CAUSES = {'trap_instruction_address_misaligned': 0, 'trap_illegal_instruction': 2,
+               'trap_breakpoint': 3, 'trap_load_address_misaligned': 4,
+               'trap_store_address_misaligned': 6, 'trap_user_ecall': 8,
+               'trap_machine_ecall': 11}
+SNAPSHOT_CSRS = tuple(CSR_NAMES.values())
+MSTATUS_MASK = 0x221888
 
 
 class Mismatch(ValueError):
@@ -52,7 +59,7 @@ def identify_spike(executable):
     if (not lines or lines[0] != lock['version_string'] or sha != lock['executable_sha256']):
         raise ValueError('Spike differs from verif/reference/spike.lock.json; '
                          'qualify the new build and update the explicit binary pin')
-    for option in ('--log-commits', '--instructions=', '--pc=', '--hartids=', '--pmpregions='):
+    for option in ('--log-commits', '--debug-cmd=', '--pc=', '--hartids=', '--pmpregions='):
         if option not in result.stdout:
             raise ValueError(f'Spike lacks required option {option}')
     return dict(lock, executable=executable, resolved_executable=str(Path(executable).resolve()))
@@ -68,10 +75,34 @@ def parse_commits(path):
     header = re.compile(r'core\s+(\d+):\s+([03])\s+(0x[0-9a-f]+)\s+\((0x[0-9a-f]+)\)(.*)')
     disasm = re.compile(r'core\s+\d+:\s+0x[0-9a-f]+\s+\(0x[0-9a-f]+\).*')
     effect = re.compile(r'\s+(?:x\s*(\d+)\s+(0x[0-9a-f]+)|c(\d+)_\w+\s+(0x[0-9a-f]+)|mem\s+(0x[0-9a-f]+)(?:\s+(0x[0-9a-f]+))?)')
+    exception = re.compile(r'core\s+(\d+): exception (\w+), epc (0x[0-9a-f]+)')
+    tval = re.compile(r'core\s+(\d+):\s+tval (0x[0-9a-f]+)')
+    last_disasm = None
     for number, line in enumerate(Path(path).read_text().splitlines(), 1):
         match = header.fullmatch(line)
         if not match:
             if disasm.fullmatch(line):
+                last_disasm = re.fullmatch(r'core\s+(\d+):\s+(0x[0-9a-f]+)\s+\((0x[0-9a-f]+)\).*', line)
+                continue
+            trap = exception.fullmatch(line)
+            if trap:
+                hart, name, pc = trap.groups()
+                if name not in TRAP_CAUSES or last_disasm is None:
+                    raise ValueError(f'unsupported or unpaired Spike exception: {line}')
+                if (int(last_disasm[1]), int(last_disasm[2], 16)) != (int(hart), int(pc, 16)):
+                    raise ValueError('Spike exception does not match the attempted instruction')
+                commits.append(dict(hart=int(hart), mode=None, pc=int(pc, 16),
+                    insn=int(last_disasm[3], 16), registers={}, csrs={}, memory=[],
+                    trap=1, cause=TRAP_CAUSES[name], tval=0, line=number))
+                last_disasm = None
+                continue
+            value = tval.fullmatch(line)
+            if value:
+                if not commits or not commits[-1].get('trap') or commits[-1]['hart'] != int(value[1]) or commits[-1].get('tval_seen'):
+                    raise ValueError('unpaired or duplicate Spike exception tval')
+                commits[-1].update(tval=int(value[2], 16) & MASK, tval_seen=True)
+                continue
+            if re.fullmatch(r'core\s+\d+: >>>>\s+\S.*', line):
                 continue
             raise ValueError(f'unrecognized Spike log line {number}: {line}')
         hart, mode, pc, insn, tail = match.groups()
@@ -100,6 +131,39 @@ def parse_commits(path):
             position = token.end()
         commits.append(row)
     if not commits: raise ValueError('Spike emitted no commit records')
+    return commits
+
+
+def debug_commands(steps):
+    snapshot = ['pc 0', 'priv 0', *('reg 0 '+name for name in SNAPSHOT_CSRS)]
+    return '\n'.join([*snapshot, *(line for _ in range(steps) for line in ['run 1', *snapshot]), 'quit']) + '\n'
+
+
+def read_snapshots(path, steps):
+    lines = Path(path).read_text().splitlines()
+    warning = "warning: tohost and fromhost symbols not in ELF; can't communicate with target"
+    if lines and lines[0] == warning: lines.pop(0)
+    width = len(SNAPSHOT_CSRS) + 2
+    if len(lines) != (steps+1)*width:
+        raise ValueError('missing/extra Spike debugger state observations')
+    states = []
+    for offset in range(0, len(lines), width):
+        values = lines[offset:offset+width]
+        if values[1] not in ('M', 'U') or any(not re.fullmatch('0x[0-9a-f]{8}', s) for s in values[:1]+values[2:]):
+            raise ValueError('unrecognized Spike debugger state format')
+        states.append(dict(pc=int(values[0], 16), mode=3 if values[1]=='M' else 0,
+                           csrs={name:int(value,16) for name,value in zip(SNAPSHOT_CSRS, values[2:])}))
+    return states
+
+
+def attach_snapshots(commits, states):
+    if len(states) != len(commits)+1:
+        raise ValueError('Spike instruction/trap count differs from debugger steps')
+    for index, row in enumerate(commits):
+        before, after = states[index:index+2]
+        if row['pc'] != before['pc'] or row['mode'] not in (None, before['mode']):
+            raise ValueError('Spike event and debugger pre-state disagree')
+        row.update(mode=before['mode'], before=before, after=after)
     return commits
 
 
@@ -160,11 +224,13 @@ def validate_profile(records, config, image):
     instructions = []
     for record in records:
         if record['type'] == 'reset': continue
-        if record['type'] != 'instruction' or record['rvfi_trap'] or record['rvfi_intr']:
-            raise ValueError('Spike initial profile does not support traps or interrupt injection')
+        if record['type'] != 'instruction':
+            raise ValueError('Spike profile does not support interrupt injection')
+        if record['rvfi_trap'] and record['cause'] not in TRAP_CAUSES.values():
+            raise ValueError('unsupported synchronous trap cause in Spike profile')
         insn = record['rvfi_insn']
         if insn & 127 == 0x73:
-            if not insn >> 12 & 7 or insn >> 20 not in CSR_NAMES:
+            if insn not in (0x73, 0x100073, 0x30200073) and (not insn >> 12 & 7 or insn >> 20 not in CSR_NAMES):
                 raise ValueError(f'Spike initial profile rejects counter/implementation-dependent CSR or SYSTEM instruction {insn:#x}')
         instructions.append(record)
     if not instructions: raise ValueError('no RVFI instructions to compare')
@@ -183,13 +249,24 @@ def compare(instructions, commits, image):
     equal(-1, 'entry', image.entry, commits[5]['pc'])
     memory, regs = image.memory(), [0] + [None]*31
     csr_state = {name: (5 if name == 'mhartid' else 0) for name in CSR_NAMES.values()}
+    handler_entry, breakpoint_mtval = False, False
     for index, actual in enumerate(instructions):
         reference, following = commits[index+5:index+7]
+        trapped = bool(reference.get('trap'))
         for name, rvfi in (('pc', 'pc_rdata'), ('insn', 'insn'), ('mode', 'mode')):
             equal(index, name, reference[name], actual['rvfi_' + rvfi])
         equal(index, 'hart', 5, reference['hart'])
+        equal(index, 'trap', int(trapped), actual['rvfi_trap'])
+        equal(index, 'handler_entry', int(handler_entry), actual['rvfi_intr'])
+        handler_entry = trapped
         equal(index, 'next_pc', following['pc'], actual['rvfi_pc_wdata'])
-        equal(index, 'source_registers', source_registers(reference['insn']),
+        if 'after' in reference:
+            equal(index, 'snapshot_next_pc', reference['after']['pc'], following['pc'])
+            equal(index, 'next_privilege', reference['after']['mode'], following['mode'])
+        sources = source_registers(reference['insn'])
+        if trapped and reference['cause'] == 2 and reference['insn'] & 127 != 0x73:
+            sources = 0, 0
+        equal(index, 'source_registers', sources,
               (actual['rvfi_rs1_addr'], actual['rvfi_rs2_addr']))
         for source in ('rs1', 'rs2'):
             address = actual['rvfi_' + source + '_addr']
@@ -199,25 +276,73 @@ def compare(instructions, commits, image):
         writes = {actual['rvfi_rd_addr']: actual['rvfi_rd_wdata']} if actual['rvfi_rd_addr'] else {}
         equal(index, 'gpr_write', reference['registers'], writes)
         regs_updates = reference['registers']
-        expected_csrs = {CSR_NAMES[a]: value for a, value in reference['csrs'].items() if a in CSR_NAMES}
-        if len(expected_csrs) != len(reference['csrs']): raise ValueError('unsupported Spike CSR effect')
-        actual_csrs = {name: value['wdata'] & value['wmask'] for name, value in actual['csrs'].items() if value['wmask']}
-        equal(index, 'csr_write', expected_csrs, actual_csrs)
         insn = reference['insn']
-        if insn & 127 == 0x73:
+        effects = dict(reference['csrs'])
+        if insn == 0x30200073 and not trapped:
+            # This qualified Spike build additionally logs two model-only CSRs
+            # on MRET. They have no counterpart in the native profile and must
+            # remain zero; all architectural native state is sampled directly.
+            for address in (0x310, 0x7a5):
+                if address in effects and effects.pop(address) != 0:
+                    raise ValueError('nonzero model-only MRET CSR effect')
+        expected_csrs = {CSR_NAMES[a]: value & (MSTATUS_MASK if a==0x300 else MASK) for a, value in effects.items() if a in CSR_NAMES}
+        if len(expected_csrs) != len(effects): raise ValueError('unsupported Spike CSR effect')
+        actual_csrs = {name: value['wdata'] & value['wmask'] for name, value in actual['csrs'].items() if value['wmask']}
+        before = reference.get('before', {}).get('csrs', csr_state)
+        after = reference.get('after', {}).get('csrs')
+        if trapped:
+            if after is None: raise ValueError('trap comparison requires independent Spike state snapshots')
+            equal(index, 'trap_cause', reference['cause'], actual['cause'])
+            value = reference['tval']
+            breakpoint_mtval = reference['cause'] == 3
+            if breakpoint_mtval:
+                if value not in (0, reference['pc']): raise ValueError('unexpected Spike breakpoint mtval policy')
+                value = 0  # Native documented breakpoint mtval choice.
+            equal(index, 'trap_tval', value, actual['tval'])
+            equal(index, 'trap_saved_pc', reference['pc'], after['mepc'])
+            equal(index, 'trap_snapshot_cause', reference['cause'], after['mcause'])
+            equal(index, 'trap_snapshot_tval', reference['tval'], after['mtval'])
+            equal(index, 'trap_target', before['mtvec'] & ~3, following['pc'])
+            equal(index, 'trap_privilege', 3, reference['after']['mode'])
+            expected_csrs = {name: (value if name=='mtval' else after[name] & (MSTATUS_MASK if name=='mstatus' else MASK))
+                             for name in ('mstatus', 'mepc', 'mcause', 'mtval')}
+            channels = {'mstatus':(MASK,MASK), 'mtvec':(MASK,0),
+                        'mepc':(0,MASK), 'mcause':(0,MASK), 'mtval':(0,MASK)}
+        elif insn == 0x30200073:
+            if after is None: raise ValueError('MRET comparison requires independent Spike state snapshots')
+            equal(index, 'mret_target', before['mepc'], following['pc'])
+            channels = {'mstatus':(MASK,MASK), 'mepc':(MASK,0)}
+            equal(index, 'mret_status_effect', after['mstatus'] & MSTATUS_MASK, expected_csrs.get('mstatus'))
+        elif insn & 127 == 0x73:
             address, function, source, dest = insn >> 20, insn >> 12 & 7, insn >> 15 & 31, insn >> 7 & 31
             if address not in CSR_NAMES: raise ValueError('unsupported reference CSR')
             name = CSR_NAMES[address]
             read = dest != 0 if function in (1, 5) else True
             write = function in (1, 5) or source != 0
-            equal(index, 'csr_channels', {name} if read or write else set(), set(actual['csrs']))
-            channel = actual['csrs'].get(name, {})
-            equal(index, 'csr_rmask', MASK if read else 0, channel.get('rmask', 0))
-            equal(index, 'csr_wmask', MASK if write else 0, channel.get('wmask', 0))
-            if read: equal(index, 'csr_read', csr_state[name], channel['rdata'])
+            if name=='mtval' and breakpoint_mtval and read and before['mtval'] != 0:
+                raise ValueError('clear mtval before reading after breakpoint: native/Spike permitted values differ')
+            if name=='mtval' and write: breakpoint_mtval = False
+            channels = {name:(MASK if read else 0, MASK if write else 0)} if read or write else {}
         else:
-            equal(index, 'csr_channels', set(), set(actual['csrs']))
+            channels = {}
+        equal(index, 'csr_write', expected_csrs, actual_csrs)
+        equal(index, 'csr_channels', set(channels), set(actual['csrs']))
+        for name, (read, write) in channels.items():
+            channel = actual['csrs'][name]
+            equal(index, 'csr_rmask:'+name, read, channel['rmask'])
+            equal(index, 'csr_wmask:'+name, write, channel['wmask'])
+            if read:
+                value = before[name] & (MSTATUS_MASK if name=='mstatus' else MASK)
+                equal(index, 'csr_read:'+name, value, channel['rdata'])
         csr_state.update(expected_csrs)
+        if trapped:
+            equal(index, 'trap_memory_effects', [], reference['memory'])
+            equal(index, 'trap_suppressed_effects', (0,0,0,0,0), tuple(actual['rvfi_'+k] for k in
+                  ('rd_addr','rd_wdata','mem_rmask','mem_wmask','mem_fault')))
+            equal(index, 'trap_fault_masks', (0,0), (actual['rvfi_mem_fault_rmask'],actual['rvfi_mem_fault_wmask']))
+            if reference['cause'] in (4,6):
+                equal(index, 'trap_memory_address', reference['tval'] & ~3, actual['rvfi_mem_addr'])
+            continue
         direction, size = memory_operation(reference['insn'])
         accesses = reference['memory']
         equal(index, 'memory_count', int(direction is not None), len(accesses))
@@ -253,8 +378,8 @@ def check_run(directory, config, info, timeout=30):
     """Preserve raw log, process diagnostics and first-mismatch evidence."""
     directory = Path(directory)
     result = dict(status='running', profile=info['profile'], tool=info,
-                  policy='deterministic native RAM; no traps, interrupts or counter reads',
-                  artifacts=['spike.log', 'spike-process.log', 'rvfi.jsonl'])
+                  policy='synchronous traps/MRET with independent snapshots; no interrupts or counters; breakpoint mtval native=0, Spike=0|PC',
+                  artifacts=['spike.log', 'spike-process.log', 'spike-debug.cmd', 'rvfi.jsonl'])
     try:
         image = load_elf(directory / 'program.elf')
         records = read_trace(directory / 'rvfi.jsonl')
@@ -263,16 +388,22 @@ def check_run(directory, config, info, timeout=30):
         command = [info['executable'], '--isa=' + march,
                    '--priv=' + ('mu' if config['ISA_UMODE'] else 'm'), '--pmpregions=0',
                    '--hartids=5', f'--pc={image.entry:#x}', f'-m{RAM_BASE:#x}:{RAM_SIZE:#x}',
-                   f'--instructions={len(instructions)+6}', '-l', '--log-commits',
+                   '-d', '--debug-cmd=' + str(directory / 'spike-debug.cmd'), '-l', '--log-commits',
                    '--log=' + str(directory / 'spike.log'), str(directory / 'program.elf')]
         result['command'] = command
+        steps = len(instructions)+6
+        (directory / 'spike-debug.cmd').write_text(debug_commands(steps))
         result['elf_sha256'] = hashlib.sha256((directory / 'program.elf').read_bytes()).hexdigest()
         with (directory / 'spike-process.log').open('w') as output:
             process = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
         if process.returncode: raise ValueError(f'Spike exited with {process.returncode}; see spike-process.log')
         commits = parse_commits(directory / 'spike.log')
+        commits = attach_snapshots(commits, read_snapshots(directory / 'spike-process.log', steps))
         count = compare(instructions, commits, image)
-        result.update(status='passed', compared_instructions=count)
+        result.update(status='passed', compared_instructions=count,
+                      compared_traps=sum(r['rvfi_trap'] for r in instructions),
+                      compared_mrets=sum(r['rvfi_insn']==0x30200073 and not r['rvfi_trap'] for r in instructions),
+                      observed_modes=sorted({r['rvfi_mode'] for r in instructions}))
     except BaseException as error:
         result.update(status='failed', detail=str(error))
         if isinstance(error, Mismatch):

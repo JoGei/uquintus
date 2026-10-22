@@ -49,8 +49,8 @@ build with `CONFIG=rv32ic` and run that ELF with any of the three matching
   upper-word completion stores and unsupported completion values fail the run.
 - Software initializes every GPR before reading it, including saved registers
   spilled by compiled code. The provided startup does this. Unexpected traps
-  fail with PC/cause/value diagnostics; arbitrary privileged-suite trap
-  expectations and Spike comparison are not implemented by this target yet.
+  fail with PC/cause/value diagnostics. Declared synchronous traps and optional
+  Spike comparison are described below; general privileged-suite adapters remain open.
 - The model uses flat identity addressing with zero reads for unwritten sparse
   RAM and no implicit ELF page permissions. ELF segment permissions validate
   entry/completion storage; they do not configure PMP or create bus faults.
@@ -99,3 +99,37 @@ independent ELF runs with compatible simulator-build reuse.
 Select `REFERENCE=spike` to compare a successful native run with the pinned external
 ISA simulator. Discovery, supported events and retained first-mismatch evidence
 are defined in the [reference guide](../../reference/README.md).
+
+## Declared synchronous traps
+
+By default an ELF must execute without trapping. Tests may instead embed a kept
+`.uqu.traps` section, delimited by global `uqu_expected_traps` and
+`uqu_expected_traps_end` symbols. Each three-word entry contains PC, cause and
+trap value, in expected event order:
+
+```asm
+.section .uqu.traps, "a", @progbits
+.balign 4
+.global uqu_expected_traps, uqu_expected_traps_end
+uqu_expected_traps:
+    .word my_ecall, 11, 0
+    .word bad_load, 4, buffer+1
+uqu_expected_traps_end:
+```
+
+The common linker retains this section even with garbage collection. Sites must
+be aligned executable ELF addresses. Supported causes are 0, 2, 3, 4, 6, 8 and
+11; duplicate PCs must declare the same cause/value and each arrival at a declared
+site must trap. Table data is validated before simulator build and copied with
+the ELF. Unexpected sites, wrong causes/values, reordered, missing or extra traps
+fail. `execution.json` records declared and observed events. Full RAM comparison
+at completion additionally detects stores absent from the architectural trace.
+
+`make sw SW=traps CONFIG=rv32i` builds the assembly test in
+[`verif/sw/traps/main.S`](../../sw/traps/main.S). Run it through the usual ELF
+target, optionally with `REFERENCE=spike`. It checks nine M-mode trap cases,
+plus four U-mode cases when `ISA_UMODE=1`. C configurations replace the two
+IALIGN=32 branch-target cases with 16-bit illegal and C.EBREAK cases. Each fault
+has a following poison store skipped by the handler; a RAM guard, destination
+sentinel and trap count are checked before completion. The MRET sequential path
+also contains a poison store. The program requires the full integer register set.

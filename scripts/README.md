@@ -175,3 +175,7 @@ Differential ELF records include the reference identity in `reference` and the
 reference binary hash in comparison context. The report links `spike.json`,
 `spike.log` and `spike-process.log` subject to artifact limits, and requires
 successful Spike evidence for a declared differential pass.
+
+Spike v2 records include the adapter profile in comparison context and retain
+the bounded read-only debugger commands/state snapshots. Report metrics expose
+`spike_compared_traps` and `spike_compared_mrets` alongside instruction counts.

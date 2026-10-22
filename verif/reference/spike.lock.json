@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "profile": "spike-commit-rv32-v1",
+  "profile": "spike-commit-rv32-v2",
   "version_string": "Spike RISC-V ISA Simulator 1.1.1-dev",
   "executable_sha256": "cf06516e33f9a6308a3ba25bb60acd85e9b333aa74e8e78d8095a8b22045fb8c",
   "source_revision": null,

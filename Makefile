@@ -26,6 +26,7 @@ help:
 	@echo 'make riscv-tests-fetch [RISCV_TESTS_ARCHIVE=<offline-tar.gz>]'
 	@echo 'make riscv-tests [CONFIG=rv32i] [RISCV_TESTS=all|rv32ui-p-add,...]'
 	@echo 'Add REFERENCE=spike to ELF tests or riscv-tests for differential checking.'
+	@echo 'make sw SW=traps  # Declared exceptions, MRET and optional M/U transitions'
 	@echo 'Spike discovery: SPIKE, then RISCV/bin/spike, then PATH; pinned build required.'
 	@echo 'Compiler discovery: RISCV_CC, then RISCV/bin, then PATH (GCC or Clang/LLD).'
 	@echo 'make test-runner  # Check shared component-runner helpers'

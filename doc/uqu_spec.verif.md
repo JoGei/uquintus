@@ -457,6 +457,16 @@ Completion shall be recognized only when that store successfully retires;
 granted requests shall not imply completion. No production core ports are added
 for test completion. Host syscalls and console communication remain deferred.
 
+An ELF may declare an ordered sequence of expected synchronous traps in a kept
+`.uqu.traps` section between global `uqu_expected_traps` and
+`uqu_expected_traps_end` symbols. Each little-endian word triple shall specify
+the faulting PC, cause and expected trap value. Validate aligned executable sites,
+supported causes, mapped table bytes and consistent declarations per PC. With no
+table, every trap remains unexpected. Declared trap sites shall fault on each
+arrival; events must match the table order and count. Missing, extra or mismatched
+traps fail the run. Completion shall also compare the bus-visible shared RAM
+against the independent architectural image to detect unretired store effects.
+
 The [ELF target](../verif/sim/core_elf/README.md) shall reuse native randomized
 OBI timing, the actual core/RVFI wrapper and independent execution/CSR checks.
 A configurable cycle watchdog, software failure or checker mismatch shall
@@ -525,20 +535,44 @@ deterministic state. Bootstrap removal shall validate a fixed known prefix,
 never search for a matching trace position. One lookahead instruction shall
 check the final next PC. Missing/extra commits and unknown log formats fail.
 
-The [reference guide](../verif/reference/README.md) defines the initial native
-64 KiB RAM, I/E/M/C, M or M/U and deterministic CSR profile. Traps, interrupts,
-counter/other implementation-dependent CSR accesses, PMP, host services and
-unsupported features shall fail explicitly. Full trap/interrupt synchronization,
-CSR/WARL coverage and cycle-sensitive read reconciliation remain required
-follow-ups; this initial adapter does not satisfy their broader acceptance scope.
+The [reference guide](../verif/reference/README.md) defines the native 64 KiB
+RAM, I/E/M/C and M or M/U profile. Version 2 shall preserve synchronous trap
+attempts in the event stream and sample PC, privilege and native CSRs directly
+from Spike's read-only debugger after each bounded step. Require exact event and
+snapshot alignment, cause, saved PC, handler/return target, privilege, handler-entry
+marker and implicit CSR channel comparisons for trap entry and MRET. Check that
+faulting instructions have no committed GPR or memory effects.
+
+Supported causes shall include illegal instruction, M/U ECALL, EBREAK/C.EBREAK,
+instruction-address misalignment and load/store address misalignment. Synchronous
+entry shall use MTVEC.BASE even when its mode is vectored. Explicit and implicit
+MSTATUS checks shall cover implemented native bits; software shall establish
+common MSTATUS state before observing its implementation-dependent reset MPP.
+For breakpoint MTVAL only, validate Spike's permitted zero-or-fault-PC choice and
+the native zero choice. Reject direct MTVAL reads while those values differ;
+do not rewrite GPR outcomes. Other trap values shall match exactly. The guide
+documents zero-only model-side MRET CSR effects absent from the native profile.
+
+The `SW=traps` program shall exercise these cases, preserving a destination
+register sentinel and RAM guard against faulting and younger flushed effects,
+including the sequential path after MRET. Cover M-only and M/U execution, both
+IALIGN settings, 16-bit illegal/EBREAK instructions when C is enabled, and a
+return from U ECALL into M mode. Report observed trap/MRET counts and modes.
+Interrupts, counter/other implementation-dependent CSR accesses, PMP, host
+services and unsupported features shall still fail explicitly. Broader bus/PMP
+fault coverage, interrupt synchronization, CSR/WARL coverage and cycle-sensitive
+read reconciliation remain follow-ups.
 
 Keep raw reference/process logs, ELF/RVFI evidence and a JSON summary with the
 first mismatch index/field and both observations. A mismatch shall fail JUnit,
 the run and its containing suite; later suite cases shall still run. Reporting
 shall distinguish reference binary identities and checked/unchecked runs, link
 retained evidence, and reject passed metadata with absent or failed reference
-evidence. Tooling tests shall deliberately corrupt observations and exercise
-unsupported events, log formats and process timeout.
+evidence. Report comparison context shall include both the executable identity
+and adapter profile so earlier and later checker versions cannot replace each
+other's outcomes. Tooling tests shall deliberately corrupt observations,
+including implicit trap/MRET state, and exercise missing/extra/reordered
+declarations, unsupported events, log formats and process timeout.
 
 ## 3. Supported-configuration CI coverage
 
@@ -611,3 +645,4 @@ later decisions determine the active contract.
 | D-294 | Add reusable ELF32 software execution with shared instruction/data RAM, PT_LOAD zero-fill, bare-metal startup/linker files, retired-store tohost completion, configurable watchdog and preserved ELF/RVFI diagnostics. | Establish a compiler-built software execution foundation reusable by later ISA suites without adding test-completion ports to the processor. | Implemented initial native environment; Section 2.6; riscv-tests added under D-296; architectural tests and broader Spike coverage remain follow-ups; initial adapter in D-297 |
 | D-296 | Integrate checksum/commit-pinned riscv-tests without submodules, using adapted bare-metal instruction tests, explicit ISA/misalignment exclusions, independent ELF runs, compatible simulator-build reuse and compiler family/version/target discovery from RISCV_CC, RISCV or PATH. | Add reproducible external instruction coverage while preserving the chosen core behavior, externally supplied tools and honest cross-configuration reporting. | Initial RV32I/M/C adapter implemented; Section 2.7; build contract in build Section 1.2; initial Spike checking in D-297; other ISA/privileged families and architectural certification remain separate |
 | D-297 | Add optional external Spike differential checking for native ELF/riscv-tests runs, with an exact qualified binary pin, strict bounded commit-log parsing, original instruction/PC/GPR/source/memory checks, deterministic CSR checks and retained first-mismatch/JUnit/report evidence. | Add the selected independent ISA reference without silently ignoring unsupported traps, interrupts, counters or implementation-dependent state; preserve external tools and native timing/error checks. | Initial profile implemented; Section 2.8; full CSR/trap/interrupt coverage and source-revision pin remain follow-ups |
+| D-298 | Add ELF-bound ordered expected-trap declarations and Spike v2 synchronous-trap/MRET comparison using independent read-only state snapshots; test M-only/M-U transitions, illegal/ECALL/EBREAK and alignment faults, implicit CSRs, suppressed effects and explicit breakpoint-MTVAL reconciliation. | Verify precise exception behavior end to end while preserving strict no-trap defaults and distinguishing permitted implementation choices from architectural mismatches. | Implemented; Sections 2.6 and 2.8; broader CSR/bus/PMP/interrupt synchronization remains open |

@@ -8,7 +8,7 @@ SECTIONS
 {
     . = ORIGIN(RAM);
     .text : ALIGN(4) { KEEP(*(.text.init)) *(.text .text.*) } > RAM :text
-    .rodata : ALIGN(4) { *(.srodata .srodata.* .rodata .rodata.*) } > RAM :text
+    .rodata : ALIGN(4) { *(.srodata .srodata.* .rodata .rodata.*) KEEP(*(.uqu.traps)) } > RAM :text
     .data : ALIGN(8) {
         __global_pointer$ = . + 0x800;
         *(.sdata .sdata.* .data .data.*)

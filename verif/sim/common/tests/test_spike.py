@@ -94,8 +94,8 @@ class SpikeTests(unittest.TestCase):
 
     def test_unsupported_events_are_rejected_not_skipped(self):
         reset = dict(type='reset', epoch=0)
-        for records in ([reset, instruction(trap=1)], [reset, dict(type='interrupt')],
-                [reset, instruction(insn=0xc0002573)], [reset, instruction(insn=0x30200073)],
+        for records in ([reset, instruction(trap=1) | dict(cause=5)], [reset, dict(type='interrupt')],
+                [reset, instruction(insn=0xc0002573)],
                 [reset, reset, instruction()], [reset]):
             with self.subTest(records=records), self.assertRaises(ValueError):
                 spike.validate_profile(records, self.config, self.image)
@@ -113,6 +113,76 @@ class SpikeTests(unittest.TestCase):
         with self.assertRaises(ValueError): spike.discover_spike('missing', env)
         with patch.object(spike.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, 'wrong version')):
             with self.assertRaisesRegex(ValueError, 'binary pin'): spike.identify_spike(str(executable))
+
+    def trap_fixture(self):
+        pc, handler = self.image.entry, self.image.entry+32
+        status = 0x1888
+        before = {name:0 for name in spike.SNAPSHOT_CSRS}
+        before.update(mstatus=status, mtvec=handler|1, mhartid=5)
+        after = dict(before, mstatus=0x1880, mepc=pc, mcause=11)
+        returned = dict(after, mstatus=0x88)
+        trap = instruction(0, pc, insn=0x73, trap=1, pc_wdata=handler) | dict(cause=11)
+        trap['csrs'] = {name:dict(rmask=spike.MASK if name in ('mstatus','mtvec') else 0,
+                    wmask=spike.MASK if name!='mtvec' else 0,
+                    rdata=before[name] if name in ('mstatus','mtvec') else 0, wdata=after[name])
+                    for name in ('mstatus','mtvec','mepc','mcause','mtval')}
+        mret = instruction(1, handler, insn=0x30200073, intr=1, pc_wdata=pc)
+        mret['csrs'] = {name:dict(rmask=spike.MASK, wmask=spike.MASK if name=='mstatus' else 0,
+                                  rdata=after[name], wdata=returned[name]) for name in ('mstatus','mepc')}
+        refs = [self.commit(0x1000+4*n, op) for n,op in enumerate(spike.BOOT_INSNS)]
+        trapped = self.commit(pc,0x73)
+        trapped.update(trap=1,cause=11,tval=0,before=dict(pc=pc,mode=3,csrs=before),
+                       after=dict(pc=handler,mode=3,csrs=after))
+        returned_ref = self.commit(handler,0x30200073,csrs={0x300:0x88,0x310:0,0x7a5:0})
+        returned_ref.update(before=dict(pc=handler,mode=3,csrs=after), after=dict(pc=pc,mode=3,csrs=returned))
+        refs += [trapped,returned_ref,self.commit(pc,0x73)]
+        return [trap,mret],refs
+
+    def test_trap_mret_snapshots_and_corrupted_implicit_effects(self):
+        rows,refs=self.trap_fixture()
+        self.assertEqual(spike.compare(rows,refs,self.image),2)
+        for index,path,value in ((0,('cause',),3),(0,('tval',),1),
+                (0,('rvfi_pc_wdata',),0),(1,('rvfi_mode',),0),(1,('rvfi_intr',),0),
+                (0,('rvfi_mem_wmask',),15),(0,('rvfi_rd_addr',),1),
+                (0,('csrs','mepc','wdata'),0),(0,('csrs','mtval','wdata'),1),
+                (0,('csrs','mstatus','rdata'),0),(1,('csrs','mstatus','wdata'),0),
+                (1,('csrs','mepc','rdata'),0)):
+            broken=deepcopy(rows)
+            target=broken[index]
+            for key in path[:-1]: target=target[key]
+            target[path[-1]]=value
+            with self.subTest(path=path),self.assertRaises(spike.Mismatch): spike.compare(broken,refs,self.image)
+        refs[5]['after']['mode']=0
+        with self.assertRaisesRegex(spike.Mismatch,'next_privilege'): spike.compare(rows,refs,self.image)
+
+    def test_breakpoint_mtval_policy_only_accepts_zero_or_fault_pc(self):
+        rows,refs=self.trap_fixture()
+        rows[0].update(cause=3,rvfi_insn=0x100073)
+        rows[0]['csrs']['mcause']['wdata']=3
+        refs[5].update(cause=3,insn=0x100073,tval=self.image.entry)
+        refs[5]['after']['csrs'].update(mcause=3,mtval=self.image.entry)
+        self.assertEqual(spike.compare(rows,refs,self.image),2)
+        refs[5]['tval']=99
+        with self.assertRaisesRegex(ValueError,'breakpoint mtval policy'): spike.compare(rows,refs,self.image)
+
+    def test_exception_log_and_state_parsers_preserve_event_alignment(self):
+        path=self.path/'events.log'
+        path.write_text('core   5: 0x80000000 (0x00100073) ebreak\n'
+                        'core   5: exception trap_breakpoint, epc 0x80000000\n'
+                        'core   5:           tval 0x80000000\n'
+                        'core   5: >>>>  handler\n'
+                        'core   5: 3 0x80000020 (0x30200073) c768_mstatus 0x00000080\n')
+        rows=spike.parse_commits(path)
+        self.assertEqual((rows[0]['trap'],rows[0]['cause'],rows[0]['tval']),(1,3,self.image.entry))
+        states=[dict(pc=pc,mode=3,csrs=dict.fromkeys(spike.SNAPSHOT_CSRS,0)) for pc in
+                (self.image.entry,self.image.entry+32,self.image.entry+4)]
+        text=''.join(f'0x{s["pc"]:08x}\nM\n'+''.join(f'0x{v:08x}\n' for v in s['csrs'].values()) for s in states)
+        path.write_text(text)
+        self.assertEqual(spike.read_snapshots(path,2),states)
+        self.assertEqual(spike.attach_snapshots(rows,states)[0]['mode'],3)
+        with self.assertRaises(ValueError): spike.read_snapshots(path,3)
+        states[0]['pc']=0
+        with self.assertRaises(ValueError): spike.attach_snapshots(rows,states)
 
     def test_process_timeout_preserves_failed_evidence(self):
         (self.path / 'program.elf').write_bytes(b'ELF')
@@ -135,6 +205,7 @@ class SpikeTests(unittest.TestCase):
         info = dict(profile='test', executable='/external/spike')
         with patch.object(spike, 'load_elf', return_value=self.image), \
              patch.object(spike, 'parse_commits', return_value=refs), \
+             patch.object(spike, 'read_snapshots'), patch.object(spike, 'attach_snapshots', return_value=refs), \
              patch.object(spike.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0)):
             with self.assertRaisesRegex(spike.Mismatch, 'gpr_write'):
                 check_reference(self.path, self.config, info)

@@ -64,6 +64,7 @@ def run_suite(path, config_path, config, *, root, seed=1, simulator='verilator',
     if reference_info:
         record['reference'] = reference_info
         record['context']['reference'] = 'spike:' + reference_info['executable_sha256']
+        record['context']['reference_profile'] = reference_info['profile']
     failures, shared_build = [], {}
 
     def save():
