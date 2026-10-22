@@ -15,6 +15,7 @@ import subprocess
 from elf_image import load_elf
 from rvfi_trace import read_trace
 from toolchain import isa_abi
+from spike_zfinx import FP_CSRS, operation as fp_operation, channels as fp_channels, read_fp_trace, coverage as fp_coverage
 from interrupts import interrupt_plan, replay_masks, pending_interrupt
 from timing import COUNTERS, SAMPLED_CSRS, replay_samples
 
@@ -22,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[3]
 LOCK = ROOT / 'verif/reference/spike.lock.json'
 MASK = 0xffffffff
 RAM_BASE, RAM_SIZE = 0x80000000, 0x10000
-CSR_NAMES = {0x300: 'mstatus', 0x304: 'mie', 0x305: 'mtvec', 0x340: 'mscratch', 0x341: 'mepc',
+CSR_NAMES = {0x301: 'misa', 0x300: 'mstatus', 0x304: 'mie', 0x305: 'mtvec', 0x340: 'mscratch', 0x341: 'mepc',
              0x342: 'mcause', 0x343: 'mtval', 0xf14: 'mhartid',
              0x306: 'mcounteren', 0x320: 'mcountinhibit', 0x344: 'mip', **COUNTERS}
 BOOT_INSNS = [0x297, 0x02028593, 0xf1402573, 0x0182a283, 0x00028067]
@@ -150,8 +151,9 @@ def irq_index(mask):
     return ((mask >> 3)&1) | (((mask >> 7)&1)<<1) | (((mask >> 11)&1)<<2)
 
 
-def debug_commands(steps, masks=None, sampled=False):
-    snapshot = ['pc 0', 'priv 0', *('reg 0 '+name for name in SNAPSHOT_CSRS)]
+def debug_commands(steps, masks=None, sampled=False, zfinx=False):
+    names = (*SNAPSHOT_CSRS, *FP_CSRS.values()) if zfinx else SNAPSHOT_CSRS
+    snapshot = ['pc 0', 'priv 0', *('reg 0 '+name for name in names)]
     commands=[] if sampled else list(snapshot)
     if masks is not None and len(masks)!=steps: raise ValueError('IRQ replay step count mismatch')
     for index in range(steps):
@@ -162,11 +164,12 @@ def debug_commands(steps, masks=None, sampled=False):
     return '\n'.join([*commands,'quit'])+'\n'
 
 
-def read_snapshots(path, steps, masks=None, sampled=False):
+def read_snapshots(path, steps, masks=None, sampled=False, zfinx=False):
+    names = (*SNAPSHOT_CSRS, *FP_CSRS.values()) if zfinx else SNAPSHOT_CSRS
     lines = Path(path).read_text().splitlines()
     warning = "warning: tohost and fromhost symbols not in ELF; can't communicate with target"
     if lines and lines[0] == warning: lines.pop(0)
-    width = len(SNAPSHOT_CSRS) + 2
+    width = len(names) + 2
     if sampled:
         if len(lines)!=steps*(2*width+1): raise ValueError('missing sampled reference inputs/states')
         clean=[]
@@ -192,7 +195,7 @@ def read_snapshots(path, steps, masks=None, sampled=False):
         if values[1] not in ('M', 'U') or any(not re.fullmatch('0x[0-9a-f]{8}', s) for s in values[:1]+values[2:]):
             raise ValueError('unrecognized Spike debugger state format')
         states.append(dict(pc=int(values[0], 16), mode=3 if values[1]=='M' else 0,
-                           csrs={name:int(value,16) for name,value in zip(SNAPSHOT_CSRS, values[2:])}))
+                           csrs={name:int(value,16) for name,value in zip(names, values[2:])}))
     for state in states:
         for name in ('mcycle','minstret'):
             state['csrs'][name] |= state['csrs'][name+'h'] << 32
@@ -227,7 +230,10 @@ def memory_operation(insn):
 
 
 def source_registers(insn):
-    """Architectural source addresses for the initial I/E/M/C profile."""
+    """Architectural source addresses, decoded independently of the DUT."""
+    floating = fp_operation(insn)
+    if floating:
+        return floating['sources'][:2]
     if insn & 3 == 3:
         op, rs1, rs2 = insn & 127, insn >> 15 & 31, insn >> 20 & 31
         if op in (0x33, 0x63, 0x23): return rs1, rs2
@@ -257,8 +263,8 @@ def source_registers(insn):
 
 
 def validate_profile(records, config, image):
-    if any(config.get(k, 0) for k in ('ISA_PMP', 'ISA_F', 'ISA_ZFINX', 'ISA_A', 'XIF', 'DEBUG', 'MUA_HARDENED')):
-        raise ValueError('Spike initial profile supports native RV32I/E/M/C without PMP, FPU, XIF or debug')
+    if any(config.get(k, 0) for k in ('ISA_PMP', 'ISA_F', 'ISA_A', 'XIF', 'DEBUG', 'MUA_HARDENED')):
+        raise ValueError('Spike profile supports native RV32I/E/M/C/Zfinx without PMP, full F, atomics, XIF or debug')
     if image.symbols.get('fromhost') is not None:
         raise ValueError('initial Spike profile requires tohost-only ELF, without host-service fromhost')
     if any(s.address < RAM_BASE or s.address + s.size > RAM_BASE + RAM_SIZE for s in image.segments):
@@ -275,19 +281,28 @@ def validate_profile(records, config, image):
         if record['rvfi_trap'] and record['cause'] not in TRAP_CAUSES.values():
             raise ValueError('unsupported synchronous trap cause in Spike profile')
         insn = record['rvfi_insn']
+        desc = fp_operation(insn)
+        if config.get('ISA_E',0) and desc and max(insn >> 7 & 31,*desc['sources'])>=16:
+            raise ValueError('Pinned Spike lacks RV32E Zfinx high-register rejection; run these probes natively')
         if insn & 127 == 0x73:
-            if insn not in (0x73, 0x100073, 0x30200073) and (not insn >> 12 & 7 or insn >> 20 not in CSR_NAMES):
+            if insn not in (0x73, 0x100073, 0x30200073) and (not insn >> 12 & 7 or insn >> 20 not in (CSR_NAMES.keys() | FP_CSRS.keys())):
                 raise ValueError(f'Spike profile rejects unsupported CSR or SYSTEM instruction {insn:#x}')
         instructions.append(record)
     if not instructions: raise ValueError('no RVFI instructions to compare')
     return instructions
 
 
-def compare(instructions, commits, image):
+def compare(instructions, commits, image, *, zfinx=False, fp_records=None):
     """Compare every RVFI event, plus one Spike lookahead for the last next PC."""
     def equal(index, field, expected, actual):
         if expected != actual: raise Mismatch(index, field, expected, actual)
 
+    names = dict(CSR_NAMES)
+    if zfinx:
+        names.update(FP_CSRS)
+        if fp_records is None:
+            raise ValueError('Zfinx comparison requires the actual EX operand companion')
+    fp_seen = set()
     equal(-1, 'commit_count', len(instructions) + 6, len(commits))
     for index, insn in enumerate(BOOT_INSNS):
         equal(-1, 'bootstrap', (0x1000 + 4*index, insn, 3, 5),
@@ -305,6 +320,9 @@ def compare(instructions, commits, image):
             equal(index,'interrupt_target',reference['after']['pc'],actual['target'])
             equal(index,'interrupt_handler_pc',reference['after']['pc'],following['pc'])
             before,after=reference['before']['csrs'],reference['after']['csrs']
+            if zfinx:
+                fp_channels(0,False,before,after,
+                            {address:value for address,value in reference['csrs'].items() if address in FP_CSRS})
             equal(index,'interrupt_priority',pending_interrupt(reference['mode']==3,before['mstatus'],before['mie'],reference['irq_mask']),reference['cause'])
             equal(index,'interrupt_vector',(before['mtvec'] & ~3)+(4*reference['cause'] if before['mtvec']&1 else 0),actual['target'])
             equal(index,'interrupt_privilege',3,reference['after']['mode'])
@@ -348,6 +366,9 @@ def compare(instructions, commits, image):
         regs_updates = reference['registers']
         insn = reference['insn']
         effects = dict(reference['csrs'])
+        floating_effects = {address:effects.pop(address) for address in tuple(effects) if address in FP_CSRS}
+        if floating_effects and not zfinx:
+            raise ValueError('FP CSR effects with Zfinx disabled')
         if insn == 0x30200073 and not trapped:
             # This qualified Spike build additionally logs two model-only CSRs
             # on MRET. They have no counterpart in the native profile and must
@@ -355,9 +376,9 @@ def compare(instructions, commits, image):
             for address in (0x310, 0x7a5):
                 if address in effects and effects.pop(address) != 0:
                     raise ValueError('nonzero model-only MRET CSR effect')
-        expected_csrs = {CSR_NAMES[a]: (value & (MSTATUS_MASK if a==0x300 else MASK)) <<
+        expected_csrs = {names[a]: (value & (MSTATUS_MASK if a==0x300 else MASK)) <<
                          (32 if a in COUNTERS and a & 0x80 else 0)
-                         for a, value in effects.items() if a in CSR_NAMES}
+                         for a, value in effects.items() if a in names}
         if len(expected_csrs) != len(effects): raise ValueError('unsupported Spike CSR effect')
         actual_csrs = {name: value['wdata'] & value['wmask'] for name, value in actual['csrs'].items() if value['wmask']}
         before = dict(csr_state, **reference.get('before', {}).get('csrs', {}))
@@ -387,8 +408,8 @@ def compare(instructions, commits, image):
             equal(index, 'mret_status_effect', after['mstatus'] & MSTATUS_MASK, expected_csrs.get('mstatus'))
         elif insn & 127 == 0x73:
             address, function, source, dest = insn >> 20, insn >> 12 & 7, insn >> 15 & 31, insn >> 7 & 31
-            if address not in CSR_NAMES: raise ValueError('unsupported reference CSR')
-            name = CSR_NAMES[address]
+            if address not in names: raise ValueError('unsupported reference CSR')
+            name = names[address]
             read = dest != 0 if function in (1, 5) else True
             write = function in (1, 5) or source != 0
             if name=='mtval' and breakpoint_mtval and read and before['mtval'] != 0:
@@ -401,6 +422,27 @@ def compare(instructions, commits, image):
                 equal(index, 'counter_preserved_half:'+name, after[name], actual['csrs'][name]['wdata'])
         else:
             channels = {}
+        if zfinx:
+            floating_channels = fp_channels(insn, trapped, before, after, floating_effects)
+            channels.update(floating_channels)
+            expected_csrs.update({name:after[name] & write for name,(_,write) in floating_channels.items() if write})
+            desc = fp_operation(insn)
+            if desc and not trapped:
+                key = actual['epoch'],actual['rvfi_order']
+                fp_seen.add(key)
+                if key not in fp_records:
+                    raise ValueError(f'missing FP companion at instruction {index}')
+                observed = fp_records[key]
+                equal(index,'fp_identity',(actual['rvfi_pc_rdata'],insn),(observed['pc'],observed['insn']))
+                address = desc['sources'][2]
+                if regs[address] is None:
+                    raise ValueError('uninitialized third FP source')
+                equal(index,'fp_rs3_addr',address,observed['rs3_addr'])
+                equal(index,'fp_rs3_value',regs[address],observed['rs3_rdata'])
+                rounding = desc['rounding']
+                if rounding is not None:
+                    effective = before['frm'] if rounding==7 else rounding
+                    equal(index,'fp_effective_rm',effective,observed['rm'])
         equal(index, 'csr_write', expected_csrs, actual_csrs)
         equal(index, 'csr_channels', set(channels), set(actual['csrs']))
         for name, (read, write) in channels.items():
@@ -410,6 +452,8 @@ def compare(instructions, commits, image):
             if read:
                 value = before[name] & (MSTATUS_MASK if name=='mstatus' else (1<<64)-1 if name in ('mcycle','minstret') else MASK)
                 equal(index, 'csr_read:'+name, value, channel['rdata'])
+            if zfinx and name in FP_CSRS.values() and write:
+                equal(index, 'fp_csr_post:'+name, after[name], channel['wdata'])
         csr_state.update(expected_csrs)
         if trapped:
             equal(index, 'trap_memory_effects', [], reference['memory'])
@@ -447,6 +491,8 @@ def compare(instructions, commits, image):
         else:
             equal(index, 'memory_masks', (0, 0), (actual['rvfi_mem_rmask'], actual['rvfi_mem_wmask']))
         for address, value in regs_updates.items(): regs[address] = value
+    if zfinx:
+        equal(-1,'fp_companion_events',fp_seen,set(fp_records))
     return len(instructions)
 
 
@@ -457,6 +503,7 @@ def check_run(directory, config, info, timeout=30):
                   policy='Native clock/retirement counters checked per edge; sampled counter/MIP inputs, independent Spike instruction semantics; aligned IRQ delivery; breakpoint mtval native=0, Spike=0|PC',
                   artifacts=['spike.log', 'spike-process.log', 'spike-debug.cmd', 'rvfi.jsonl'])
     try:
+        zfinx = bool(config.get('ISA_ZFINX',0))
         image = load_elf(directory / 'program.elf')
         records = read_trace(directory / 'rvfi.jsonl')
         instructions = validate_profile(records, config, image)
@@ -505,13 +552,13 @@ def check_run(directory, config, info, timeout=30):
             command[-1:-1]=['--extlib='+str(device),'--device=uqu_irq'+
                            (','+str(directory/'spike-inputs.txt') if sampled else '')]
         steps = len(instructions)+6
-        (directory / 'spike-debug.cmd').write_text(debug_commands(steps,masks,sampled))
+        (directory / 'spike-debug.cmd').write_text(debug_commands(steps,masks,sampled,zfinx))
         result['elf_sha256'] = hashlib.sha256((directory / 'program.elf').read_bytes()).hexdigest()
         with (directory / 'spike-process.log').open('w') as output:
             process = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT, timeout=timeout)
         if process.returncode: raise ValueError(f'Spike exited with {process.returncode}; see spike-process.log')
         commits = parse_commits(directory / 'spike.log')
-        commits = attach_snapshots(commits, read_snapshots(directory / 'spike-process.log', steps,masks,sampled))
+        commits = attach_snapshots(commits, read_snapshots(directory / 'spike-process.log', steps,masks,sampled,zfinx))
         if sampled:
             for row,sample in zip(commits[5:],samples):
                 for name in ('mcycle','minstret','mip'):
@@ -519,13 +566,21 @@ def check_run(directory, config, info, timeout=30):
                         raise ValueError('Spike did not consume sampled input: '+name)
         if masks is not None:
             for row,mask in zip(commits,masks): row['irq_mask']=mask
-        count = compare(instructions, commits, image)
+        fp_records = read_fp_trace(directory/'fpu.jsonl') if zfinx else None
+        if zfinx:
+            result['artifacts'].append('fpu.jsonl')
+        count = compare(instructions, commits, image, zfinx=zfinx, fp_records=fp_records)
+        if zfinx:
+            (directory/'zfinx-coverage.json').write_text(json.dumps(fp_coverage(instructions),indent=2)+'\n')
+            result['artifacts'].append('zfinx-coverage.json')
         result.update(status='passed', compared_instructions=count-sum(r['type']=='interrupt' for r in instructions),
                       compared_events=count,
                       compared_traps=sum(r.get('rvfi_trap',0) for r in instructions),
                       compared_interrupts=sum(r['type']=='interrupt' for r in instructions),
                       compared_mrets=sum(r.get('rvfi_insn')==0x30200073 and not r['rvfi_trap'] for r in instructions),
                       compared_counter_accesses=sum(r['type']=='instruction' and r['rvfi_insn'] & 127==0x73 and r['rvfi_insn'] >> 20 in COUNTERS for r in instructions),
+                      compared_fp_instructions=sum(not r.get('rvfi_trap') and fp_operation(r.get('rvfi_insn',0)) is not None for r in instructions),
+                      compared_fp_csr_accesses=sum(r['type']=='instruction' and r['rvfi_insn'] & 127==0x73 and r['rvfi_insn'] >> 20 in FP_CSRS for r in instructions),
                       compared_mip_accesses=sum(r['type']=='instruction' and r['rvfi_insn'] & 127==0x73 and r['rvfi_insn'] >> 20==0x344 for r in instructions),
                       observed_modes=sorted({r['rvfi_mode'] for r in instructions if r['type']=='instruction'}))
     except BaseException as error:

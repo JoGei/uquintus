@@ -249,6 +249,15 @@ module uqu_core_tb #(
         .order_i(raw_rvfi_order), .we0_i(u_core.wb_we0), .rd0_i(u_core.wb_waddr0), .data0_i(u_core.wb_wdata0),
         .we1_i(u_core.wb_we1), .rd1_i(u_core.wb_waddr1), .data1_i(u_core.wb_wdata1)
     );
+    uqu_fp_trace u_fp_trace (
+        .clk_i(clk_i), .rst_ni(rst_ni),
+        .ex_fire_i(u_core.ex_fire), .ex_fp_i(u_core.ex_fflags_valid),
+        .ex_rs3_addr_i(u_core.ex_used_q[2] ? u_core.ex_rs_addr_q[2] : 5'd0),
+        .ex_rs3_data_i(u_core.ex_rs[2]), .ex_rm_i(u_core.ex_rm_q),
+        .mem_fire_i(u_core.mem_fire), .retire_i(u_core.wb_retire),
+        .wb_fp_i(u_core.wb_fflags_valid_q), .order_i(raw_rvfi_order),
+        .pc_i(u_core.wb_pc_q), .insn_i(u_core.wb_original_q)
+    );
     uqu_rvfi u_rvfi (
         .clk_i(clk_i),
         .rst_ni(rst_ni),

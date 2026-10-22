@@ -126,12 +126,15 @@ class ReportTests(unittest.TestCase):
         (path / 'spike.json').write_text(json.dumps(dict(status='passed', compared_instructions=12,
             compared_traps=2, compared_mrets=3, compared_interrupts=4,
             checked_counter_cycles=100, compared_counter_accesses=6, compared_mip_accesses=7,
+            compared_fp_instructions=8, compared_fp_csr_accesses=9,
             profile='test', tool=metadata['reference'])))
         (path / 'spike-debug.cmd').write_text('run 1\nquit\n')
         (path / 'interrupts.json').write_text('{}')
         (path / 'timing.json').write_text('{}')
         (path / 'spike-inputs.txt').write_text('1 0 0 0 0\n')
         (path / 'spike.log').write_text('reference observation')
+        (path / 'fpu.jsonl').write_text('{}\n')
+        (path / 'zfinx-coverage.json').write_text('{}\n')
         record = report.collect(self.build, self.root)['records'][0]
         self.assertEqual(record['status'], 'passed')
         self.assertEqual(record['tools']['reference']['profile'], 'test')
@@ -143,6 +146,9 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(metrics['spike_checked_counter_cycles'],100)
         self.assertEqual(metrics['spike_compared_counter_accesses'],6)
         self.assertEqual(metrics['spike_compared_mip_accesses'],7)
+        self.assertEqual(metrics['spike_compared_fp_instructions'],8)
+        self.assertEqual(metrics['spike_compared_fp_csr_accesses'],9)
+        self.assertTrue({'fpu.jsonl','zfinx-coverage.json'} <= {a['path'] for a in record['artifacts']})
         self.assertTrue(any(a['path']=='interrupts.json' for a in record['artifacts']))
         self.assertTrue(any(a['path']=='timing.json' for a in record['artifacts']))
         self.assertTrue(any(a['path']=='spike-inputs.txt' for a in record['artifacts']))

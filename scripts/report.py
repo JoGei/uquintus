@@ -44,7 +44,7 @@ FILES = ('run.json', 'build.json', 'report.json', 'results.xml', 'execution.json
          'simulation.log', 'build.log', 'program.map', 'software-build.json',
          'spike.json', 'spike.log', 'spike-process.log', 'spike-debug.cmd',
          'interrupts.json', 'timing.json', 'spike-inputs.txt', 'spike-irq-build.json', 'spike-irq-build.log',
-         'xif.jsonl', 'xif-agent.json')
+         'xif.jsonl', 'xif-agent.json', 'fpu.jsonl', 'zfinx-coverage.json')
 
 
 def digest(value):
@@ -278,7 +278,8 @@ def normalize(path, build, root, hashes):
             record['metrics'].append({'name': 'spike_compared_instructions', 'value': count, 'unit': 'instructions'})
             for field, unit in (('compared_traps','traps'), ('compared_mrets','instructions'),
                                 ('compared_interrupts','interrupts'), ('checked_counter_cycles','cycles'),
-                                ('compared_counter_accesses','accesses'), ('compared_mip_accesses','accesses')):
+                                ('compared_counter_accesses','accesses'), ('compared_mip_accesses','accesses'),
+                                ('compared_fp_instructions','instructions'), ('compared_fp_csr_accesses','accesses')):
                 value = evidence.get(field)
                 if type(value) is int and value >= 0:
                     record['metrics'].append({'name':'spike_'+field, 'value':value, 'unit':unit})

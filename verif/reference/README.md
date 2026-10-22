@@ -46,13 +46,13 @@ Its format is not assumed stable across arbitrary builds. Unknown log lines or
 effects fail parsing. No proxy kernel is used.
 
 The initial profile uses one hart (ID 5, matching the native harness), configured
-M or M/U privilege, matching I/E/M/C/Zicsr/Zifencei settings, PMP disabled, and the
+M or M/U privilege, matching I/E/M/C/Zicsr/Zifencei/Zfinx settings, PMP disabled, and the
 native linker RAM at `0x80000000..0x8000ffff`. Both models load the same ELF, with
 zero-filled segment tails. Startup must initialize GPRs before reading them;
 the checker does not accept Spike's zeroed reset GPRs as evidence for unreset
 core registers. RAM holes are initially zero. ELF `fromhost` services are rejected.
 
-Profile `spike-commit-rv32-v4` uses a bounded debugger command file: a read-only
+Profile `spike-commit-rv32-v5` uses a bounded debugger command file: a read-only
 state snapshot, then one `run 1` attempt and another snapshot at each step.
 Snapshots contain PC, privilege and the supported CSRs directly from Spike.
 This observes implicit trap/MRET state changes without reconstructing them from
@@ -107,7 +107,7 @@ it. The adapter does not rewrite GPR results or allow divergent control flow.
 Counter and MIP accesses use the sampled-input policy below. `mcountinhibit`
 and optional `mcounteren` are also supported. Other CSRs and SYSTEM operations,
 including TIME and WFI, are rejected.
-Multiple reset epochs, PMP, FPU, atomics, XIF, debug,
+Multiple reset epochs, PMP, full F/D/Q, atomics, XIF, debug,
 host I/O and memory outside this RAM are not supported by this first profile.
 Encountering them fails explicitly rather than silently skipping observations.
 Full CSR/WARL and bus/PMP faults remain follow-ups under the
@@ -237,6 +237,53 @@ make sw SW=counters CONFIG=rv32im PYTHON=.venv/bin/python
 make test COMPONENT=core_elf CONFIG=rv32im REFERENCE=spike \
   ELF=build/uquintus-rv32im/sw/counters/program.elf PYTHON=.venv/bin/python
 ```
+
+## Scalar Zfinx ISA checks
+
+```sh
+make sw SW=zfinx CONFIG=rv32i_zfinx PYTHON=.venv/bin/python
+make test COMPONENT=core_elf CONFIG=rv32i_zfinx REFERENCE=spike \
+  ELF=build/uquintus-rv32i_zfinx/sw/zfinx/program.elf PYTHON=.venv/bin/python
+```
+
+The compiler must assemble Zfinx; the ABI remains `ilp32` (`ilp32e` for E).
+Profile v5 keeps the same qualified binary and adds independent execution of
+all 22 scalar FP instructions, FP CSR snapshots and MISA reads. It compares
+GPR results, consumed operands, flags/rounding aliases and channel masks with
+Spike's execution. It does not call the native Python FP oracle to predict
+reference results. Spike's disassembler may print f-register names for these
+encodings; comparison uses instruction bits and integer-register commit effects.
+
+Standard RVFI carries two sources. The simulation-only `fpu.jsonl` companion
+observes actual third-source consumption and effective rounding in EX and
+follows pipeline transfers to WB. Epoch/order/PC/instruction bind it to RVFI;
+prior Spike GPR writes and FRM supply independent expected values. Missing,
+extra, malformed or incorrect companion records fail. No production-core port
+or nonstandard RVFI port is added.
+
+`SW=zfinx` walks every available GPR as destination and each source, including
+FMA rs3 distinct from rd, x0, and overlapping roles. It executes all 13
+rounding-capable operations in each of the five static and dynamic modes,
+checks FP CSR aliases/access forms, NaNs, signed zero, FCLASS, exception flags,
+M/U execution and precise illegal-mode/encoding traps. The same program with
+`ISA_E=1` walks the 16 available registers. Separate native-only `SW=zfinx_ereg`
+checks high-register traps: the pinned Spike executes these reserved encodings
+instead of rejecting them. The adapter refuses those probes explicitly; no
+mismatch is forgiven. With Zfinx disabled, `SW=zfinx` probes illegal FP
+instructions and CSRs. Trap poison stores must remain uncommitted.
+
+Successfully compared traces produce `zfinx-coverage.json` with operation counts,
+static/dynamic modes, register roles, CSR forms, privilege modes and trap causes.
+The report exposes this artifact and FP instruction/CSR counts. This is directed
+ISA verification, not upstream architectural-test certification or formal proof.
+
+The independent check caught incorrect exponent-based UF filtering in the
+initial adapter and native oracle. Both now preserve IEEE tininess after
+rounding with unbounded exponent range. A minimum-normal encoded result can
+still raise UF|NX; see the
+[SoftFloat FAQ](https://www.jhauser.us/arithmetic/SoftFloat-3/doc/SoftFloat-FAQ.html).
+Boundary tests retain both flag-raising and non-flag-raising examples, with an
+optional external SoftFloat cross-check.
 
 ## Evidence and checker tests
 

@@ -60,6 +60,13 @@ def round_binary32(number, rm, zero_sign=0):
     power = Fraction(1 << exponent) if exponent >= 0 else Fraction(1, 1 << -exponent)
     if magnitude < power:
         exponent -= 1
+    # IEEE tininess-after-rounding uses destination precision with an
+    # unbounded exponent range. Inspecting the final encoded exponent would
+    # incorrectly suppress UF for some results rounding to minimum normal.
+    tiny = False
+    if exponent < -126:
+        unbounded, _ = rounded_integer(magnitude * (1 << (23 - exponent)), negative, rm)
+        tiny = exponent + int(unbounded >= 1 << 24) < -126
     scale = 23 - max(exponent, -126)
     scaled = magnitude * (1 << scale) if scale >= 0 else magnitude / (1 << -scale)
     significand, inexact = rounded_integer(scaled, negative, rm)
@@ -72,7 +79,7 @@ def round_binary32(number, rm, zero_sign=0):
         infinity = rm in (0, 4) or (rm == 2 and negative) or (rm == 3 and not negative)
         return sign | (0x7f800000 if infinity else 0x7f7fffff), OF | NX
     bits = ((encoded_exponent + 127) << 23) + significand - (1 << 23) if significand >= 1 << 23 else significand
-    return sign | bits, (NX | (UF if bits < 0x800000 else 0)) if inexact else 0
+    return sign | bits, (NX | (UF if tiny else 0)) if inexact else 0
 
 
 def compare(a, b):

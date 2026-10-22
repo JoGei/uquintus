@@ -31,7 +31,7 @@ work. Every run records the configuration, source/header hashes and Bender lock.
 Verilator controls are confined to imported source diagnostics and the adapter's
 checked enum-parameter language boundary. No upstream source is patched.
 
-The `arithmetic` test compares 21,022 operations per enabled configuration
+The `arithmetic` test compares 21,027 operations per enabled configuration
 against an independent Python oracle using exact rational arithmetic and one
 binary32 rounding. It covers all 22 operations, all five rounding modes where
 applicable, signed zeros, subnormals, infinities, quiet/signaling NaNs, fused
@@ -55,7 +55,7 @@ SoftFloat shared library (such as a matching Spike installation):
 SOFTFLOAT_LIB=/path/to/libsoftfloat.so make test-runner
 ```
 
-That check compares 26,000 reproducible arithmetic/conversion results and flags;
+That check compares 27,080 reproducible arithmetic/conversion results and flags;
 without the variable, only this external-library unit check is skipped. The HDL
 regressions do not depend on SoftFloat or any host floating-point library.
 
@@ -63,5 +63,5 @@ To explore staging, copy a complete hardware YAML and change the explicit
 counts/placement. Simulation matrices should include `before`, `after`,
 `inside`, `distributed` and zero configured registers. Tested simulations do
 not imply every count combination, formal proof, ASIC frontend support or
-mapped timing/area qualification. Spike ELF differential support for Zfinx and
-standard formal FPU instruction checks remain separate follow-ups.
+mapped timing/area qualification. Independent [Spike ELF ISA checks](../../reference/README.md#scalar-zfinx-isa-checks)
+complement these arithmetic tests; standard formal FPU instruction checks remain open.

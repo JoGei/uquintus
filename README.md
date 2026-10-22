@@ -6,8 +6,8 @@ ASIC flows. The specification is in [doc/uqu_spec.md](doc/uqu_spec.md).
 The [native processor core](verif/sim/core/README.md) connects all five stages
 with core-owned pipeline registers, hazards, PMP and control. Native execution
 supports the implemented E/M/C, M/U, PMP and Zifencei configurations plus the
-initial standard-channel XIF profile. FPU and core debug adapters remain
-unfinished and reject enabled elaboration.
+initial standard-channel XIF profile and scalar Zfinx through CVFPU/FPnew.
+Core debug remains unfinished and rejects enabled elaboration.
 The core testbed includes verification-only RVFI instruction/CSR collectors and SV JSONL trace;
 see the [RVFI profile](verif/common/README.md) for coverage and remaining formal work.
 
@@ -334,10 +334,13 @@ precise fault containment, LSU effect permission and remembered fence handshakes
 Use `make test-runner` to
 check the shared tooling without running an HDL simulator.
 
-The native processor and initial XIF integration are implemented. FPU/debug
+The native processor, scalar Zfinx FPU and initial XIF integration are implemented. Core debug
 integration, complete architectural verification, formal proofs and the ASIC
 implementation flow remain unfinished.
 
 Optional [Spike differential checking](verif/reference/README.md) is available for
 ELF runs and riscv-tests through `REFERENCE=spike`. Supply the pinned external
 binary through `SPIKE`, `$RISCV/bin` or `PATH`.
+
+Directed Zfinx ISA checks use `SW=zfinx CONFIG=rv32i_zfinx` with the ELF
+runner and `REFERENCE=spike`; see the [reference guide](verif/reference/README.md#scalar-zfinx-isa-checks).

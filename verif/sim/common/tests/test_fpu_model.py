@@ -16,7 +16,8 @@ class FpuModelTests(unittest.TestCase):
         for rm in range(5):
             self.assertEqual(result(0,0x3f800000,0x33800000,rm=rm),
                              (0x3f800001 if rm in (3,4) else 0x3f800000,NX))
-        self.assertEqual(result(2,0x00800000,0x3f7fffff),(0x00800000,NX))
+        self.assertEqual(result(2,0x00800000,0x3f7fffff),(0x00800000,UF|NX))
+        self.assertEqual(result(2,0x00800001,0x3f7ffffe),(0x00800000,NX))
         self.assertEqual(result(2,0x00800000,0x3f7fffff,rm=1),(0x007fffff,UF|NX))
         self.assertEqual(result(2,0x7f7fffff,0x40000000),(0x7f800000,OF|NX))
         self.assertEqual(result(3,0x3f800000,0),(0x7f800000,DZ))
@@ -72,9 +73,17 @@ class FpuModelTests(unittest.TestCase):
             fn.restype=Float32
         rng=random.Random(120)
         for op in list(range(9))+list(range(18,22)):
-            for _ in range(2000):
-                a,b,c=(rng.getrandbits(32) for _ in range(3))
-                rm=rng.randrange(5)
+            vectors=[(*(rng.getrandbits(32) for _ in range(3)),rng.randrange(5))
+                     for _ in range(2000)]
+            # Random bit patterns rarely exercise tininess at minimum normal.
+            # Cover both signs and all rounding modes around that boundary.
+            if op in (2,3,5):
+                vectors += [(a ^ sign,b,c,rm)
+                            for a in (0x007fffff,0x00800000,0x00800001)
+                            for b in (0x3f7ffffe,0x3f7fffff,0x3f800000,0x3f800001)
+                            for c in (0,1,0x80000001)
+                            for sign in (0,SIGN) for rm in range(5)]
+            for a,b,c,rm in vectors:
                 rounding.value,flags.value=rm,0
                 if op<5:
                     args=[Float32(a)] if op==4 else [Float32(a),Float32(b)]

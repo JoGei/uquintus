@@ -684,10 +684,11 @@ The [FPU component guide](../verif/sim/fpu/README.md) defines the executable
 `fpu` target and the real CVFPU adapter's supported configuration scope.
 Arithmetic and per-instruction flags shall be checked against an independent
 exact-rational binary32 oracle, including fused operations and square root,
-without host floating-point rounding. The enabled suite compares 21,022
+without host floating-point rounding. The enabled suite compares 21,027
 operations across all 22 normalized operations, five rounding modes,
 special values, rounding boundaries and randomized inputs. An optional external
-Berkeley SoftFloat check cross-validates 26,000 oracle results and flags;
+Berkeley SoftFloat check cross-validates 27,080 oracle results and flags,
+including targeted normal/subnormal boundaries for both signs and all modes;
 HDL tests shall not require that library.
 
 The component regression shall exercise held results/flags, changes to live
@@ -703,9 +704,54 @@ instruction and result/status association under backpressure. The core `fpu`
 program shall check all scalar instructions, all three FMA source dependencies,
 dynamic rounding and reserved-mode traps, FP CSR aliases, x0 flag accrual,
 older-memory-fault cancellation and interrupt drain. FP CSR observation shall
-sample actual retired state, not speculative FPU output. These are native
-simulation checks; Zfinx Spike differential support, formal FP models and
-physical-flow qualification remain open.
+sample actual retired state, not speculative FPU output. These native checks
+are complemented by Section 2.10. Formal FP models and physical-flow
+qualification remain open.
+
+### 2.10. Independent Zfinx ISA execution
+
+Spike profile `spike-commit-rv32-v5` shall support scalar RV32I/E Zfinx using
+the existing external binary pin, ELF runner and integer ABI. Decode ISA fields
+independently of native decoder/arithmetic helpers. Expected GPR results and FP
+CSR state shall come from Spike execution and pre/post snapshots, never DUT
+values or the native arithmetic oracle. Preserve all existing integer, trap,
+memory, privilege, counter and interrupt checks. Include MISA in snapshots.
+
+Check `fflags`, `frm` and `fcsr` values, read/write masks, explicit aliases and
+accrued flags. Check FS remains Off and MISA F/D/Q remain absent. Standard RVFI
+has two source operands; a simulation-only `fpu.jsonl` companion shall follow
+actual EX consumption to retirement, recording the third source and effective
+rounding mode with epoch/order/PC/instruction identity. Check these against
+prior Spike GPR writes and Spike FRM. Missing, extra or malformed events fail.
+This adds no production-core ports or nonstandard RVFI ports.
+
+`SW=zfinx` shall exercise all 22 scalar instructions, all 13 rounding-capable
+instructions in each static and dynamic mode, every available source/destination
+register, overlap and x0, FMA's independent third source, ten FCLASS categories,
+canonical versus payload-preserving NaNs, signed zero, rounding boundaries,
+all five exception flags and sticky accrual. Include all six FP CSR access
+forms/aliases, illegal/reserved encodings and modes, excluded FLW/FSW/FMV,
+M/U execution. Native-only `SW=zfinx_ereg` shall check RV32E high-register
+traps: the pinned Spike executes those reserved encodings, so its adapter shall
+reject these probes explicitly. With Zfinx disabled, probe illegal
+FP instructions and FP CSR access. Expected-trap declarations and poison stores
+shall check precise exceptions and suppression of younger effects.
+
+Retain independent snapshots/logs and `zfinx-coverage.json` only after successful
+comparison. The report shall expose FP instruction/CSR counts and the coverage
+artifact. Coverage describes executed operations, register roles, privilege
+modes, static/dynamic modes, CSR forms and trap causes; it is not certification.
+Corruption tests shall reject incorrect GPR/source/third-source values, effective
+rounding, FP CSR masks/pre/post state and companion identity/completeness.
+
+Independent comparison exposed incorrect UF suppression shared by the initial
+adapter and native oracle. Correct tininess uses destination precision with
+unbounded exponent range, so `0x00800000 * 0x3f7fffff`, RNE, produces
+`0x00800000` with UF|NX. Keep this directed case and cross-check boundary
+arithmetic against external SoftFloat. See the
+[SoftFloat FAQ](https://www.jhauser.us/arithmetic/SoftFloat-3/doc/SoftFloat-FAQ.html).
+Broader generated ISA programs, upstream architectural-test integration and
+formal FP proofs remain future work.
 
 ## 3. Supported-configuration CI coverage
 
@@ -783,3 +829,4 @@ later decisions determine the active contract.
 | D-298 | Add ELF-bound ordered expected-trap declarations and Spike v2 synchronous-trap/MRET comparison using independent read-only state snapshots; test M-only/M-U transitions, illegal/ECALL/EBREAK and alignment faults, implicit CSRs, suppressed effects and explicit breakpoint-MTVAL reconciliation. | Verify precise exception behavior end to end while preserving strict no-trap defaults and distinguishing permitted implementation choices from architectural mismatches. | Implemented; Sections 2.6 and 2.8; IRQ synchronization added under D-299/D-300; broader CSR/bus/PMP comparison open |
 | D-299 | Add ELF-bound deterministic IRQ stimuli, independent native masking/priority/drain checks and Spike v3 delivery alignment through a qualified verification device; retain full input/entry evidence and check architectural state without inventing retirement. | Compare asynchronous behavior at valid instruction boundaries while checking native timing independently; keep platform MMIO controllers outside the core and SDK/tool provenance explicit. | Implemented initial software/timer/external IRQ profile; Section 2.8; MIP/counters extended by D-300; Spike WFI comparison remains open |
 | D-300 | Check native counters on every clock edge and use verified model pre-state plus sampled MIP inputs for Spike v4 CSR execution; retain validated timing/replay evidence and counter/MIP metrics. | Verify native timing independently while comparing instruction semantics across different execution timing; preserve original target instructions/results and independently checked interrupt delivery. | Implemented; Section 2.8; counter software/IRQ regressions and corruption checks; full CSR/WARL and Spike WFI comparison remain follow-ups |
+| D-305 | Extend pinned Spike ELF checking to scalar RV32I/E Zfinx, independent FP CSR snapshots and observed third-source/effective-rounding companions; add directed ISA programs and descriptive coverage/report artifacts. Correct boundary underflow in the adapter and exact oracle. | Check instruction semantics independently of the native arithmetic model and expose shared assumptions. | Implemented; Section 2.10; native E high-register probes remain separate due to pinned Spike behavior; certification/formal FP proofs open |

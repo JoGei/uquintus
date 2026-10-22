@@ -135,6 +135,7 @@ class ArithmeticTest(FpuTest):
                         (5, 0x3f800001, 0x3f7ffffe, 0xbf800000),
                         (5, 0x7f800000, 0, 0x7fc00000),
                         (2, 0x00800000, 0x3f7fffff, 0),
+                        (2, 0x00800001, 0x3f7ffffe, 0),
                         (18, 0xcf000001, 0, 0), (19, 0xbe800000, 0, 0))
             for op, a, b, c in directed:
                 for rm in range(5):

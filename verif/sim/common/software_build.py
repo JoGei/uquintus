@@ -35,7 +35,7 @@ def main():
         config_path = ROOT / 'config' / f'{args.config}.yml'
     catalog = json.loads((ROOT / 'config/selectors.json').read_text())
     config = load_configuration(config_path, catalog)
-    if any(config[name] for name in ('ISA_F', 'ISA_ZFINX', 'ISA_A', 'XIF', 'DEBUG', 'MUA_HARDENED')):
+    if any(config[name] for name in ('ISA_F', 'ISA_A', 'XIF', 'DEBUG', 'MUA_HARDENED')):
         raise ValueError('software smoke build requires the implemented native core profile')
     compiler = identify_compiler(discover_compiler(args.cc), config)
     directory = ROOT / 'build' / f'uquintus-{config_path.stem}' / 'sw' / args.program
@@ -43,7 +43,7 @@ def main():
     common = ROOT / 'verif/sw/common'
     inputs = [common / 'crt0.S', source, common / 'link.ld']
     command = compiler_command(compiler)
-    command += [f'-DUQU_ISA_UMODE={config["ISA_UMODE"]}', '-mcmodel=medany', '-mno-relax',
+    command += [f'-DUQU_ISA_UMODE={config["ISA_UMODE"]}', f'-DUQU_ISA_ZFINX={config["ISA_ZFINX"]}', '-mcmodel=medany', '-mno-relax',
                 '-msmall-data-limit=0', '-ffreestanding', '-fno-builtin', '-fno-pic',
                 '-fno-stack-protector', '-ffunction-sections', '-fdata-sections',
                 '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-nostdlib',

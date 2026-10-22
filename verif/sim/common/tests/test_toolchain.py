@@ -18,6 +18,12 @@ class ToolchainTests(unittest.TestCase):
         self.assertEqual(isa_abi(dict(ISA_E=1, ISA_M=0, ISA_C=0, ISA_ZIFENCEI=0)),
                          ('rv32e_zicsr', 'ilp32e'))
 
+    def test_zfinx_uses_integer_abi_and_explicit_isa_extension(self):
+        for embedded,abi in ((0,'ilp32'),(1,'ilp32e')):
+            march,actual=isa_abi(dict(ISA_E=embedded,ISA_M=0,ISA_C=0,ISA_ZIFENCEI=0,ISA_ZFINX=1))
+            self.assertTrue(march.endswith('_zicsr_zfinx'))
+            self.assertEqual(actual,abi)
+
     def test_explicit_then_riscv_root_then_path(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

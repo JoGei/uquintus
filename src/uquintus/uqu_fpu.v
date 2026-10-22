@@ -150,12 +150,11 @@ module uqu_fpu #(
             assign req_ready_o = fp_in_ready && fp_in_valid;
             assign res_valid_o = enabled && fp_out_valid && (active_q || fp_in_valid);
             assign res_data_o = res_valid_o ? fp_result : 32'd0;
-            // The pinned FMA can flag tininess before rounding. RISC-V
-            // detects it after rounding: a normal result cannot underflow.
-            // Invalid operations do not also
+            // Preserve backend tininess-after-rounding status, including UF
+            // at the normal/subnormal boundary. Invalid operations do not also
             // report divide-by-zero or inexact/overflow/underflow exceptions.
             assign res_fflags_o = !res_valid_o ? 5'd0 : fp_status[4] ? 5'b10000 :
-                {fp_status[4:2], fp_status[1] && (fp_result[30:23] == 8'd0), fp_status[0]};
+                fp_status;
 
             fpnew_top #(
                 .Features(FEATURES), .Implementation(IMPLEMENTATION),

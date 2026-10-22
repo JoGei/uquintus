@@ -10,6 +10,7 @@ def isa_abi(config):
     march = 'rv32' + ('e' if config['ISA_E'] else 'i')
     march += ('m' if config['ISA_M'] else '') + ('c' if config['ISA_C'] else '') + '_zicsr'
     march += '_zifencei' if config['ISA_ZIFENCEI'] else ''
+    march += '_zfinx' if config.get('ISA_ZFINX', 0) else ''
     return march, 'ilp32e' if config['ISA_E'] else 'ilp32'
 
 

@@ -289,6 +289,8 @@ def main(argv=None, shared_build=None):
         metadata.setdefault('context', {})['reference'] = 'spike:' + reference_info['executable_sha256']
         metadata['context']['reference_profile'] = reference_info['profile']
         for path in (ROOT / 'verif/sim/common/spike.py', ROOT / 'verif/reference/spike.lock.json',
+                     ROOT / 'verif/sim/common/spike_zfinx.py',
+                     ROOT / 'verif/sim/common/fpu_model.py',
                      ROOT / 'verif/sim/common/interrupts.py', ROOT / 'verif/sim/common/timing.py', ROOT / 'verif/sim/common/spike_irq.py',
                      ROOT / 'verif/sim/common/csregfile_model.py', ROOT / 'verif/sim/common/rvfi_csrs.py',
                      ROOT / 'verif/sim/core/core_env.py', ROOT / 'verif/sim/core_elf/test_uqu_elf.py',

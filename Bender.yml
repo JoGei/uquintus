@@ -25,6 +25,7 @@ sources:
           - verif/common/uqu_rvfi_csrs.sv
           - verif/sim/core/uqu_rvfi_trace.sv
           - verif/sim/core/uqu_xif_trace.sv
+          - verif/sim/core/uqu_fp_trace.sv
           - verif/sim/core/uqu_core_tb.sv
       - target: any(pipeline_ctrl, pipeline_ctrl_test, rtl, core_test)
         files:
