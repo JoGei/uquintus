@@ -2,6 +2,7 @@
 """GNU Make helper for component simulation and lint; select a config/sim manifest."""
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import importlib.metadata
 import json
@@ -172,6 +173,9 @@ def main(argv=None, shared_build=None):
     parser.add_argument("--max-cycles", type=int, default=100000, help="ELF execution watchdog")
     parser.add_argument('--reference', choices=('none', 'spike'), default='none')
     parser.add_argument('--spike', default='', help='external Spike executable; otherwise SPIKE, RISCV/bin, PATH')
+    parser.add_argument('--imem-latency', type=int, help='fixed grant-to-response cycles; requires dmem latency')
+    parser.add_argument('--dmem-latency', type=int, help='fixed grant-to-response cycles; requires imem latency')
+    parser.add_argument('--benchmark', action='store_true', help='measure the ELF-bound benchmark window')
     args = parser.parse_args(argv)
     component = load_component(args.component)
     if args.test != "all" and args.test not in component["tests"]:
@@ -203,13 +207,38 @@ def main(argv=None, shared_build=None):
         declared_interrupts = interrupt_plan(image,parameters)
     elif args.elf:
         raise ValueError('ELF is only supported for tests of a requires_elf component')
+    memory = None
+    if args.imem_latency is not None or args.dmem_latency is not None:
+        if elf_path is None or any(type(v) is not int or not 1 <= v <= 1000000
+                                   for v in (args.imem_latency, args.dmem_latency)):
+            raise ValueError('fixed memory timing requires an ELF and both positive latencies')
+        memory = dict(imem_latency=args.imem_latency, dmem_latency=args.dmem_latency)
+    benchmark = None
+    if args.benchmark:
+        if elf_path is None or memory is None or args.component != 'core_elf':
+            raise ValueError('benchmark measurement requires core_elf with fixed memory timing')
+        from benchmark_measure import marker_addresses, software_compatible
+        marker_addresses(image)
+        software = json.loads((elf_path.parent / 'build.json').read_text())
+        if (software.get('status') != 'passed' or software.get('elf_sha256') != hashlib.sha256(elf_path.read_bytes()).hexdigest()
+                or not software_compatible(software.get('parameters', {}), config)
+                or not isinstance(software.get('benchmark'), dict)):
+            raise ValueError('benchmark needs successful matching ELF build metadata')
+        benchmark = software['benchmark']
+        if benchmark.get('memory') != memory:
+            raise ValueError('benchmark memory profile differs from build metadata')
+        for name, expected in software['source_sha256'].items():
+            source = ROOT / name
+            if not source.is_file() or hashlib.sha256(source.read_bytes()).hexdigest() != expected:
+                raise ValueError(f'benchmark build input changed: {name}; rebuild')
     reference_info = None
     if args.reference == 'spike':
         if elf_path is None:
             raise ValueError('Spike comparison requires ELF execution')
         from spike import discover_spike, identify_spike
         reference_info = identify_spike(discover_spike(args.spike))
-    run_dir = ROOT / "build" / f"uquintus-{config_path.stem}" / args.sim / args.component / (
+    component_path = Path('benchmark') / benchmark['name'] if benchmark else Path(args.component)
+    run_dir = ROOT / "build" / f"uquintus-{config_path.stem}" / args.sim / component_path / (
         f"{args.action}-{args.test}-seed{args.seed}-{uuid.uuid4().hex[:12]}")
     run_dir.mkdir(parents=True)
     write_header(catalog, run_dir / "include")
@@ -244,6 +273,7 @@ def main(argv=None, shared_build=None):
         "header_sha256": {str(path.relative_to(ROOT)) if path.is_relative_to(ROOT) else str(path):
                           hashlib.sha256(path.read_bytes()).hexdigest() for path in headers},
         "status": "running",
+        'started_at': datetime.now(timezone.utc).isoformat(),
     }
     if bender_dependencies_enabled(component, parameters):
         lock = ROOT / 'Bender.lock'
@@ -255,6 +285,9 @@ def main(argv=None, shared_build=None):
             raise ValueError('--label requires ELF execution')
         metadata['selection'] = args.label
     extra_env = {"UQU_COMPONENT_PARAMS": json.dumps(parameters)}
+    # Explicitly clear these for ordinary tests, including suites which reuse
+    # one simulator process configuration after a benchmark invocation.
+    extra_env.update(UQU_MEMORY_TIMING=json.dumps(memory), UQU_BENCHMARK=json.dumps(benchmark))
     if elf_path is not None:
         program = run_dir / 'program.elf'
         shutil.copyfile(elf_path, program)
@@ -283,6 +316,18 @@ def main(argv=None, shared_build=None):
                     if software.get('upstream'):
                         metadata['context']['suite_revision'] = software['upstream']['revision']
         extra_env.update(UQU_ELF=str(program), UQU_MAX_CYCLES=str(args.max_cycles))
+    if memory:
+        metadata.setdefault('context', {})['memory'] = dict(memory,
+            grants='immediate', fence_ack='immediate', ports='independent', response_errors='none')
+    if benchmark:
+        metadata['benchmark'] = benchmark
+        metadata.setdefault('context', {}).update(benchmark=benchmark,
+            execution_mode='checked', validation_scope='instruction_oracle_rvfi_counters_and_crc',
+            measurement='retirement edges (start, stop]; timer call overhead included')
+        # Python monitors/agents are measurement inputs too.
+        for directory in (ROOT / 'verif/sim/common', ROOT / 'verif/sim/core', ROOT / 'verif/sim/core_elf'):
+            for source in directory.glob('*.py'):
+                metadata['source_sha256'][str(source.relative_to(ROOT))] = hashlib.sha256(source.read_bytes()).hexdigest()
     if reference_info:
         metadata['reference'] = reference_info
         metadata['input_scope'] = 'HDL, headers, recorded software sources, native oracle and reference adapter/pin'
@@ -349,13 +394,36 @@ def main(argv=None, shared_build=None):
             if reference_info:
                 metadata['differential'] = check_reference(run_dir, config, reference_info)
             metadata['tests_passed'] = native_passed
+        if benchmark and json.loads((run_dir / 'benchmark.json').read_text()).get('status') != 'passed':
+            raise RuntimeError('benchmark has no passing measurement evidence')
         metadata["status"] = "passed"
     except BaseException as error:
         metadata["status"] = "failed"
         error.run_dir = run_dir
         raise
     finally:
+        metadata['finished_at'] = datetime.now(timezone.utc).isoformat()
         metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+        if benchmark:
+            evidence_path = run_dir / 'benchmark.json'
+            evidence = json.loads(evidence_path.read_text()) if evidence_path.is_file() else {}
+            metrics = []
+            if metadata['status'] == 'passed':
+                for name, value, unit in (
+                    ('benchmark_cycles', evidence['window']['cycles'], 'cycles'),
+                    ('benchmark_retired', evidence['window']['retired'], 'instructions'),
+                    ('benchmark_cpi', evidence['window']['cpi'], 'cycles/instruction'),
+                    ('cycles_per_iteration', evidence['result']['cycles_per_iteration'], 'cycles/iteration'),
+                    ('elf_load_bytes', sum(s.size for s in image.segments), 'bytes'),
+                    ('executable_segment_bytes', sum(len(s.data) for s in image.segments if s.flags & 1), 'bytes')):
+                    metrics.append(dict(name=name, value=value, unit=unit))
+            report = dict(metadata, schema_version=1, kind='benchmark', configuration_scope='core',
+                          configuration=dict(name=config_path.stem, parameters=config),
+                          selection=args.label or benchmark['name'] + '-' + benchmark['profile'],
+                          workload=metadata['elf']['sha256'], metrics=metrics,
+                          results_file='results.xml',
+                          artifacts=['benchmark.json', 'benchmark.log', 'run.json'])
+            (run_dir / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
     print(f"PASS: {args.action} {config_path.stem} {args.test} seed={args.seed}")
     return run_dir
 

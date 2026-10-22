@@ -277,7 +277,7 @@ Run `make report` to collect existing results into
 category pages, searchable run history, logs/results, a configuration matrix and
 parameter comparison, plus Markdown/JSON summaries. See the
 [reporting guide](scripts/README.md) for outcome/provenance semantics and the
-common record for future synthesis, formal and benchmark flows. The generated
+common record used by synthesis and benchmark flows and reserved for formal results. The generated
 directory can later be published as a static site; deployment is not configured.
 
 The [riscv-tests integration](verif/sw/riscv_tests/README.md) uses a commit- and
@@ -293,6 +293,27 @@ make report
 Compiler discovery uses `RISCV_CC`, `$RISCV/bin` or `PATH`; GCC/Clang identity,
 version and effective target are recorded in reports. Use `RISCV_TESTS` for a
 partial selection and `CONFIG=rv32im`/`rv32ic` for implemented M/C cases.
+
+The [benchmark ports](verif/sw/benchmark/README.md) initially provide CoreMark
+with both standard seed profiles, pinned source archives and no submodules:
+
+```sh
+make benchmark-fetch
+make benchmark CONFIG=rv32i
+make report
+```
+
+Ports and software/memory settings live in `verif/sw/benchmark/<suite>/`.
+The default one-iteration runs validate CRCs and report workload cycles,
+instructions, CPI and footprint using deterministic memory timing. They are
+cycle-only RTL measurements; official CoreMark scores are not claimed. See the
+[CoreMark guide](verif/sw/benchmark/coremark/README.md) for compiler requirements,
+measurement boundaries and artifacts.
+
+Benchmarks default to `BENCHMARK_MODE=fast`, a native Verilator C++ driver
+without cocotb/pyuvm, VPI or instruction tracing during execution. Use
+`BENCHMARK_MODE=checked` for the full instruction/RVFI/counter verification path.
+Both modes validate the workload CRCs and preserve the same memory/timer contract.
 
 Compressed decoding uses `MUA_C_IMPL: decompress | decode_compressed` and, for
 decompression, `MUA_C_DECOMPRESS_STAGE: if | de`. The three `rv32ic*` profiles

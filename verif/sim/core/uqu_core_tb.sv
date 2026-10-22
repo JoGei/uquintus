@@ -122,6 +122,20 @@ module uqu_core_tb #(
     `undef UQU_RVFI_CSR
 );
 
+    // Passive simulation bridge: sample all masks with one VPI read, then
+    // transfer values only when a CSR channel is active. The individual RVFI
+    // ports and the trace sink remain the authoritative observations.
+    wire [`UQU_RVFI_CSR_COUNT-1:0] rvfi_csr_active;
+    `define UQU_RVFI_CSR(NAME, WIDTH, INDEX, LO, HI, ULO, UHI) \
+        assign rvfi_csr_active[INDEX] = (|rvfi_csr_``NAME``_rmask) || (|rvfi_csr_``NAME``_wmask); \
+        wire [255:0] rvfi_csr_snapshot_``NAME = { \
+            {(64-WIDTH){1'b0}}, rvfi_csr_``NAME``_wdata, \
+            {(64-WIDTH){1'b0}}, rvfi_csr_``NAME``_rdata, \
+            {(64-WIDTH){1'b0}}, rvfi_csr_``NAME``_wmask, \
+            {(64-WIDTH){1'b0}}, rvfi_csr_``NAME``_rmask };
+    `include "uqu_rvfi_csr_list.vh"
+    `undef UQU_RVFI_CSR
+
     wire raw_rvfi_valid;
     wire [63:0] raw_rvfi_order;
     wire [31:0] raw_rvfi_insn;

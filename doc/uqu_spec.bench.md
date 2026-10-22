@@ -1,7 +1,8 @@
 # uquintus Benchmarking and PPA Measurement
 
-**Status:** Minimum-period definition agreed; benchmark workloads and suite
-integration remain open.
+**Status:** Minimum-period definition agreed; CoreMark cycle-only RTL integration
+implemented with native fast and fully checked modes. Wider workload coverage
+remains open.
 
 [Specification index](uqu_spec.md) · [Build](uqu_spec.build.md) · [Interfaces](uqu_spec.interfaces.md)
 
@@ -130,8 +131,76 @@ an explicit startup/inactivity protocol and verification before corresponding
 timing exceptions can be used. Such a reset-sequencer feature is not selected
 by this measurement definition.
 
-## 3. Measurement decision record
+## 3. RTL workload measurements
+
+Benchmark ports, source pins, software configurations and build instructions
+shall live under `verif/sw/benchmark/<suite>/`. Hardware configurations remain
+under top-level `config/`. Shared build/run helpers live in `verif/sim/common/`.
+Upstream sources shall use explicit revision/checksum-pinned archive fetching
+under `build/deps/`, without submodules or implicit network activity in builds.
+
+The initial [CoreMark port](../verif/sw/benchmark/coremark/README.md) executes both
+standard 2000-byte seed profiles through the existing ELF/RVFI harness. Each
+profile requires valid CRCs, valid workload/timing output and successful
+completion. A zero software exit code alone shall not establish correctness.
+Official CoreMark scores are not claimed.
+
+`BENCHMARK_MODE=fast` shall be the benchmark default. Its compiled Verilator
+C++ driver shall execute the real RTL without Python callbacks, VPI, cocotb,
+pyuvm, instruction traces, RVFI collectors or per-edge CSR models. Keep lightweight
+completion/response, unexpected-trap, watchdog, enabled-counter and timer-window
+checks. Python may prepare the ELF memory image and validate results afterward.
+`BENCHMARK_MODE=checked` shall retain the existing instruction oracle, RVFI,
+CSR and per-edge counter checks. Both modes shall validate the final workload
+CRCs; a fast pass shall not be represented as per-instruction ISA verification.
+Seed profile selection (`performance`/`validation`) is independent of run mode.
+
+Both modes shall implement the same active memory transaction schedule, store
+visibility/response ordering and retirement-based timing boundaries. Qualify
+backend changes by comparing cycle/instruction counts and timer points on the
+same executable/configuration/memory profile. The initial RV32I CoreMark profiles
+match exactly across both modes. Keep mode and validation scope in report
+comparison context. Waveform and Spike options require checked mode.
+
+Measurements shall record deterministic, independent instruction/data memory
+response latencies, grant behavior, fence acknowledgements, compiler/version/
+flags/ISA/ABI and runtime identity, ELF/source hashes, configuration and the
+measurement boundary. Random memory wait regressions remain verification tests.
+The initial environment grants immediately, responds after a configurable
+positive integer number of cycles (one by default) and acknowledges fences
+immediately. These conditions do not imply a physical memory implementation.
+
+Time the interval between retirement of the labeled `mcycle` reads in
+`start_time()` and `stop_time()`: `(start, stop]`. Count cycles and retired
+instructions independently; confirm the cycle delta against the software CSR
+results. Include timer overhead within those boundaries consistently. Exclude
+startup, initialization and result reporting. Reject incomplete/repeated/
+reordered windows, disabled counters and intervals of 2^32 cycles or longer.
+
+Report cycles, instructions, CPI and cycles per iteration alongside executable
+segment and loaded-memory footprint. Whole-program execution counts shall be
+distinguished from workload-window metrics. Retain raw evidence and publish
+native records in the shared report's Benchmarks category, including failures.
+Short cycle-only simulation runs shall be labeled separately from official
+suite scores and shall not invent an operating frequency.
+
+For a matching hardware configuration and explicitly stated implementation/
+memory timing context, an estimated workload execution time may be derived as:
+
+```text
+estimated_execution_time [ns] = workload_cycles * T_min [ns]
+```
+
+This combines an RTL measurement with an implementation estimate, rather than
+a measured silicon result. Predictor comparisons should first hold the ISA,
+compiler, executable and memory model constant, then assess cycle savings
+alongside implementation area and `T_min`. A broader suite such as Embench and
+dynamic-predictor event metrics remain follow-ups.
+
+## 4. Measurement decision record
 
 | ID | Decision | Rationale | Status |
 | --- | --- | --- | --- |
-| D-307 | Define `T_min` as the setup-derived minimum period of one implemented netlist under an explicit timing context, with `estimated_fmax [MHz] = 1000 / T_min [ns]`. Retain path/interface scope, stage, corner, constraints and non-setup qualification separately. | Make PPA and future benchmark frequency claims reproducible without confusing a target clock, positive margin or an optimistic timing subset with a qualified operating limit. | Agreed; definition documented; dedicated benchmark integration remains open |
+| D-307 | Define `T_min` as the setup-derived minimum period of one implemented netlist under an explicit timing context, with `estimated_fmax [MHz] = 1000 / T_min [ns]`. Retain path/interface scope, stage, corner, constraints and non-setup qualification separately. | Make PPA and benchmark frequency claims reproducible without confusing a target clock, positive margin or an optimistic timing subset with a qualified operating limit. | Agreed; definition documented; initial benchmark integration implemented separately |
+| D-313 | Place benchmark ports/configurations in `verif/sw/benchmark/<suite>/`; start with pinned, unmodified CoreMark workloads, both standard seed profiles, deterministic memory timing, independently checked workload windows and native report artifacts. | Establish reproducible cycle measurements before implementing dynamic branch prediction, while reusing ELF/RVFI correctness checks for baseline qualification. | Implemented; broader suites and official-score qualification remain open |
+| D-314 | Default benchmarks to a native Verilator fast mode with final CRC and lightweight execution/timing checks; retain explicit cocotb/pyuvm checked mode and identify both scopes in reports. Require matching cycles/instructions on identical backend qualification inputs. | Remove per-cycle verification overhead from performance sweeps while retaining a path for architectural checking and diagnosis. | Implemented; both initial RV32I CoreMark profiles match checked baselines exactly |

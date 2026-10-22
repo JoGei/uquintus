@@ -26,6 +26,26 @@ the common runner, sharing only a compatible compiled simulator. Each execution
 retains a fresh process and artifact directory. See the
 [riscv-tests guide](../../sw/riscv_tests/README.md).
 
+`benchmark.py` builds and runs ports declared under
+[`verif/sw/benchmark/`](../../sw/benchmark/README.md). `pinned_archive.py` handles
+checksum-pinned archive caches without submodules. `benchmark_measure.py`
+validates executable timer markers, retirement-edge windows and CoreMark RAM
+diagnostics. The common runner supports paired `--imem-latency` and
+`--dmem-latency` options for deterministic ELF memory timing; `--benchmark`
+additionally requires matching build metadata and produces native benchmark
+reports. Ordinary tests retain the existing random waits. Benchmark runs keep
+the same instruction, RVFI, CSR and cycle-counter checks as other ELF tests when
+`BENCHMARK_MODE=checked` is selected. The default `BENCHMARK_MODE=fast` instead
+uses `benchmark_fast.py` and the [native C++ harness](../benchmark/README.md).
+It uses Bender's RTL sources and Verilator's native build API without importing
+cocotb/pyuvm or using VPI, and validates the final workload/window after execution.
+The core fixture also exposes a passive active-channel bitmap and 256-bit
+snapshot per CSR to reduce individual VPI reads. The checker still compares
+every asserted channel against the independent model on each edge; the
+individual RVFI ports and JSONL trace are unchanged. The model advances cycle
+and retirement counters on every edge, taking CSR snapshots only for CSR,
+trap/return or floating-point CSR events.
+
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
 standalone and shared-parent scoreboards. `decode_model.py` supplies the shared
 mask/match ISA oracle to decoder and DE tests; `de_model.py` adds DE runtime,

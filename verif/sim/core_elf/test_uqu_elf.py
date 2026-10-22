@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.core_env import CoreTest, MASK
 from elf_image import completion_code, expected_traps, load_elf, validate_trap_sequence
 from interrupts import interrupt_plan, InterruptStimulus
+from benchmark_measure import BenchmarkWindow, coremark_result, read_log
 
 
 class ELFTest(CoreTest):
@@ -32,6 +33,9 @@ class ELFTest(CoreTest):
         self.exit_code = None
         self.last_retired = None
         self.max_cycles = int(os.environ['UQU_MAX_CYCLES'])
+        self.benchmark = json.loads(os.environ.get('UQU_BENCHMARK', 'null'))
+        self.window = BenchmarkWindow(self.image) if self.benchmark else None
+        self.benchmark_evidence = dict(schema_version=1, status='running', mode='checked')
 
     async def cycle(self, **kwargs):
         if kwargs.get('rst',1) and not self.interrupts.lines and self.interrupts.index < len(self.interrupts.plan):
@@ -59,6 +63,9 @@ class ELFTest(CoreTest):
         # Keep all existing independent instruction/CSR and RVFI checks active.
         before = self.word(self.model_memory, self.tohost, 8)
         super().retire(pc, original, write, rd_actual, data_actual)
+        if self.window:
+            self.window.retire(pc, self.cycles, len(self.retired), data_actual,
+                               self.csr_observer.model.words[0x320] & 5)
         self.last_retired = pc
         value = self.word(self.model_memory, self.tohost, 8)
         if value != before:
@@ -89,6 +96,15 @@ class ELFTest(CoreTest):
             # complete sparse images catches any flushed/faulting store effect,
             # including one that never produces an RVFI retirement record.
             assert self.memory == self.model_memory, 'unretired store modified shared RAM'
+            if self.window:
+                window = self.window.finish()
+                log = read_log(self.image, self.model_memory)
+                Path('benchmark.log').write_text(log)
+                assert self.benchmark['validator'] == 'coremark', 'unsupported benchmark validator'
+                result = coremark_result(log, self.benchmark['profile'],
+                                        self.benchmark['iterations'], window['cycles'])
+                self.benchmark_evidence.update(window=window, result=result,
+                                               memory=self.memory_timing)
             status = 'passed'
         except BaseException as error:
             detail = str(error)
@@ -110,6 +126,16 @@ class ELFTest(CoreTest):
             Path('interrupts.json').write_text(json.dumps(self.interrupts.evidence(),indent=2)+'\n')
             self.timing['status'] = status
             Path('timing.json').write_text(json.dumps(self.timing,indent=2)+'\n')
+            if self.window:
+                self.benchmark_evidence.update(status=status, detail=detail)
+                # Preserve partial windows and RAM output on watchdog/check failures.
+                self.benchmark_evidence.update(start=self.window.start, stop=self.window.stop)
+                Path('benchmark.json').write_text(json.dumps(self.benchmark_evidence, indent=2)+'\n')
+                if not Path('benchmark.log').exists():
+                    try:
+                        Path('benchmark.log').write_text(read_log(self.image, self.model_memory))
+                    except ValueError:
+                        pass
             self.drop_objection()
 
 

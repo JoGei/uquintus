@@ -40,11 +40,16 @@ class CSRObservation:
         except KeyError: return 0  # Unavailable feature; masks must remain zero.
 
     def step(self, inputs, event):
-        before = {name:self.value(name,row,inputs) for name,row in CSR_CATALOG.items()}
+        # Ordinary instructions cannot assert CSR channel masks. Still advance
+        # the independent model on every clock, including cycle/retire counts;
+        # only snapshot the CSR catalog for events that can actually observe it.
+        observe = inputs['rst_n'] and event and any(inputs.get(name, 0) for name in
+            ('csr_valid', 'trap', 'mret', 'fp_flags_valid', 'fp_rm_read'))
+        before = {name:self.value(name,row,inputs) for name,row in CSR_CATALOG.items()} if observe else {}
         query,_ = self.model.query(inputs)
         self.read_result = query['rdata']
         self.model.step(inputs)
-        if not inputs['rst_n'] or not event:
+        if not observe:
             return {}
         result = {}
         for name,row in CSR_CATALOG.items():

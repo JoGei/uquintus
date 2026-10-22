@@ -24,8 +24,12 @@ DIE_AREA ?= 0 0 1240 1240
 CORE_AREA ?= 20 20 1220 1220
 PLACE_DENSITY ?= 0.65
 JOBS ?= 4
+BENCHMARK ?= coremark
+BENCHMARK_PROFILE ?= all
+BENCHMARK_ARCHIVE ?=
+BENCHMARK_MODE ?= fast
 
-.PHONY: help test sim lint synth impl sw riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests report test-report test-runner clean
+.PHONY: help test sim lint synth impl sw benchmark-fetch benchmark-build benchmark-run benchmark riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests report test-report test-runner clean
 
 help:
 	@echo 'make test [CONFIG=rv32i] [COMPONENT=gpregfile] [SIM=verilator]'
@@ -43,6 +47,10 @@ help:
 	@echo 'make test COMPONENT=core_elf ELF=<path> [CONFIG=rv32i] [MAX_CYCLES=100000]'
 	@echo 'make riscv-tests-fetch [RISCV_TESTS_ARCHIVE=<offline-tar.gz>]'
 	@echo 'make riscv-tests [CONFIG=rv32i] [RISCV_TESTS=all|rv32ui-p-add,...]'
+	@echo 'make benchmark-fetch [BENCHMARK=coremark] [BENCHMARK_ARCHIVE=<offline-tar.gz>]'
+	@echo 'make benchmark [CONFIG=rv32i] [BENCHMARK=coremark] [BENCHMARK_PROFILE=all|performance|validation]'
+	@echo '               [BENCHMARK_MODE=fast|checked] [JOBS=4]; fast uses a native Verilator driver.'
+	@echo 'Benchmark settings/ports: verif/sw/benchmark/<name>/; compiler and simulator supplied externally.'
 	@echo 'Add REFERENCE=spike to ELF tests or riscv-tests for differential checking.'
 	@echo 'make sw SW=traps  # Declared exceptions, MRET and optional M/U transitions'
 	@echo 'make sw SW=interrupts  # ELF-bound IRQ masking, priority and drain scenarios'
@@ -66,6 +74,20 @@ test sim lint:
 
 sw:
 	$(PYTHON) verif/sim/common/software_build.py --config "$(CONFIG)" --program "$(SW)" --cc "$(RISCV_CC)"
+
+benchmark-fetch:
+	$(PYTHON) verif/sim/common/benchmark.py fetch --benchmark "$(BENCHMARK)" $(if $(BENCHMARK_ARCHIVE),--archive "$(BENCHMARK_ARCHIVE)")
+
+benchmark-build:
+	$(PYTHON) verif/sim/common/benchmark.py build --benchmark "$(BENCHMARK)" --config "$(CONFIG)" \
+		--profile "$(BENCHMARK_PROFILE)" --cc "$(RISCV_CC)"
+
+benchmark: benchmark-build
+benchmark benchmark-run:
+	$(PYTHON) verif/sim/common/benchmark.py run --benchmark "$(BENCHMARK)" --config "$(CONFIG)" \
+		--profile "$(BENCHMARK_PROFILE)" --sim "$(SIM)" --bender "$(BENDER)" --seed "$(SEED)" \
+		--waves "$(WAVES)" --reference "$(REFERENCE)" --spike "$(SPIKE)" $(if $(ELF),--elf "$(ELF)") \
+		--mode "$(BENCHMARK_MODE)" --jobs "$(JOBS)"
 
 synth impl:
 ifeq ($(ASIC_FLOW),orfs)

@@ -89,9 +89,25 @@ workflow is installed or executed by `make report`.
 - The negative ELF fixtures remain failed software tests in this report. An
   expected-failure regression needs a producer that checks the expected failure
   and reports that check's outcome; the reporter does not infer expectations.
-- Case timings are simulation/test wall times. ELF execution cycles and retired
-  counts are diagnostics, not benchmark scores. Synthesis, formal and benchmark
-  pages remain empty until those flows supply results.
+- Case timings are simulation/test wall times. Incidental ELF execution cycles
+  and retired counts are diagnostics, not benchmark scores. Explicit benchmark
+  records have separately validated workload windows. Synthesis/placement and
+  CoreMark benchmark producers are implemented; formal pages remain empty until
+  a formal flow supplies results.
+
+The benchmark producer defaults to a compiled Verilator driver with final CRC
+and lightweight completion/trap/watchdog/window checks. Explicit
+`BENCHMARK_MODE=checked` uses the common cocotb/pyuvm ELF runner with `--benchmark`.
+Both modes use fixed memory timing. Their native records retain the compiler/flags/runtime, upstream
+pin, workload and memory conditions in the comparison context. A passed record
+requires successful JUnit and `benchmark.json` evidence agreeing with the
+reported workload cycles, retired instructions and CPI. `benchmark.log` retains
+the CRC diagnostics. `context.execution_mode` and `context.validation_scope`
+distinguish fast from checked evidence; each mode remains a separate scenario.
+Run pages explain that fast results have no per-instruction ISA/RVFI checks.
+The run page labels both as cycle-only RTL measurements,
+separately from the whole-program `execution.json` counts. See the
+[CoreMark port](../verif/sw/benchmark/coremark/README.md).
 
 Small metadata, configuration files, JUnit, logs and linker maps are bundled
 (512 KiB per file by default). Waveforms, ELF binaries and raw RVFI streams remain

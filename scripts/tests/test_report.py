@@ -103,6 +103,52 @@ class ReportTests(unittest.TestCase):
         (path / 'results.xml').write_text('<testsuites><testsuite><testcase name="wrong"/></testsuite></testsuites>')
         self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
 
+    def test_benchmark_requires_validated_window_and_junit_and_keeps_memory_context(self):
+        path = self.run_record(component='core_elf')
+        raw = json.loads((path / 'run.json').read_text())
+        raw.update(schema_version=1, kind='benchmark', configuration_scope='core',
+            target='verilator',
+            configuration=dict(name='rv32i', parameters=self.parameters),
+            selection='coremark-performance',
+            context=dict(memory=dict(imem_latency=1, dmem_latency=1)),
+            metrics=[dict(name='benchmark_cycles', value=120, unit='cycles'),
+                     dict(name='benchmark_retired', value=40, unit='instructions'),
+                     dict(name='benchmark_cpi', value=3, unit='cycles/instruction'),
+                     dict(name='cycles_per_iteration', value=120, unit='cycles/iteration')])
+        (path / 'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        evidence = dict(status='passed', window=dict(cycles=120, retired=40),
+                        result=dict(validation='passed', official_score=False, cycles_per_iteration=120))
+        (path / 'benchmark.json').write_text(json.dumps(evidence))
+        (path / 'benchmark.log').write_text('validated CRCs; duration warning')
+        raw['context']['execution_mode'] = 'fast'
+        (path / 'report.json').write_text(json.dumps(raw))
+        record = report.collect(self.build, self.root)['records'][0]
+        self.assertEqual(record['status'], 'passed')
+        self.assertEqual(record['configuration_scope'], 'core')
+        self.assertEqual(record['context']['memory']['imem_latency'], 1)
+        self.assertTrue({'benchmark.json', 'benchmark.log'} <= {p['path'] for p in record['artifacts']})
+        self.assertTrue(any('no per-instruction ISA/RVFI checking' in note for note in record['notes']))
+        checked = path.parent / 'checked'
+        checked.mkdir()
+        other = dict(raw, context=dict(raw['context'], execution_mode='checked'))
+        for name in ('benchmark.json', 'results.xml'):
+            (checked / name).write_bytes((path / name).read_bytes())
+        (checked / 'report.json').write_text(json.dumps(other))
+        self.assertEqual(sum(r['latest'] for r in report.collect(self.build, self.root)['records']), 2)
+        shutil.rmtree(checked)
+        evidence['result']['validation'] = 'failed'
+        (path / 'benchmark.json').write_text(json.dumps(evidence))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        evidence['result']['validation'] = 'passed'
+        evidence['window']['cycles'] = 121
+        (path / 'benchmark.json').write_text(json.dumps(evidence))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        evidence['window']['cycles'] = 120
+        (path / 'benchmark.json').write_text(json.dumps(evidence))
+        (path / 'results.xml').unlink()
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+
     def test_xif_activity_and_companion_trace_are_reported(self):
         path=self.run_record(component='core')
         (path/'xif-agent.json').write_text(json.dumps(dict(max_live=4,events=[

@@ -1,0 +1,27 @@
+schema_version: 1
+name: coremark
+validator: coremark
+sources:
+  - core_main.c
+  - core_list_join.c
+  - core_matrix.c
+  - core_state.c
+  - core_util.c
+port_sources:
+  - core_portme.c
+compiler_flags:
+  - -O2
+  - -g
+  - -fno-common
+defines:
+  ITERATIONS: 1
+  TOTAL_DATA_SIZE: 2000
+profiles:
+  performance:
+    PERFORMANCE_RUN: 1
+  validation:
+    VALIDATION_RUN: 1
+memory:
+  imem_latency: 1
+  dmem_latency: 1
+max_cycles: 5000000

@@ -33,3 +33,8 @@ The [pinned riscv-tests adapter](riscv_tests/README.md) adds external instructio
 regressions without submodules. Both flows use shared external-compiler discovery
 through `RISCV_CC`, `$RISCV/bin` or `PATH`, and record compiler family/version and
 effective target for reporting.
+
+[Performance benchmarks](benchmark/README.md) have a separate directory per
+suite, initially `benchmark/coremark/`. Their port, source pin and software/
+memory settings live there; `make benchmark` uses the shared ELF environment
+with deterministic memory timing and an explicit measured workload window.

@@ -44,6 +44,7 @@ FILES = ('run.json', 'build.json', 'report.json', 'results.xml', 'execution.json
          'simulation.log', 'build.log', 'program.map', 'software-build.json',
          'spike.json', 'spike.log', 'spike-process.log', 'spike-debug.cmd',
          'interrupts.json', 'timing.json', 'spike-inputs.txt', 'spike-irq-build.json', 'spike-irq-build.log',
+         'benchmark.json', 'benchmark.log',
          'xif.jsonl', 'xif-agent.json', 'fpu.jsonl', 'zfinx-coverage.json')
 
 
@@ -218,7 +219,7 @@ def normalize(path, build, root, hashes):
         'time_basis': time_basis, 'source': rel, 'context': context,
         'metrics': list(metrics), 'timing_paths':timing_paths, 'cases': [], 'notes': [], 'artifacts': [],
         'revision': raw.get('revision'),
-        'tools': {k: raw[k] for k in ('simulator', 'bender', 'compiler', 'compiler_info', 'upstream', 'packages', 'reference') if k in raw},
+        'tools': {k: raw[k] for k in ('simulator', 'bender', 'compiler', 'compiler_info', 'host_compiler', 'upstream', 'packages', 'reference') if k in raw},
         'workload': raw.get('workload', raw.get('elf', {}).get('sha256')),
     }
     if native and raw.get('detail'):
@@ -240,7 +241,7 @@ def normalize(path, build, root, hashes):
     record['inputs'] = inputs_status(inputs, root, hashes)
     record['inputs']['scope'] = raw.get('input_scope', 'declared inputs' if native else
         'software sources' if kind == 'software' else 'HDL and available headers only')
-    if kind in ('regression', 'test'):
+    if kind in ('regression', 'test', 'benchmark'):
         results = (path.parent / raw.get('results_file', 'results.xml')).resolve()
         if not results.is_relative_to(path.parent.resolve()):
             raise ValueError('results_file escapes the run directory')
@@ -260,7 +261,7 @@ def normalize(path, build, root, hashes):
                     (expected is not None and sorted(names) != sorted(expected))):
                 record['status'] = 'error'
                 record['notes'].append('Passed metadata conflicts with JUnit selection/results.')
-        elif state == 'passed' and (not native or 'results_file' in raw):
+        elif state == 'passed' and (not native or 'results_file' in raw or kind == 'benchmark'):
             record['status'] = 'error'
             record['notes'].append('Passed test metadata has no results.xml evidence.')
     execution = path.parent / 'execution.json'
@@ -275,6 +276,27 @@ def normalize(path, build, root, hashes):
         if state == 'passed' and detail.get('status') != 'passed':
             record['status'] = 'error'
             record['notes'].append('Passed metadata conflicts with execution status.')
+    if kind == 'benchmark':
+        evidence_path = path.parent / 'benchmark.json'
+        evidence = read_json(evidence_path) if evidence_path.is_file() else {}
+        window, result = evidence.get('window', {}), evidence.get('result', {})
+        measured = {m['name']: m['value'] for m in metrics}
+        consistent = (evidence.get('status') == 'passed' and
+            result.get('validation') == 'passed' and result.get('official_score') is False and
+            type(window.get('cycles')) is int and window['cycles'] > 0 and
+            type(window.get('retired')) is int and window['retired'] > 0 and
+            measured.get('benchmark_cycles') == window['cycles'] and
+            measured.get('benchmark_retired') == window['retired'] and
+            measured.get('benchmark_cpi') == window['cycles'] / window['retired'] and
+            measured.get('cycles_per_iteration') == result.get('cycles_per_iteration'))
+        if state == 'passed' and not consistent:
+            record['status'] = 'error'
+            record['notes'].append('Passed benchmark conflicts with workload validation or measurement evidence.')
+        record['notes'].append('Cycle-only RTL benchmark; no official benchmark score or silicon execution time is claimed.')
+        if context.get('execution_mode') == 'fast':
+            record['notes'].append('Fast native execution: workload CRC, completion, trap/watchdog and timer-window checks; no per-instruction ISA/RVFI checking.')
+        elif context.get('execution_mode') == 'checked':
+            record['notes'].append('Checked execution: instruction oracle, RVFI, per-edge counters and workload CRC checks.')
     offload = path.parent / 'xif-agent.json'
     if offload.is_file():
         evidence = read_json(offload)

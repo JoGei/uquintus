@@ -62,6 +62,7 @@ class CoreTest(uvm_test):
     def build_phase(self):
         self.dut = cocotb.top
         self.core = self.dut.u_core
+        self.signal_handles = {}
         self.params = json.loads(os.environ['UQU_COMPONENT_PARAMS'])
         self.hart_id = self.params['HART_ID']
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
@@ -86,6 +87,9 @@ class CoreTest(uvm_test):
                      0x341: 0, 0x342: 0, 0x343: 0, 0xf14: self.hart_id, 1: 0, 2: 0, 3: 0}
         self.cycles = 0
         self.random_wait = True
+        self.memory_timing = json.loads(os.environ.get('UQU_MEMORY_TIMING', 'null'))
+        if self.memory_timing is not None:
+            self.random_wait = False
         self.rvfi_order = 0
         self.rvfi_entry = False
         self.rvfi_records = []
@@ -264,8 +268,11 @@ class CoreTest(uvm_test):
         self.retired.append(pc)
 
     def signal(self, name):
-        owner = self.dut if hasattr(self.dut, name) else self.core
-        return int(getattr(owner, name).value)
+        handle = self.signal_handles.get(name)
+        if handle is None:
+            owner = self.dut if hasattr(self.dut, name) else self.core
+            handle = self.signal_handles[name] = getattr(owner, name)
+        return int(handle.value)
 
     def check_rvfi(self, o, rst):
         names = ('valid','order','insn','trap','halt','intr','mode','ixl',
@@ -368,7 +375,7 @@ class CoreTest(uvm_test):
         d.irq_software_i.value = bool(irq & 8)
         d.irq_timer_i.value = bool(irq & 128)
         d.irq_external_i.value = bool(irq & 2048)
-        ack = int(self.rng.randrange(4) == 0) if fence_ack is None else fence_ack
+        ack = (1 if self.memory_timing is not None else int(self.rng.randrange(4) == 0)) if fence_ack is None else fence_ack
         d.fence_ack_i.value = d.fencei_ack_i.value = ack
         for bus in self.pending:
             getattr(d, bus+'_gnt_i').value = 0
@@ -467,7 +474,8 @@ class CoreTest(uvm_test):
                             for n in range(4):
                                 if be & (1 << n):
                                     memory[addr+n] = value >> (8*n) & 255
-                    delay = self.rng.randrange(8) if self.random_wait else 0
+                    delay = (self.memory_timing[bus+'_latency'] - 1 if self.memory_timing is not None else
+                             self.rng.randrange(8) if self.random_wait else 0)
                     self.pending[bus] = delay, data, int(error)
             for name in ('fence','fencei'):
                 if self.signal(name+'_req_o') and ack:
@@ -492,9 +500,13 @@ class CoreTest(uvm_test):
             self.timing.update(reset_cycle=self.cycles, checked_cycles=0, events=[])
         rvfi = self.check_rvfi(o, rst)
         observed_csrs={}
-        for name in CSR_CATALOG:
-            values={field:self.signal('rvfi_csr_'+name+'_'+field) for field in ('rmask','wmask','rdata','wdata')}
-            if values['rmask'] or values['wmask']: observed_csrs[name]=values
+        active = self.signal('rvfi_csr_active')
+        if active:
+            for name, row in CSR_CATALOG.items():
+                if active & (1 << row['index']):
+                    slot = self.signal('rvfi_csr_snapshot_'+name)
+                    observed_csrs[name] = {field: (slot >> (64*n)) & ((1 << 64)-1)
+                        for n, field in enumerate(('rmask','wmask','rdata','wdata'))}
         assert observed_csrs==expected_csrs, ('CSR observation',o,observed_csrs,expected_csrs)
         if rst:
             if o['wb_retire']:

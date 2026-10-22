@@ -74,6 +74,14 @@ the simulation watchdog; it shall not introduce a processor timeout. The
 the loader/completion contract specified in
 [verification, Section 2.6](uqu_spec.verif.md#26-elf-software-execution).
 
+`make benchmark CONFIG=<hw>` builds and executes ports/configurations under
+`verif/sw/benchmark/<suite>/`. `BENCHMARK_MODE=fast` defaults to a compiled
+Verilator C++ driver; `BENCHMARK_MODE=checked` uses the cocotb/pyuvm ELF harness.
+These are execution/validation settings, not hardware parameters or simulator
+selectors. Both modes use the same memory/timing contract and final CRC checks;
+their distinct scopes remain explicit in report metadata. See the
+[benchmark specification](uqu_spec.bench.md#3-rtl-workload-measurements).
+
 ### 1.2. Pinned instruction suites and external compiler identity
 
 The initial `riscv-tests` adapter shall consume the commit and archive SHA-256
@@ -662,9 +670,9 @@ normalized records. Relative links and bundled supporting files shall allow the
 whole directory to work locally and later on GitHub Pages without a runtime
 service or frontend package dependencies. Publishing is a separate future step.
 
-The initial reporter shall collect native component/core regressions, lint and
-software build records. Synthesis/PPA, formal verification and benchmark pages
-shall show absent evidence explicitly until corresponding producers exist.
+The reporter collects component/core regressions, lint, software builds,
+synthesis/placement results and cycle-only RTL benchmarks. Formal verification
+pages shall show absent evidence explicitly until corresponding producers exist.
 Future producers shall integrate through a versioned per-run `report.json`
 record with outcome, full hardware configuration, target/component/scenario,
 timestamps, provenance, metrics with units, comparison context and artifact
@@ -875,7 +883,7 @@ later decisions determine the active contract.
 | D-137 | Use readable YAML labels for enumerated hardware selectors and translate validated labels into integer RTL parameter values; initially use predictor labels `none`/`static_not_taken` and register-file labels `ff`/`latch`. | Keep hardware configurations readable while providing consistent numeric tool inputs across build flows. | Implemented canonical encodings in config/selectors.json and shared configuration translator; Section 2 |
 | D-138 | Generate guarded Verilog-2005 `.vh` macro headers for shared selector encodings from one canonical definition also used by YAML configuration translation. | Keep synthesis-compatible RTL constants and build-tool mappings consistent without SystemVerilog packages in the synthesizable design. | Implemented canonical JSON catalog and guarded-header generator in verif/sim/common/hw_config.py; Section 2 |
 | D-258 | Place common processor RTL directly in `src/uquintus/`, with `src/wrap/` for protocol-specific top levels and `src/adapt/` for reusable protocol adapters as sibling directories. | Keep common core files together without an extra directory level. | Agreed; replaces D-131 |
-| D-295 | Generate a shared static report under build/report with an HTML landing page, category/run pages, configuration comparison, Markdown summary and versioned JSON data; collect existing flow artifacts and accept a common per-run record for future flows. | Visualize evidence across configurations without losing failures, provenance or comparison conditions, and produce a portable artifact suitable for later website publication. | Initial aggregation implemented; Section 6.1; synthesis producer implemented under D-306; formal/benchmark producers, CI retention and deployment remain follow-ups |
+| D-295 | Generate a shared static report under build/report with an HTML landing page, category/run pages, configuration comparison, Markdown summary and versioned JSON data; collect existing flow artifacts and accept a common per-run record for future flows. | Visualize evidence across configurations without losing failures, provenance or comparison conditions, and produce a portable artifact suitable for later website publication. | Initial aggregation implemented; Section 6.1; synthesis producer implemented under D-306; benchmark producer under D-313; formal producer, CI retention and deployment remain follow-ups |
 | D-303 | Fetch commit-pinned CVFPU/FPnew through Bender with exact transitive revisions in Bender.lock, disable upstream Git submodule checkout in project configuration, and opt imported HDL into component builds through a manifest flag. | Reuse upstream source/dependency metadata without adding repository submodules or compiling unused IP into native tests. | Implemented dependency/configuration preparation; Section 1.3; real execution adapter under architecture D-304; physical qualification remains open |
 | D-306 | Implement external ORFS mapped synthesis for core/FPU targets using shared hardware YAML and Bender, Slang for imported SV, latch/mapping checks, preplacement STA and provenance-rich report records. | Qualify open-source ASIC frontend/mapping compatibility and expose measured cell area/timing without conflating mapped synthesis with physical closure. | Implemented; Section 4 and impl/asic/README.md; six default core/FPU runs on SKY130 HD and IHP SG13G2; full physical flow and broader parameter matrices open |
 | D-309 | Organize ASIC integrations under impl/asic/<flow>/ with flow-owned scripts, platform adapters and investigations; keep targets.yml shared at the ASIC root and select the backend through ASIC_FLOW, defaulting to orfs. | Allow future ASIC flows without treating ORFS-specific files as technology-independent collateral. | Implemented; Sections 2, 4 and 7; unsupported flow selections fail explicitly |

@@ -28,6 +28,11 @@ recorded; a supported/pinned distribution of those external tools remains an
 environment follow-up. GCC is needed for RV32E if the provided Clang lacks the
 ILP32E backend.
 
+The [benchmark flow](../../sw/benchmark/README.md) reuses this environment with
+fixed memory timing and ELF-bound measurement windows. Its software ports and
+settings live under `verif/sw/benchmark/`; ordinary `make test` ELF runs retain
+random wait-state stimulus.
+
 Use the same config when executing. The simulator target accepts external ELFs
 with the contract below; building a program is a separate step. For example,
 build with `CONFIG=rv32ic` and run that ELF with any of the three matching
