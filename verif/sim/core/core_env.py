@@ -63,6 +63,7 @@ class CoreTest(uvm_test):
         self.dut = cocotb.top
         self.core = self.dut.u_core
         self.params = json.loads(os.environ['UQU_COMPONENT_PARAMS'])
+        self.hart_id = self.params['HART_ID']
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
         self.code = {}
         self.model_code = self.code
@@ -82,7 +83,7 @@ class CoreTest(uvm_test):
         self.pc = BOOT
         self.priv = 1
         self.csrs = {0x300: 0x1800, 0x304: 0, 0x305: 0, 0x340: 0,
-                     0x341: 0, 0x342: 0, 0x343: 0, 0xf14: 5, 1: 0, 2: 0, 3: 0}
+                     0x341: 0, 0x342: 0, 0x343: 0, 0xf14: self.hart_id, 1: 0, 2: 0, 3: 0}
         self.cycles = 0
         self.random_wait = True
         self.rvfi_order = 0
@@ -412,7 +413,7 @@ class CoreTest(uvm_test):
                          self.coprocessor is not None and self.coprocessor.pre_busy)
             check_interrupt_cycle(o,priv_m=self.priv,mstatus=self.csrs[0x300],mie=self.csrs[0x304],
                 lines=irq,lsu_busy=data_busy,de_fire=self.signal('de_fire'))
-        ci = dict(INPUTS, rst_n=rst, priv_m=self.priv, hart_id=5,
+        ci = dict(INPUTS, rst_n=rst, priv_m=self.priv, hart_id=self.hart_id,
             irq_software=int(bool(irq & 8)), irq_timer=int(bool(irq & 128)),
             irq_external=int(bool(irq & 2048)), retire=o['wb_retire'],
             trap=int(bool(o['trap_valid'] or o['wb_exception_fire'])),
@@ -525,7 +526,6 @@ class CoreTest(uvm_test):
     async def reset(self, boot=BOOT):
         d = self.dut
         d.boot_addr_i.value = boot
-        d.hart_id_i.value = 5
         for n in ('xif_issue_ready','xif_issue_accept','xif_issue_writeback','xif_issue_register_read',
                   'xif_register_ready','xif_result_valid','xif_result_hartid','xif_result_id',
                   'xif_result_data','xif_result_rd','xif_result_we'):

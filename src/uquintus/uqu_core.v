@@ -5,6 +5,7 @@
 // Native core region. All four pipeline boundaries, GPRs, shared hazards/PMP,
 // privilege and architectural resume tracking live here. Memories are external.
 module uqu_core #(
+    parameter [31:0] HART_ID = 32'd0,
     parameter ISA_E = 0,
     parameter ISA_M = 0,
     parameter ISA_C = 0,
@@ -43,7 +44,6 @@ module uqu_core #(
     input wire clk_i,
     input wire rst_ni,
     input wire [31:0] boot_addr_i,
-    input wire [31:0] hart_id_i,
     input wire irq_software_i,
     input wire irq_timer_i,
     input wire irq_external_i,
@@ -304,7 +304,7 @@ module uqu_core #(
         .csr_src_o(de_csr_src), .csr_src_zero_o(de_csr_zero), .control_flow_o(de_control_flow), .branch_resolve_o(),
         .branch_taken_o(de_branch_taken), .branch_target_o(de_target), .next_pc_o(de_next_pc),
         .exception_valid_o(de_exception), .exception_cause_o(de_cause), .exception_tval_o(de_tval),
-        .xif_force_i(1'b0), .xif_id_valid_i(xif_id_valid), .xif_id_i(xif_de_id), .hart_id_i(hart_id_i),
+        .xif_force_i(1'b0), .xif_id_valid_i(xif_id_valid), .xif_id_i(xif_de_id), .hart_id_i(HART_ID),
         .xif_issued_o(xif_issued), .xif_accepted_o(xif_accepted), .xif_cleanup_valid_o(xif_cleanup_valid), .xif_cleanup_id_o(xif_cleanup_id), .xif_cleanup_ready_i(xif_cleanup_ready),
         .xif_issue_valid_o(xif_issue_valid_o), .xif_issue_ready_i(xif_issue_ready_i), .xif_issue_instr_o(xif_issue_instr_o),
         .xif_issue_hartid_o(xif_issue_hartid_o), .xif_issue_id_o(xif_issue_id_o), .xif_issue_accept_i(xif_issue_accept_i),
@@ -349,7 +349,7 @@ module uqu_core #(
         .csr_addr_i(wb_csr_addr_q), .csr_op_i(wb_csr_op_q), .csr_src_i(wb_csr_src_q), .csr_src_zero_i(wb_csr_zero_q),
         .fflags_valid_i(wb_fflags_valid_q), .fflags_i(wb_fflags_q), .exception_valid_i(wb_exception_q),
         .exception_cause_i(wb_cause_q), .exception_tval_i(wb_tval_q), .priv_m_i(wb_valid_q ? wb_priv_m_q : priv_m_q),
-        .hart_id_i(hart_id_i), .irq_software_i(irq_software_i), .irq_timer_i(irq_timer_i), .irq_external_i(irq_external_i),
+        .hart_id_i(HART_ID), .irq_software_i(irq_software_i), .irq_timer_i(irq_timer_i), .irq_external_i(irq_external_i),
         .trap_i(trap_valid), .trap_pc_i(trap_pc), .trap_interrupt_i(trap_interrupt), .trap_cause_i(trap_cause), .trap_tval_i(trap_tval),
         .xif_id_i(wb_xif_id_q), .xif_kill_valid_i(xif_kill_valid), .xif_kill_id_i(xif_kill_id), .xif_kill_ready_o(xif_kill_ready),
         .xif_commit_valid_o(xif_commit_valid_o), .xif_commit_hartid_o(xif_commit_hartid_o), .xif_commit_id_o(xif_commit_id_o), .xif_commit_kill_o(xif_commit_kill_o),

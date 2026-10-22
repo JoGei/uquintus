@@ -5,6 +5,7 @@
 
 // Verification-only wrapper; hierarchical observation is confined here.
 module uqu_core_tb #(
+    parameter [31:0] HART_ID = 32'd0,
     parameter ISA_E = 0,
     parameter ISA_M = 0,
     parameter ISA_C = 0,
@@ -43,7 +44,6 @@ module uqu_core_tb #(
     input wire clk_i,
     input wire rst_ni,
     input wire [31:0] boot_addr_i,
-    input wire [31:0] hart_id_i,
     input wire irq_software_i,
     input wire irq_timer_i,
     input wire irq_external_i,
@@ -147,6 +147,7 @@ module uqu_core_tb #(
     wire [3:0] raw_rvfi_mem_fault_rmask;
     wire [3:0] raw_rvfi_mem_fault_wmask;
     uqu_core #(
+        .HART_ID(HART_ID),
         .MUA_FPU_PIPE_REGS_FMA(MUA_FPU_PIPE_REGS_FMA),
         .MUA_FPU_PIPE_REGS_DIVSQRT(MUA_FPU_PIPE_REGS_DIVSQRT),
         .MUA_FPU_PIPE_REGS_NONCOMP(MUA_FPU_PIPE_REGS_NONCOMP),
@@ -185,7 +186,6 @@ module uqu_core_tb #(
         .clk_i(clk_i),
         .rst_ni(rst_ni),
         .boot_addr_i(boot_addr_i),
-        .hart_id_i(hart_id_i),
         .irq_software_i(irq_software_i),
         .irq_timer_i(irq_timer_i),
         .irq_external_i(irq_external_i),

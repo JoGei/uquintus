@@ -17,6 +17,24 @@ from hw_config import load_configuration, parameters_for_component
 
 
 class ComponentRunnerTests(unittest.TestCase):
+    def test_hart_id_is_explicit_and_supports_the_full_unsigned_word(self):
+        catalog=json.loads((ROOT/'config/selectors.json').read_text())
+        config=load_configuration(ROOT/'config/rv32i.yml',catalog)
+        self.assertEqual(config['HART_ID'],0)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'hart.yml'
+            for value in (0,5,0xa5a50005,0xffffffff):
+                path.write_text(yaml.safe_dump(dict(config,HART_ID=value)))
+                validated=load_configuration(path,catalog)
+                self.assertEqual(parameters_for_component(validated,['HART_ID'],catalog),{'HART_ID':value})
+            for value in (-1,True,1.5,'5',0x100000000):
+                path.write_text(yaml.safe_dump(dict(config,HART_ID=value)))
+                with self.assertRaisesRegex(ValueError,'HART_ID'):
+                    load_configuration(path,catalog)
+            path.write_text(yaml.safe_dump({k:v for k,v in config.items() if k!='HART_ID'}))
+            with self.assertRaisesRegex(ValueError,'missing=.*HART_ID'):
+                load_configuration(path,catalog)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

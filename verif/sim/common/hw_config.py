@@ -25,12 +25,14 @@ FPU_PIPE_PARAMS = {
 
 def load_configuration(path, catalog):
     config = yaml.safe_load(path.read_text())
-    expected = BOOLEAN_PARAMS | set(CHOICES) | set(catalog) | FPU_PIPE_PARAMS | {"MUA_IF_BUFFER_WORDS"}
+    expected = BOOLEAN_PARAMS | set(CHOICES) | set(catalog) | FPU_PIPE_PARAMS | {"MUA_IF_BUFFER_WORDS", "HART_ID"}
     if not isinstance(config, dict):
         raise ValueError("hardware configuration must be a YAML mapping")
     if set(config) != expected:
         raise ValueError(f"configuration keys: missing={sorted(expected-set(config))}, "
                          f"unknown={sorted(set(config)-expected)}")
+    if type(config['HART_ID']) is not int or not 0 <= config['HART_ID'] <= 0xffffffff:
+        raise ValueError('HART_ID must be an unsigned 32-bit integer')
     for name in BOOLEAN_PARAMS:
         if type(config[name]) is not int or config[name] not in (0, 1):
             raise ValueError(f"{name} must be integer 0 or 1")

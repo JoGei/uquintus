@@ -49,7 +49,7 @@ uncertainty; do not add those terms a second time.
 For example, the default IHP placed Zfinx core has `T_target = 20 ns` and
 `worst_setup_slack = +3.668873 ns`, giving `T_min = 16.331127 ns` and
 `estimated_fmax = 61.2328 MHz` under that experiment's constraints. See the
-[placement comparison](../impl/asic/investigations/ihp-placement.md).
+[placement comparison](../impl/asic/orfs/investigations/ihp-placement.md).
 
 This subtraction is not a general solution for half-cycle paths, multicycle
 exceptions, latch borrowing or multiple clock relationships. Those cases require
@@ -111,7 +111,7 @@ The build flow supports an explicit trial override, `RESET_INPUT_DELAY_NS=1`,
 which selects a 0 ns minimum and 1 ns maximum reset arrival without changing
 other input/output budgets. Omission preserves the original default. Resolved
 reset min/max values shall be retained with the result. The
-[IHP trial](../impl/asic/investigations/ihp-reset-timing.md) demonstrates the
+[IHP trial](../impl/asic/orfs/investigations/ihp-reset-timing.md) demonstrates the
 effect on unchanged placements; its improved frequency remains conditional on
 the integration meeting that reset-arrival contract.
 

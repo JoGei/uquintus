@@ -1157,27 +1157,44 @@ ignored. Reset shall also drive the request inactive. Exact per-system
 maintenance actions, reset handling of pending external maintenance, and
 integration-specific synchronization sequencing remain to be documented.
 
-## 9. Hart identification input
+## 9. Hart identification parameter
 
 **Status:** Agreed
 
-The core shall expose a 32-bit `hart_id_i` input. The read-only `mhartid` CSR
-shall return this value. Hart identity shall be an integration input rather
-than an RTL parameter, allowing identical synthesized core instances to be
-assigned different hart IDs.
+The core shall have a 32-bit elaboration parameter, `HART_ID`, defaulting to
+`32'd0`. The native `uqu_core` top level shall not expose a `hart_id_i` port.
+The read-only `mhartid` CSR shall return the configured constant without
+allocating storage. Hart identity cannot change at runtime.
 
-Integration shall provide a valid hart ID before reset release and hold it
-stable while the core operates, including while stalled or in Debug Mode.
-Changing hart identity during execution shall not be supported. The interface
-shall not require internal storage for the ID; the CSR may read the stable input
-directly.
+The core shall supply the same parameter value to the DE and WB/CSR logic.
+Outgoing CV-X-IF issue, register and commit hart-ID fields shall use it; incoming
+result hart IDs shall be checked against it. Internal component ports may carry
+this constant, but shall not reintroduce a core-level hart-ID input.
+
+For example:
+
+```verilog
+uqu_core #(.HART_ID(32'd0)) u_core (
+    .clk_i(clk_i),
+    .rst_ni(rst_ni),
+    // Other named connections; no hart_id_i connection.
+    .boot_addr_i(boot_addr_i)
+);
+```
 
 Integration shall assign IDs that are unique within the execution environment,
 with one hart assigned ID zero, as required by the
 [RISC-V machine-level specification](https://docs.riscv.org/reference/isa/priv/machine.html).
-A single-hart system shall therefore tie `hart_id_i` to zero. Protocol-specific
-processor wrappers shall expose or connect this input consistently with the
-native top level.
+A single-hart system shall therefore use `HART_ID = 0`. A multi-hart integration
+shall instantiate cores with distinct parameter values, including one zero ID.
+Protocol-specific wrappers shall propagate the parameter rather than expose an
+identity input. Separately hardened core netlists with different identities may
+require separate elaboration/synthesis.
+
+The complete hardware YAML shall explicitly set `HART_ID` as an unsigned integer
+from 0 through `4294967295`. This integration parameter is neither an ISA switch
+nor a microarchitecture selector. Simulation, synthesis, software expectations
+and Spike hart selection shall consume the same configured value.
 
 ## 10. Baseline functional interface index
 
@@ -1195,7 +1212,6 @@ Section 5. The FPU backend is integrated under architecture D-304; core debug in
 | Clock | `clk_i` | Input | 1 | [interfaces, Section 2](uqu_spec.interfaces.md#2-single-clock-domain) |
 | Reset | `rst_ni` | Input | 1 | [interfaces, Section 3](uqu_spec.interfaces.md#3-active-low-synchronous-reset) |
 | Boot entry | `boot_addr_i` | Input | 32 | [interfaces, Section 3](uqu_spec.interfaces.md#3-active-low-synchronous-reset) |
-| Hart identity | `hart_id_i` | Input | 32 | [interfaces, Section 9](uqu_spec.interfaces.md#9-hart-identification-input) |
 | Interrupt sources | `irq_software_i`, `irq_timer_i`, `irq_external_i` | Input | 1 each | [interfaces, Section 4](uqu_spec.interfaces.md#4-external-machine-interrupt-sources) |
 | Instruction request | `imem_req_o`, `imem_addr_o` | Output | 1, 32 | [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories) |
 | Instruction handshake | `imem_gnt_i`, `imem_rvalid_i` | Input | 1 each | [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories) |
@@ -1302,7 +1318,8 @@ later decisions determine the active contract.
 | D-110 | Support error-response inputs on both core memory ports, mapping native fetch/load/store failures to access faults; make bus-side error reporting optional per port, with absent error signals tied low at integration. | Support fault-reporting memory systems while retaining a simple connection to buses without error reporting. | Agreed; external error-side-effect guarantees remain integration work; custom execution traps deferred by D-234 |
 | D-111 | Omit internal bus timeouts on both memory ports; leave timeout detection and recovery to the external memory system or bus adapter. | Preserve unrestricted variable latency without core timeout counters, automatic retries, or fabricated completions. | Agreed; external logic must preserve the core-facing completion contract |
 | D-112 | Clear core memory-transaction tracking on reset; require integration to handle pending pre-reset transactions and prevent their responses from reaching the core after reset release. | Allow deterministic core restart without retaining transaction history or internally draining old requests. | Agreed; external mechanism is an integration choice |
-| D-116 | Expose a stable 32-bit `hart_id_i` input and return its value through read-only `mhartid`. | Allow multiple instances of the same synthesized core to have distinct integration-assigned identities. | Agreed |
+| D-116 | Expose a stable 32-bit `hart_id_i` input and return its value through read-only `mhartid`. | Allow multiple instances of the same synthesized core to have distinct integration-assigned identities. | Superseded by D-308; retained as history |
+| D-308 | Replace the native core hart-ID input with 32-bit `HART_ID`, default zero, consumed consistently by `mhartid`, CV-X-IF, software and verification. | Let elaboration fold the identity into constants and remove a timing-constrained integration input. | Agreed and implemented; supersedes D-116 |
 | D-188 | Exclude CLIC/ACLIC support from this draft without committing to a later implementation; retain the standard machine interrupt inputs and Direct/Vectored trap dispatch, with external controller selection left to integration. | Keep baseline interrupt handling simple and require a separate decision before adding advanced interrupt architecture features. | Agreed |
 | D-189 | Use active-high, level-sensitive software/timer/external interrupt inputs reflected in read-only `mip.MSIP`/`.MTIP`/`.MEIP`, without sticky edge capture; clear pending sources externally and provide writable `mie.MSIE`/`.MTIE`/`.MEIE` bits resetting to zero. | Keep interrupt source ownership outside the core and separate pending state from delivery enables. | Agreed; synchronous input contract defined by D-190 |
 | D-190 | Require the machine interrupt inputs to be synchronous to the core clock; handle asynchronous-source synchronization and any required source capture/pulse stretching in the surrounding integration or wrapper. | Keep the processor's interrupt boundary within its single clock domain without internal IRQ synchronizers. | Agreed |

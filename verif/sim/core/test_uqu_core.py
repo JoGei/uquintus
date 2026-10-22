@@ -11,6 +11,29 @@ def custom_word(rd=6, a=1, b=2, op=0):
     return b << 20 | a << 15 | op << 12 | rd << 7 | 0x0b
 
 
+class HartIdTest(CoreTest):
+    async def run_phase(self):
+        self.raise_objection()
+        self.skip_handler()
+        program=self.setup_traps()+[csr(0xf14,rd=1,f=2),csr(0xf14,rd=2,f=6)]
+        bad=csr(0xf14,rd=3,rs=1)
+        self.expected_faults[BOOT+4*len(program)]=(2,bad)
+        program += [bad,csr(0xf14,rd=4,f=2)]
+        end=self.put(BOOT,program)
+        self.put(end,[ins_j(0,0)])
+        await self.reset()
+        await self.finish(end)
+        assert [self.regs[r] for r in (1,2,4)]==[self.hart_id]*3
+        assert len(self.faults)==1
+        assert not hasattr(self.dut,'hart_id_i')
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=100,timeout_unit='us')
+async def hart_id(dut):
+    await uvm_root().run_test('HartIdTest')
+
+
 class XifTest(CoreTest):
     async def run_phase(self):
         self.raise_objection()
@@ -19,7 +42,7 @@ class XifTest(CoreTest):
             await self.reset()
             for name,value in dict(xif_issue_ready_i=1,xif_issue_accept_i=1,xif_issue_writeback_i=1,
                     xif_issue_register_read_i=(1 << self.params['XIF_NUM_RS'])-1,xif_register_ready_i=1,
-                    xif_result_valid_i=1,xif_result_hartid_i=5,xif_result_id_i=7,
+                    xif_result_valid_i=1,xif_result_hartid_i=self.hart_id,xif_result_id_i=7,
                     xif_result_data_i=0xffffffff,xif_result_rd_i=1,xif_result_we_i=1).items():
                 getattr(self.dut,name).value=value
             await self.finish(BOOT)

@@ -108,7 +108,8 @@ defines pinning, supported events and retained JUnit/report diagnostics. The
 default `REFERENCE=none` preserves native-only checking.
 
 Native software programs shall provide exactly one `main.c` or `main.S`.
-Both shall receive the configured `UQU_ISA_UMODE` value for conditional M/U
+Both shall receive the configured `UQU_HART_ID`, `UQU_ISA_ZFINX` and `UQU_ISA_UMODE`
+values for identity expectations and conditional ISA/M/U
 scenarios. The linker shall retain the optional embedded expected-trap table
 described in [verification Section 2.6](uqu_spec.verif.md#26-elf-software-execution).
 
@@ -316,9 +317,10 @@ of the synthesis/implementation target rather than redefine the ISA.
 `make sim COMPONENT=core CONFIG=rv32i` selects the integrated core simulation;
 `make test` is its alias, with `COMPONENT` defaulting to `gpregfile`.
 `make lint COMPONENT=core CONFIG=rv32i` checks the corresponding source set.
-`make synth TOP=core|fpu CONFIG=<hw> PLATFORM=sky130hd|ihp-sg13g2`
-selects the synthesizable top and ORFS technology independently. `TOP` defaults
-to `core`; `CLOCK_PERIOD_NS=20` and `JOBS=4` are flow settings. Formal and full
+`make synth ASIC_FLOW=orfs TOP=core|fpu CONFIG=<hw> PLATFORM=sky130hd|ihp-sg13g2`
+selects the implementation flow, synthesizable top and technology independently.
+`ASIC_FLOW` defaults to `orfs`; unsupported selections shall fail explicitly.
+`TOP` defaults to `core`; `CLOCK_PERIOD_NS=20` and `JOBS=4` are flow settings. Formal and full
 physical implementation commands remain open.
 
 ## 3. Selectable simulation backend
@@ -370,14 +372,18 @@ parameters through `VERILOG_TOP_PARAMS`, preserving the shared-configuration
 contract in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
 
 Design-specific ORFS configuration and constraints shall remain in the uquintus
-repository under `impl/asic/`, allowing a future `impl/fpga/` alongside it.
+repository under `impl/asic/orfs/`, allowing other ASIC flows alongside `orfs/`
+and a future `impl/fpga/` alongside `impl/asic/`. Each flow shall own its scripts
+and platform adapters. The flow-independent `impl/asic/targets.yml` shall define
+synthesis tops, Bender source targets and parameter selection. Hardware presets
+and the report format shall remain shared across flows.
 The integration shall use ORFS's external-design support and
 documented configuration/hooks; the baseline shall not require a fork or copy
 of its implementation scripts. Simulation and formal checking shall continue
 to use their separate targets and tool integrations.
 
 The [ASIC guide](../impl/asic/README.md) defines the executable Make interface,
-source/top selection, constraints, tools and artifacts. `impl/asic/common/synth.py`
+source/top selection, constraints, tools and artifacts. `impl/asic/orfs/common/synth.py`
 generates an external-design configuration and invokes ORFS `make synth`.
 The baseline uses ORFS's native Verilog frontend; enabled Zfinx uses its Slang
 frontend for imported SystemVerilog. Canonicalization checks reject structural
@@ -392,7 +398,7 @@ Constrain synchronous reset as data. Pass ABC's target explicitly in ps.
 An optional `RESET_INPUT_DELAY_NS` override shall set reset's maximum input
 delay independently, with a 0 ns minimum; when omitted, preserve the original
 20%-of-period data-input budget. Record both resolved reset delays with the run.
-The [reset timing trial](../impl/asic/investigations/ihp-reset-timing.md) documents
+The [reset timing trial](../impl/asic/orfs/investigations/ihp-reset-timing.md) documents
 the 1 ns experiment and the required integration assumption.
 Report cell count, summed cell area, buffer count/area, setup slack/TNS and estimated maximum
 frequency. Negative slack means the target was missed, not that mapping failed.
@@ -409,7 +415,7 @@ sources/includes, Bender lock, flow/platform/library hashes, constraints and
 raw outputs per run. Publish them through the shared `report.json` schema.
 The initial qualification covers standalone FPU and complete RV32I cores with
 Zfinx disabled/enabled on SKY130 HD and IHP SG13G2. A controlled
-[IHP placement comparison](../impl/asic/investigations/ihp-placement.md) also reuses
+[IHP placement comparison](../impl/asic/orfs/investigations/ihp-placement.md) also reuses
 two mapped Zfinx core netlists through identical floorplanning, placement and
 timing repair, with separate `placed_pre_cts` report records. It does not establish
 a general physical Make target or post-CTS/routed closure. Full physical implementation,
@@ -615,9 +621,14 @@ config/
   sim/              # Component manifests and simulation-target configuration
 impl/
   asic/
-    common/         # Shared uquintus ORFS integration settings
-    sky130/         # SKY130 target configuration and constraints
-    ihp_sg13g2/     # IHP target configuration and constraints
+    README.md       # Flow selection, environment contract and artifacts
+    targets.yml     # Shared top/source/parameter selection
+    orfs/
+      common/       # ORFS runner and Yosys/OpenROAD hooks
+      platforms/
+        sky130hd/   # Project settings for the external ORFS platform
+        ihp-sg13g2/ # Project settings for the external ORFS platform
+      investigations/ # ORFS-specific experiments and documentation
   fpga/             # Possible future FPGA implementation setup
 scripts/            # Configuration translation and tool integration helpers
 docker/             # Dockerfiles and optional Docker Compose definitions
@@ -644,6 +655,10 @@ Dockerfiles and any Docker Compose definitions shall use `docker/`.
 ASIC implementation setup shall use `impl/asic/`; `impl/fpga/` is reserved as a
 possible later sibling and shall not imply a requirement to implement FPGA
 support now.
+ASIC flows shall use `impl/asic/<flow>/`, with flow-specific platform adapters
+under `platforms/`. Only ORFS is currently implemented. Add shared technology
+collateral when actual reuse across flows requires it; no alternative flow or
+empty placeholder directory is required initially.
 
 The repository-root `config/` directory shall hold shared core configurations
 and simulation-target configuration. `config/sim/<component>.yml` shall describe
@@ -723,3 +738,4 @@ later decisions determine the active contract.
 | D-295 | Generate a shared static report under build/report with an HTML landing page, category/run pages, configuration comparison, Markdown summary and versioned JSON data; collect existing flow artifacts and accept a common per-run record for future flows. | Visualize evidence across configurations without losing failures, provenance or comparison conditions, and produce a portable artifact suitable for later website publication. | Initial aggregation implemented; Section 6.1; synthesis producer implemented under D-306; formal/benchmark producers, CI retention and deployment remain follow-ups |
 | D-303 | Fetch commit-pinned CVFPU/FPnew through Bender with exact transitive revisions in Bender.lock, disable upstream Git submodule checkout in project configuration, and opt imported HDL into component builds through a manifest flag. | Reuse upstream source/dependency metadata without adding repository submodules or compiling unused IP into native tests. | Implemented dependency/configuration preparation; Section 1.3; real execution adapter under architecture D-304; physical qualification remains open |
 | D-306 | Implement external ORFS mapped synthesis for core/FPU targets using shared hardware YAML and Bender, Slang for imported SV, latch/mapping checks, preplacement STA and provenance-rich report records. | Qualify open-source ASIC frontend/mapping compatibility and expose measured cell area/timing without conflating mapped synthesis with physical closure. | Implemented; Section 4 and impl/asic/README.md; six default core/FPU runs on SKY130 HD and IHP SG13G2; full physical flow and broader parameter matrices open |
+| D-309 | Organize ASIC integrations under impl/asic/<flow>/ with flow-owned scripts, platform adapters and investigations; keep targets.yml shared at the ASIC root and select the backend through ASIC_FLOW, defaulting to orfs. | Allow future ASIC flows without treating ORFS-specific files as technology-independent collateral. | Implemented; Sections 2, 4 and 7; unsupported flow selections fail explicitly |

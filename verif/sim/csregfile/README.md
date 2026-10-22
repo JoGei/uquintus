@@ -95,7 +95,7 @@ aliases share counter storage. Stalls/CSR flush do not stop mcycle.
 | Machine HPM B03..B1F/B83..B9F, selectors 323..33F | Mapped zero, permitted writes ignored; no payload storage. |
 | HPM aliases C03..C1F/C83..C9F | Read-only zero, M-mode only because user enables are zero. |
 | IDs F11/F12/F13/F15 | Read-only zero, no payload storage. |
-| `mhartid` F14 | Read-only integration input, no storage. |
+| `mhartid` F14 | Read-only parent identity input, no storage. The native core supplies its constant `HART_ID` parameter. |
 
 Unlisted addresses, including `time[h]`, supervisor CSRs, delegation CSRs, and
 unimplemented debug CSRs, raise illegal instruction. Normal address privilege and read-only

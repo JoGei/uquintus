@@ -1,4 +1,6 @@
 # Complete RV32I + scalar Zfinx configuration with the TH32 CVFPU divider.
+# Compile-time integration identity; single-hart systems use zero.
+HART_ID: 0
 ISA_E: 0
 ISA_M: 0
 ISA_C: 0

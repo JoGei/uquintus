@@ -1,4 +1,6 @@
 # RV32I+C compressed decode comparison profile.
+# Compile-time integration identity; single-hart systems use zero.
+HART_ID: 0
 ISA_E: 0
 ISA_M: 0
 ISA_C: 1

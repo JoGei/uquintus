@@ -1,4 +1,6 @@
 # Complete hardware configuration for standalone M-extension component tests.
+# Compile-time integration identity; single-hart systems use zero.
+HART_ID: 0
 ISA_E: 0
 ISA_M: 1
 ISA_C: 0

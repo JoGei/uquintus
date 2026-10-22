@@ -263,6 +263,8 @@ def source_registers(insn):
 
 
 def validate_profile(records, config, image):
+    if config.get('HART_ID',0)>0x7fffffff:
+        raise ValueError('Pinned Spike --hartids parser accepts signed 32-bit IDs only; use native checking for HART_ID above 0x7fffffff')
     if any(config.get(k, 0) for k in ('ISA_PMP', 'ISA_F', 'ISA_A', 'XIF', 'DEBUG', 'MUA_HARDENED')):
         raise ValueError('Spike profile supports native RV32I/E/M/C/Zfinx without PMP, full F, atomics, XIF or debug')
     if image.symbols.get('fromhost') is not None:
@@ -292,7 +294,7 @@ def validate_profile(records, config, image):
     return instructions
 
 
-def compare(instructions, commits, image, *, zfinx=False, fp_records=None):
+def compare(instructions, commits, image, *, zfinx=False, fp_records=None, hart_id=0):
     """Compare every RVFI event, plus one Spike lookahead for the last next PC."""
     def equal(index, field, expected, actual):
         if expected != actual: raise Mismatch(index, field, expected, actual)
@@ -305,11 +307,11 @@ def compare(instructions, commits, image, *, zfinx=False, fp_records=None):
     fp_seen = set()
     equal(-1, 'commit_count', len(instructions) + 6, len(commits))
     for index, insn in enumerate(BOOT_INSNS):
-        equal(-1, 'bootstrap', (0x1000 + 4*index, insn, 3, 5),
+        equal(-1, 'bootstrap', (0x1000 + 4*index, insn, 3, hart_id),
               tuple(commits[index][k] for k in ('pc', 'insn', 'mode', 'hart')))
     equal(-1, 'entry', image.entry, commits[5]['pc'])
     memory, regs = image.memory(), [0] + [None]*31
-    csr_state = {name: (5 if name == 'mhartid' else 0) for name in CSR_NAMES.values()}
+    csr_state = {name: (hart_id if name == 'mhartid' else 0) for name in CSR_NAMES.values()}
     handler_entry, breakpoint_mtval = False, False
     for index, actual in enumerate(instructions):
         reference, following = commits[index+5:index+7]
@@ -343,7 +345,7 @@ def compare(instructions, commits, image, *, zfinx=False, fp_records=None):
         trapped = bool(reference.get('trap'))
         for name, rvfi in (('pc', 'pc_rdata'), ('insn', 'insn'), ('mode', 'mode')):
             equal(index, name, reference[name], actual['rvfi_' + rvfi])
-        equal(index, 'hart', 5, reference['hart'])
+        equal(index, 'hart', hart_id, reference['hart'])
         equal(index, 'trap', int(trapped), actual['rvfi_trap'])
         equal(index, 'handler_entry', int(handler_entry), actual['rvfi_intr'])
         handler_entry = trapped
@@ -504,6 +506,7 @@ def check_run(directory, config, info, timeout=30):
                   artifacts=['spike.log', 'spike-process.log', 'spike-debug.cmd', 'rvfi.jsonl'])
     try:
         zfinx = bool(config.get('ISA_ZFINX',0))
+        hart_id = config['HART_ID']
         image = load_elf(directory / 'program.elf')
         records = read_trace(directory / 'rvfi.jsonl')
         instructions = validate_profile(records, config, image)
@@ -542,7 +545,7 @@ def check_run(directory, config, info, timeout=30):
         march += '_zicntr'
         command = [info['executable'], '--isa=' + march,
                    '--priv=' + ('mu' if config['ISA_UMODE'] else 'm'), '--pmpregions=0',
-                   '--hartids=5', f'--pc={image.entry:#x}', f'-m{RAM_BASE:#x}:{RAM_SIZE:#x}',
+                   f'--hartids={hart_id}', f'--pc={image.entry:#x}', f'-m{RAM_BASE:#x}:{RAM_SIZE:#x}',
                    '-d', '--debug-cmd=' + str(directory / 'spike-debug.cmd'), '-l', '--log-commits',
                    '--log=' + str(directory / 'spike.log'), str(directory / 'program.elf')]
         result['command'] = command
@@ -569,7 +572,7 @@ def check_run(directory, config, info, timeout=30):
         fp_records = read_fp_trace(directory/'fpu.jsonl') if zfinx else None
         if zfinx:
             result['artifacts'].append('fpu.jsonl')
-        count = compare(instructions, commits, image, zfinx=zfinx, fp_records=fp_records)
+        count = compare(instructions, commits, image, zfinx=zfinx, fp_records=fp_records, hart_id=hart_id)
         if zfinx:
             (directory/'zfinx-coverage.json').write_text(json.dumps(fp_coverage(instructions),indent=2)+'\n')
             result['artifacts'].append('zfinx-coverage.json')

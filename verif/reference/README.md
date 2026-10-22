@@ -45,12 +45,20 @@ The adapter uses Spike's documented `-l` and `--log-commits` observations:
 Its format is not assumed stable across arbitrary builds. Unknown log lines or
 effects fail parsing. No proxy kernel is used.
 
-The initial profile uses one hart (ID 5, matching the native harness), configured
+The profile uses one hart with the configured `HART_ID` (zero by default), selected
+through Spike's `--hartids` and checked against the native parameter, with configured
 M or M/U privilege, matching I/E/M/C/Zicsr/Zifencei/Zfinx settings, PMP disabled, and the
 native linker RAM at `0x80000000..0x8000ffff`. Both models load the same ELF, with
 zero-filled segment tails. Startup must initialize GPRs before reading them;
 the checker does not accept Spike's zeroed reset GPRs as evidence for unreset
 core registers. RAM holes are initially zero. ELF `fromhost` services are rejected.
+
+The pinned Spike CLI parses `--hartids` through a signed 32-bit integer, so
+reference execution rejects `HART_ID > 0x7fffffff` explicitly. Native RTL,
+configuration validation and native regression support the full unsigned 32-bit
+range. The core's range is not reduced to match this tool limitation; high-bit
+IDs are covered natively. See the
+[upstream hart-ID parser](https://github.com/riscv-software-src/riscv-isa-sim/blob/master/spike_main/spike.cc).
 
 Profile `spike-commit-rv32-v5` uses a bounded debugger command file: a read-only
 state snapshot, then one `run 1` attempt and another snapshot at each step.

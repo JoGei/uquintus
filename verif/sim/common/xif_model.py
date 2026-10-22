@@ -94,7 +94,7 @@ class Coprocessor:
             if allowed and oldest['delay']==0 and not self.hold_result:
                 self.write('result_valid',1)
                 kind=self.bad_packets % 3 if self.bad_packets else None
-                self.write('result_hartid',6 if kind==1 else 5)
+                self.write('result_hartid',self.env.hart_id ^ (1 if kind==1 else 0))
                 self.write('result_id',(oldest['id']+1)&7 if kind==0 else oldest['id'])
                 self.write('result_data',oldest['data'][0] | oldest['data'][1] << 32)
                 self.write('result_rd',(oldest['desc']['rd']+2)&31 if kind==2 and not self.env.params['XIF_DUALWRITE'] else oldest['desc']['rd'])
@@ -109,7 +109,7 @@ class Coprocessor:
         if valid:
             ident,insn,hart=self.read('issue_id'),self.read('issue_instr'),self.read('issue_hartid')
             assert (self.read('register_id'),self.read('register_hartid'))==(ident,hart)
-            assert hart==5
+            assert hart==e.hart_id
             values=self.read('register_rs'); flags=self.read('register_rs_valid')
             operands=[values >> (32*i) & MASK for i in range(e.params['XIF_NUM_RS'])]
             operands += [0]*(3-len(operands))

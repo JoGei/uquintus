@@ -1,4 +1,6 @@
 # Complete hardware configuration exercising the shared iterative MUL/DIV chain.
+# Compile-time integration identity; single-hart systems use zero.
+HART_ID: 0
 ISA_E: 0
 ISA_M: 1
 ISA_C: 0

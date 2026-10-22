@@ -43,7 +43,7 @@ def main():
     common = ROOT / 'verif/sw/common'
     inputs = [common / 'crt0.S', source, common / 'link.ld']
     command = compiler_command(compiler)
-    command += [f'-DUQU_ISA_UMODE={config["ISA_UMODE"]}', f'-DUQU_ISA_ZFINX={config["ISA_ZFINX"]}', '-mcmodel=medany', '-mno-relax',
+    command += [f'-DUQU_HART_ID={config["HART_ID"]}u', f'-DUQU_ISA_UMODE={config["ISA_UMODE"]}', f'-DUQU_ISA_ZFINX={config["ISA_ZFINX"]}', '-mcmodel=medany', '-mno-relax',
                 '-msmall-data-limit=0', '-ffreestanding', '-fno-builtin', '-fno-pic',
                 '-fno-stack-protector', '-ffunction-sections', '-fdata-sections',
                 '-O1', '-g', '-Wall', '-Wextra', '-Werror', '-nostdlib',

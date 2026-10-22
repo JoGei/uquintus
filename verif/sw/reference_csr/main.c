@@ -18,7 +18,7 @@ int main(void)
     __asm__ volatile ("csrr %0, mscratch" : "=r" (value));
     if (value != 14) return 7;
     __asm__ volatile ("csrr %0, mhartid" : "=r" (value));
-    if (value != 5) return 8;
+    if (value != UQU_HART_ID) return 8;
     __asm__ volatile ("csrw mscratch, zero");
     return 0;
 }

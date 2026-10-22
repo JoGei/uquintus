@@ -20,7 +20,7 @@ class ZfinxReferenceTests(unittest.TestCase):
         state=dict(mstatus=0x1800,misa=0x40100100,fflags=0,frm=4 if dynamic else 0,
                    fcsr=128 if dynamic else 0)
         def commit(address,insn,registers=None,csrs=None):
-            return dict(hart=5,mode=3,pc=address,insn=insn,registers=registers or {},
+            return dict(hart=0,mode=3,pc=address,insn=insn,registers=registers or {},
                         csrs=csrs or {},memory=[],before=dict(pc=address,mode=3,csrs=dict(state)),
                         after=dict(pc=address+4,mode=3,csrs=dict(state)))
         refs=[commit(0x1000+4*i,insn) for i,insn in enumerate(BOOT_INSNS)]

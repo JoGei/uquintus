@@ -8,6 +8,8 @@ with core-owned pipeline registers, hazards, PMP and control. Native execution
 supports the implemented E/M/C, M/U, PMP and Zifencei configurations plus the
 initial standard-channel XIF profile and scalar Zfinx through CVFPU/FPnew.
 Core debug remains unfinished and rejects enabled elaboration.
+Hart identity is the 32-bit `HART_ID` elaboration parameter, default zero,
+explicitly set in hardware YAML; `mhartid` and CV-X-IF use that constant.
 The core testbed includes verification-only RVFI instruction/CSR collectors and SV JSONL trace;
 see the [RVFI profile](verif/common/README.md) for coverage and remaining formal work.
 

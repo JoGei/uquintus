@@ -28,11 +28,16 @@ interfaces remain available for later integration.
 
 ## External connections
 
+Hart identity is the compile-time `parameter [31:0] HART_ID = 32'd0`, explicitly
+set in hardware YAML and forwarded to the core instantiation. There is no native
+hart-ID input. `mhartid` and outgoing/checked CV-X-IF hart IDs use this constant.
+Standalone DE/WB/CSR components retain parent-supplied identity inputs; the core
+ties those inputs to `HART_ID` so synthesis can fold the constant.
+
 | Ports | Contract |
 | --- | --- |
 | `clk_i`, `rst_ni` | One clock; synchronous active-low reset. Reset clears control/validity, not GPR or pipeline payload storage. |
 | `boot_addr_i[31:0]` | Word-aligned boot entry; hold stable through reset. |
-| `hart_id_i[31:0]` | Stable integration identity, read through `mhartid`. |
 | `irq_software_i`, `irq_timer_i`, `irq_external_i` | Synchronous level inputs reflected directly in `mip`. Peripheral/integration logic clears their sources. |
 | `imem_req_o`, `imem_addr_o[31:0]` | Read-only word-aligned native OBI request; grant via `imem_gnt_i`. |
 | `imem_rvalid_i`, `imem_rdata_i[31:0]`, `imem_err_i` | Instruction response; an error causes a precise instruction access fault. |
@@ -114,6 +119,7 @@ Registers must be initialized by software before the interpreter reads them.
 | Suite | Checks |
 | --- | --- |
 | `csrs` | Six CSR instruction forms, suppressed reads/writes, WARL/read-only behavior, 64-bit counter halves and aliases, inhibition/increments, PMP locking, constant HPM/identity state and illegal-write traps. |
+| `hart_id` | Configured 32-bit `mhartid` reads, read-only write rejection, value preserved after trapping, and absence of the removed top-level port. |
 | `integer` | Seeded RV32I register/immediate arithmetic, shifts and comparisons; x0; dependent/overwritten destinations; branches, loops, JAL/JALR and skipped poison stores. |
 | `memory` | Signed/unsigned byte/halfword/word loads, byte-lane stores, load consumers, store-data dependencies, branch operands, FENCE and configured FENCE.I. |
 | `traps` | Misaligned data/branch targets, illegal instruction/CSR, disabled M and RV32E register restrictions, ECALL, EBREAK with zero `mtval`, and explicit load/store error responses. |

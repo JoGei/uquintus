@@ -79,7 +79,8 @@ and [signal dependencies](https://docs.openhwgroup.org/projects/openhw-group-cor
 The core-side `xif_id_i[2:0]` travels in the parent MEM/WB token. Issue/operand
 channels, up to four live pipeline offloads, ID allocation/reuse and dependency
 tracking remain in the core parent/DE integration; WB adds no issue/result queue.
-The hart-ID field is 32 bits, consistently using hart_id_i.
+The hart-ID field is 32 bits. The native core ties this component's `hart_id_i`
+to its compile-time `HART_ID` parameter; it is not an exposed core input.
 
 For a surviving XIF token WB sends exactly one commit notification with kill=0,
 independently of result validity or ready_i. This avoids deadlock with a

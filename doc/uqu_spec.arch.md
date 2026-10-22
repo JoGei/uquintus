@@ -65,6 +65,10 @@ at elaboration/synthesis time:
 
 The default integer base shall therefore be RV32I, with
 `ISA_E = ISA_M = ISA_C = ISA_ZFINX = ISA_F = 0`.
+The separate integration parameter `HART_ID` is an unsigned 32-bit constant,
+default zero, explicitly set in every complete hardware configuration. It does
+not change the ISA. Its `mhartid` and CV-X-IF uses are defined in
+[interfaces, Section 9](uqu_spec.interfaces.md#9-hart-identification-parameter).
 `ISA_ZIFENCEI` shall also default to `0`; user-mode configuration is defined in
 [architecture, Section 8](uqu_spec.arch.md#8-bare-metal-execution-with-configurable-user-mode). CV-X-IF integration is selected separately through `XIF`
 ([interfaces, Section 5](uqu_spec.interfaces.md#5-cv-x-if-custom-extension-interface)); enabling that interface does not itself define a software ISA
@@ -3232,7 +3236,7 @@ and register-specific read/write behavior, and shall own architectural CSR
 storage and its update logic. This ownership shall include machine counters,
 implemented PMP configuration/address registers, and floating-point CSR state
 when enabled. Read-only aliases shall share their underlying state; constants
-and integration inputs such as `mhartid` shall not require duplicated storage.
+and integration constants such as parameter-backed `mhartid` shall not require duplicated storage.
 
 CSR storage shall be implemented as explicitly decoded architectural state,
 with registers only for fields that can change in the selected hardware
@@ -3256,7 +3260,7 @@ storage.
 
 In particular, only CY and IR require storage in `mcountinhibit` and, when
 present, `mcounteren`; their other bits are hardwired zero. Hardwired `misa`,
-integration-supplied `mhartid`, and supported constant-zero disabled PMP/HPM
+parameter-backed `mhartid`, and supported constant-zero disabled PMP/HPM
 registers shall allocate no CSR payload storage. Counter aliases shall reuse
 the underlying counter state. Disabled optional-feature state shall be excluded
 at elaboration or eliminated by synthesis, preserving its specified mapped or

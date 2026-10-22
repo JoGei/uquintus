@@ -6,6 +6,7 @@ bender_targets:
   - tech_cells_generic_exclude_deprecated
   - cvfpu_verilator
 parameters:
+- HART_ID
 - ISA_E
 - ISA_M
 - ISA_C

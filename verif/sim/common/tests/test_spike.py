@@ -21,10 +21,10 @@ class SpikeTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.path = Path(temporary.name)
         self.image = ELFImage(0x80000000, 0, (Segment(0x80000000, b'\0'*64, 64, 7),), {'tohost': 0x80000020})
-        self.config = dict(ISA_E=0, ISA_C=0, ISA_M=0, ISA_UMODE=1, ISA_ZIFENCEI=0)
+        self.config = dict(HART_ID=0, ISA_E=0, ISA_C=0, ISA_M=0, ISA_UMODE=1, ISA_ZIFENCEI=0)
 
     def commit(self, pc, insn, registers=None, memory=None, csrs=None):
-        return dict(hart=5, mode=3, pc=pc, insn=insn, registers=registers or {},
+        return dict(hart=0, mode=3, pc=pc, insn=insn, registers=registers or {},
                     memory=memory or [], csrs=csrs or {})
 
     def fixture(self):
@@ -57,6 +57,15 @@ class SpikeTests(unittest.TestCase):
         with self.assertRaises(spike.Mismatch): spike.compare(rows, refs[:-1], self.image)
         refs[0]['insn'] = 0
         with self.assertRaises(spike.Mismatch): spike.compare(rows, refs, self.image)
+
+    def test_configured_hart_identity_is_checked_in_bootstrap_and_retirement(self):
+        for hart_id in (0,5,0xa5a50005,0xffffffff):
+            rows,refs=self.fixture()
+            for row in refs: row['hart']=hart_id
+            self.assertEqual(spike.compare(rows,refs,self.image,hart_id=hart_id),3)
+            refs[5]['hart']=hart_id ^ 1
+            with self.assertRaisesRegex(spike.Mismatch,'hart'):
+                spike.compare(rows,refs,self.image,hart_id=hart_id)
 
     def test_csr_channels_checked_against_reference_effect_and_prestate(self):
         pc = self.image.entry
@@ -93,6 +102,9 @@ class SpikeTests(unittest.TestCase):
             self.assertEqual(spike.memory_operation(insn), expected)
 
     def test_unsupported_events_are_rejected_not_skipped(self):
+        with self.assertRaisesRegex(ValueError,'Spike.*hartids'):
+            spike.validate_profile([dict(type='reset',epoch=0),instruction()],
+                                   dict(self.config,HART_ID=0x80000000),self.image)
         reset = dict(type='reset', epoch=0)
         for records in ([reset, instruction(trap=1) | dict(cause=5)], [reset, dict(type='interrupt')],
                 [reset, instruction(insn=0xc0102573)],
@@ -118,7 +130,7 @@ class SpikeTests(unittest.TestCase):
         pc, handler = self.image.entry, self.image.entry+32
         status = 0x1888
         before = {name:0 for name in spike.SNAPSHOT_CSRS}
-        before.update(mstatus=status, mtvec=handler|1, mhartid=5)
+        before.update(mstatus=status, mtvec=handler|1, mhartid=0)
         after = dict(before, mstatus=0x1880, mepc=pc, mcause=11)
         returned = dict(after, mstatus=0x88)
         trap = instruction(0, pc, insn=0x73, trap=1, pc_wdata=handler) | dict(cause=11)
