@@ -198,8 +198,10 @@ Yosys optimization finds no native DE state, 72 bits with two-source paired
 XIF or 105 with three-source paired XIF; XIF data fields have no reset and
 control/validity resets synchronously. No latches are inferred. Combinational
 netlist reachability checks cut sequential boundaries and verify no forbidden
-issue-response-to-issue/register-output path. These are component checks;
-full-core execution, RVFI/Spike and frontend/global-control integration remain.
+issue-response-to-issue/register-output path. These are component checks. The
+[core regression](../core/README.md) adds frontend/global-control integration,
+RVFI observations and XIF lifecycle coverage; native ELF/riscv-tests runs also
+support scoped Spike comparison. Spike custom comparison remains unsupported.
 
 The additional fourteen-profile strategy sweep covers IF expansion, DE
 expansion and direct C decoding with I, E+Zfinx and two-/three-source XIF,

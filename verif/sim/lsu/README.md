@@ -5,7 +5,8 @@ MEM stage. It accepts one native access, checks it, performs a native
 OBI transaction, and retains a registered completion. It contains private
 transaction/result state, not the parent pipeline's EX/MEM or MEM/WB registers.
 The [MEM wrapper](../mem/README.md) is implemented; its parent owns the PMP block
-and pipeline boundary registers. Full-pipeline integration remains pending.
+and pipeline boundary registers. The [core](../core/README.md) connects MEM,
+shared PMP, WB and control; its regression adds integrated execution coverage.
 
 ## MEM-side interface
 

@@ -125,9 +125,10 @@ Unsupported parameter values or combinations shall cause a build failure with
 a clear diagnostic identifying the offending parameters and violated constraint.
 The build shall not silently change requested settings or omit requested
 features. Configuration checks shall run before simulation or synthesis
-proceeds with an unsupported design. The checking mechanism remains TBD and
-shall preserve the language rules for project-owned RTL and imported IP in the
-[style guide](uqu_spec.style.md#2-language-and-source-files).
+proceeds with an unsupported design. The shared hardware configuration helper
+validates inputs, and RTL configuration guards reject unsupported elaborations.
+These checks preserve the language rules for project-owned RTL and imported IP
+in the [style guide](uqu_spec.style.md#2-language-and-source-files).
 
 The documented supported configuration set may expand across implementation
 milestones. A feature planned in this specification but not yet implemented
@@ -142,11 +143,10 @@ and `ISA_C` selects `rv32imc_zicsr`. Enabling `ISA_E` alone selects
 
 The extension meanings follow the standard
 [RISC-V ISA extension naming conventions](https://docs.riscv.org/reference/isa/unpriv/naming.html).
-Additional extensions, supported combinations, implementation algorithms,
-latency, throughput, and pipeline handling
-remain TBD. Optional ISA extensions shall follow the first implementation
-milestone ([overview, Section 3](uqu_spec.md#3-first-implementation-milestone)); their implementation order and detailed milestones
-remain TBD.
+The implemented extension combinations, arithmetic algorithms, latency and
+pipeline handling are defined below. Additional extensions and their acceptance
+milestones remain open. The baseline acceptance focus and existing optional
+implementations are distinguished in [overview, Section 3](uqu_spec.md#3-first-implementation-milestone).
 
 ### 2.1. Hardwired ISA identification
 
@@ -183,7 +183,8 @@ checks shall still apply. See the
 
 ### 2.2. Microarchitecture configuration parameters
 
-**Status:** Agreed; selector encodings and details marked TBD remain open
+**Status:** Selectors and current microarchitecture options implemented;
+hardening and additional predictors remain future work
 
 The following elaboration-time parameters select microarchitecture while
 preserving the configured ISA's behavior. Their naming conventions are defined
@@ -219,8 +220,8 @@ including inactive ones, under [build, Section 2](uqu_spec.build.md#2-shared-cor
 `MUA_DE_OPERAND_RETENTION` is implemented by the standalone hazard unit in
 Section 4.2 and accepted as an explicit integer boolean by the component runner.
 All hardware presets shall set it; existing presets use zero, and
-`config/rv32i_retained.yml` selects one for comparison. Core/stage integration
-remains pending.
+`config/rv32i_retained.yml` selects one for comparison. The core connects the
+hazard unit to DE/EX and assembles its producer descriptors from pipeline state.
 
 Compressed-decode selectors shall also be set explicitly when inactive. Their
 labels shall still be validated and mapped through the canonical catalog.
@@ -229,7 +230,7 @@ labels shall still be validated and mapped through the canonical catalog.
 paths and parent payload rules are defined in Section 15.1. Presets
 `rv32ic`, `rv32ic_decompress_de` and `rv32ic_decoder_c` select them respectively.
 All three paths are implemented in IF/DE with parent-register tests in
-Section 15.5. Complete-core integration remains pending.
+Section 15.5 and integrated core regressions under Section 3.13.
 
 `MUA_HARDENED` is a planned future feature. Every hardware configuration shall
 explicitly set it to zero until its implementation is supported. An enabled
@@ -478,7 +479,8 @@ completion, discarding a stale instruction-fetch result when appropriate.
 ### 3.1. Common native execution-unit handshake
 
 **Status:** Request/result handshake and immediate affected-operation flush
-cancellation for native ALU/MUL/DIV/FPU agreed; exact payloads and adapters TBD
+cancellation implemented for ALU/MUL/DIV; FPU interface stub present, execution
+backend and its adapter open
 
 Native arithmetic execution units connected to EX shall use the common
 request/result interface and handshake rules in the
@@ -534,14 +536,15 @@ acceptance under backpressure shall remain distinct.
 
 ALU and iterative MUL/DIV use of EX-owned shared arithmetic shall use internal operand/result
 connections for each arithmetic step; it shall not create a new instruction
-request or add a handshake cycle for every iteration. The exact payload widths,
-unit adapters, and status fields remain TBD. OBI and CV-X-IF shall retain their
+request or add a handshake cycle for every iteration. The implemented unit
+interfaces and component guides define payload widths and status fields; an
+imported FPU backend still requires its adapter. OBI and CV-X-IF shall retain their
 separately specified interface contracts.
 
 ### 3.2. Control organization
 
-**Status:** Native central controller implemented with normalized event inputs;
-full-core binding and optional XIF/debug adapters remain integration work
+**Status:** Central controller integrated with the core, stages and initial XIF
+lifecycle; core debug adapter remains open
 
 The core shall use the following division of control responsibilities:
 
@@ -566,8 +569,9 @@ redirect shall not discard older EX/MEM/WB instructions. Trap entry shall wait
 for the older work required by [architecture, Section 9](uqu_spec.arch.md#9-precise-synchronous-exceptions) and finalize synchronous trap entry
 at WB under [architecture, Section 9.2](uqu_spec.arch.md#92-early-exception-containment-and-wb-trap-entry); interrupt entry shall follow the completion policy
 in [interfaces, Section 4](uqu_spec.interfaces.md#4-external-machine-interrupt-sources). Detailed eligibility and priority rules for
-simultaneous native events are implemented in Section 3.2.1; full optional
-debug-cause and XIF-ID sequencing remain adapter integration work.
+simultaneous native events are implemented in Section 3.2.1. XIF ID/kill
+sequencing is connected under D-301; optional core debug-cause arbitration
+remains open.
 
 Local backpressure shall hold predecessor stages while allowing older stages
 to drain. Central drain or flush control shall identify the affected stages
@@ -575,7 +579,8 @@ and instructions, preserving accepted-memory completion tracking and the
 native arithmetic cancellation contract. The hazard/forwarding block shall
 remain separate from global event arbitration; arithmetic and memory protocol
 state machines shall remain within their respective units. The native controller
-bindings are defined below; full-core payload/producer wiring remains pending.
+bindings are defined below; full-core payload and producer wiring is implemented
+in Section 3.13.
 
 #### 3.2.1. Core-owned pipeline control implementation
 
@@ -638,9 +643,10 @@ traps during a requested drain, WB recovery shall occur first and a still-live
 drain request shall subsequently save the post-trap handler PC.
 
 The core shall supply normalized admission and drain-readiness conditions for
-optional debug stepping and standard XIF DE-only kill cleanup. XIF IDs,
-commit-kill arbitration, replay after canceled eviction, Debug Mode, debug cause
-selection and external-DM request/step sequencing remain future core adapters.
+optional debug stepping and standard XIF DE-only kill cleanup. XIF ID ownership,
+commit-kill arbitration and replay after canceled eviction are implemented under
+D-301. Debug Mode, debug cause selection and external-DM request/step sequencing
+remain future core adapters.
 No additional coprocessor signal is defined by these core-internal hooks.
 Unfinished cleanup shall block admission and entry, and its owner shall arrange
 replay of an evicted instruction if entry is canceled.
@@ -882,8 +888,8 @@ in DE; upstream operand selection may use ADD for address, AUIPC, and LUI work.
 Standalone wrappers and the
 [shared-parent fixture](../verif/sim/exec_arith/README.md) supply the external
 arithmetic instance for verification. That fixture demonstrates the module
-boundary. The EX component implements ownership tracking; the full processor
-pipeline remains pending.
+boundary. The EX component implements ownership tracking and is connected to
+the full processor pipeline in Section 3.13.
 
 ### 3.7. EX stage and parent-owned pipeline registers
 
@@ -1026,7 +1032,8 @@ variable-latency transactions, faults, order/identity, WB backpressure, killed
 transaction draining, and recovery. Development Yosys checks confirm only one
 top-level tracking state bit plus one LSU, no boundary payload/PMP storage in
 MEM, and no combinational OBI-response bypass or flush withdrawal of request.
-Full-core WB/controller/fence and hazard/forwarding integration remain pending.
+Full-core WB/controller/fence and hazard/forwarding integration is implemented
+in Section 3.13; external fence actions remain system-specific.
 
 ### 3.10. WB stage, commitment, and owned CSR state
 
@@ -1108,9 +1115,11 @@ The [WB parent fixture](../verif/sim/wb_pipeline/README.md) verifies a real
 MEM/WB slot, sibling FF/latch GPR storage, privilege transitions, delayed XIF
 results, paired writes and debug execution through the normal datapath.
 Synthesis checks retain zero/one local WB state bits with XIF disabled/enabled,
-respectively, and no boundary payload storage. Full-core arbitration/draining,
-DE offload tracking, external-DM integration, RVFI and software-level verification
-remain separate integration work.
+respectively, and no boundary payload storage. Full-core arbitration/draining
+and initial DE offload tracking are integrated under Section 3.13 and D-301.
+RVFI/CSR observations, ELF execution and scoped Spike comparison are implemented
+in the verification specification. Core debug and external-DM integration remain
+open.
 
 
 ### 3.11. Native decoder and DE ownership
@@ -1249,19 +1258,22 @@ boundary without feeding back into its own local flush. Current privilege
 shall change on accepted machine entry or MRET; MEM shall apply MPRV/MPP
 before its shared-PMP query while IF uses current execution privilege.
 
-The initial integration supports native RV32I+Zicsr/M/U and implemented
-E/M/C/PMP/Zifencei and microarchitecture options. FPU, XIF-ID/cleanup and debug
-sequencing remain separate work: enabling Zfinx, F, A, XIF, debug or hardening
-shall fail elaboration until the relevant implementation exists. Disabled
-standard XIF declarations remain inactive. No proprietary coprocessor signals
-or synthesizable trace outputs are introduced by this integration.
+The integration supports native RV32I+Zicsr/M/U, implemented E/M/C/PMP/Zifencei
+and microarchitecture options, and initial standard-channel XIF issue/ID/kill
+tracking under D-301. Enabling Zfinx, F, A, debug or hardening still fails core
+elaboration until the corresponding implementation exists. Disabled standard
+XIF declarations remain inactive. Compressed offload, shared-LSU custom access
+and coprocessor execution traps remain deferred. No proprietary coprocessor
+signals or synthesizable trace outputs are introduced by this integration.
 
 Initial retirement-program tests use a Python instruction interpreter and
 independent variable-latency instruction/data agents. The
 [native RVFI testbed](../verif/common/README.md) now supplies architectural
-observations, per-CSR state channels and SV JSONL tracing. Spike comparison
-remains a follow-up; formal core binding/proofs are deferred pending toolchain
-selection.
+observations, per-CSR state channels and SV JSONL tracing. Native ELF/riscv-tests
+Spike comparison includes scoped trap, interrupt and counter/MIP support under
+verification D-297 through D-300. XIF uses a separate behavioral oracle and
+companion trace; Spike custom comparison remains unsupported. Formal core
+binding/proofs are deferred pending toolchain selection.
 
 ## 4. Configurable operand forwarding
 
@@ -1495,7 +1507,7 @@ profiles shall retain their separately specified or open integration requirement
 
 ### 4.1. Core-to-DE operand availability contract
 
-**Status:** Agreed; DE implementation pending
+**Status:** Implemented by DE and the core-owned hazard unit
 
 DE shall expose its source-register addresses and use information to the
 core-owned hazard/forwarding logic. The core shall resolve the youngest older
@@ -1559,7 +1571,7 @@ with its existing owning pipeline registers or functional unit.
 
 ### 4.2. Core-owned hazard unit and selectable DE operand retention
 
-**Status:** Standalone component implemented; core/stage integration pending
+**Status:** Component and core/stage integration implemented
 
 The core shall instantiate `uqu_hazard` to centralize source dependency checks,
 youngest-writer selection and configured forwarding for both DE and EX. It
@@ -1842,8 +1854,9 @@ Yosys optimization retains no storage in continuous mode, 66 bits with two
 retained sources or 99 bits with three. No latches are inferred. These counts
 measure generic optimized state rather than mapped ASIC PPA. Unsupported
 parameter settings fail elaboration through an unresolved configuration-guard
-cell. Parent pipeline wiring, the DE stage, central controller sequencing and
-XIF issue/holding-state integration remain pending.
+cell. Parent pipeline wiring, DE, central controller sequencing and initial
+XIF issue/holding-state integration are implemented in the core under
+Section 3.13 and D-301.
 
 ## 5. Configurable branch prediction
 
@@ -1928,10 +1941,10 @@ the branch. Decode resolution shall check any prediction and request correction
 when necessary. Discarded instructions shall not change architectural state.
 
 The decode logic's timing shall be evaluated during implementation; no fixed
-branch penalty or clock frequency is assumed. Detailed redirect timing, pending
-instruction-fetch tracking, and detailed hazard-controller wiring remain
-implementation follow-ups; the agreed stall, forwarding, and request-persistence
-rules shall remain applicable. Behavior with
+branch penalty or clock frequency is assumed. Redirect sequencing, persistent
+instruction-fetch tracking and hazard/controller wiring are implemented in the
+core. Physical timing evaluation remains open; the agreed stall, forwarding and
+request-persistence rules remain applicable. Behavior with
 prediction disabled is defined by `none` mode in [architecture, Section 5](uqu_spec.arch.md#5-configurable-branch-prediction).
 
 
@@ -1996,8 +2009,9 @@ ISA priority of other exceptions. It is permitted by the
 [RISC-V synchronous exception priority rules](https://docs.riscv.org/reference/isa/priv/machine.html).
 
 The execution environment may provide software emulation; it is outside the
-core. Precise exception handling is defined in [architecture, Section 9](uqu_spec.arch.md#9-precise-synchronous-exceptions); remaining detailed
-trap delivery and other implementation-defined exception priorities remain TBD.
+core. Precise exception handling and the implemented exception ordering are
+defined in [architecture, Section 9](uqu_spec.arch.md#9-precise-synchronous-exceptions)
+and the stage/controller contracts.
 
 The ISA permits this policy; see the
 [RV32I load/store specification](https://docs.riscv.org/reference/isa/v20260120/unpriv/rv32.html#_load_and_store_instructions).
@@ -2075,15 +2089,16 @@ to the deferred full-F design intent (D-185 through D-187); they shall not
 apply to Zfinx. Any future implementation of full F shall revisit that profile.
 
 PMP shall be selected through `ISA_PMP`, defaulting to `0`, and follow the
-internal structure defined in [architecture, Section 8.1](uqu_spec.arch.md#81-internal-pmp-and-memory-fault-boundary); its enabled profile is described there, while full-core integration remains
-pending. Other memory protection
-features remain future design choices. U-mode support alone shall not be
-described as providing memory isolation without an implemented protection
+internal structure defined in [architecture, Section 8.1](uqu_spec.arch.md#81-internal-pmp-and-memory-fault-boundary).
+The enabled profile, CSR state and concurrent IF/MEM checks are integrated in
+the core. Other memory protection features remain future design choices.
+U-mode support alone shall not be described as providing memory isolation without an implemented protection
 mechanism.
 
-The privileged ISA baseline is fixed in [architecture, Section 1](uqu_spec.arch.md#1-fixed-32-bit-architecture). CSR behavior, trap
-delivery, reset values, and PMP follow the topic requirements below; remaining
-CSR field mappings and internal sequencing are implementation follow-ups.
+The privileged ISA baseline is fixed in [architecture, Section 1](uqu_spec.arch.md#1-fixed-32-bit-architecture).
+CSR behavior, trap delivery, reset values and PMP follow the topic requirements
+below, with implemented field mappings and update priorities in Section 18.2.
+FPU execution and core debug sequencing remain open.
 The reset contract is defined in [interfaces, Section 3](uqu_spec.interfaces.md#3-active-low-synchronous-reset).
 Precise synchronous exception behavior is defined in [architecture, Section 9](uqu_spec.arch.md#9-precise-synchronous-exceptions).
 The agreed machine interrupt inputs are defined in [interfaces, Section 4](uqu_spec.interfaces.md#4-external-machine-interrupt-sources).
@@ -2093,7 +2108,8 @@ The agreed machine interrupt inputs are defined in [interfaces, Section 4](uqu_s
 **Status:** Internal placement, bus boundary, disabled default, fixed sixteen-entry
 capacity, four-byte granularity, all standard address modes, zeroed
 configuration bytes and unreset address registers, and zero-valued disabled PMP CSRs agreed;
-remaining enabled profile and implementation milestone TBD
+enabled profile and core integration implemented; broader verification and
+physical validation remain open
 
 PMP shall be a core-internal feature. Its configuration CSRs, effective-privilege
 evaluation, and permission checks shall reside within the core. The external
@@ -2228,8 +2244,8 @@ access succeeds in M-mode and fails in U-mode when PMP is enabled, including
 when all entries are OFF. `ISA_PMP = 0` instead permits every access through
 the checker and removes its checking logic at elaboration.
 
-The initial PMP CSR field implementation is defined in Section 18.2; its
-full-core integration milestone remains pending.
+The PMP CSR field implementation is defined in Section 18.2 and connected
+to the shared core-owned checker under Section 3.13.
 
 ## 9. Precise synchronous exceptions
 
@@ -2263,9 +2279,10 @@ synchronous trap entry at WB as defined in [architecture, Section 9.2](uqu_spec.
 
 External bus-error side effects require a separate memory-interface contract.
 Precise exception reporting shall not imply that the core can undo an external
-write or device side effect. The OBI error-response guarantees, treatment of
-already accepted transactions, and any separate asynchronous bus-error reporting
-remain TBD. The agreed pre-request rejection of misaligned accesses in [architecture, Section 7](uqu_spec.arch.md#7-trap-on-misaligned-data-accesses) is unchanged.
+write or device side effect. The core retains already presented/accepted
+transactions under the OBI persistence and drain contract in the interface
+specification. External fault side-effect guarantees remain system-specific;
+separate asynchronous bus-error reporting is outside the current interface. The agreed pre-request rejection of misaligned accesses in [architecture, Section 7](uqu_spec.arch.md#7-trap-on-misaligned-data-accesses) is unchanged.
 
 ### 9.1. Informative machine trap value
 
@@ -2310,7 +2327,8 @@ custom-operation memory fault details remain subject to [interfaces, Section 5](
 
 ### 9.2. Early exception containment and WB trap entry
 
-**Status:** Agreed; exact event interfaces and request-permission timing TBD
+**Status:** Native exception containment and memory-effect permission integrated
+through the core controller and WB
 
 Once a synchronous exception is recognized for a live instruction, the central
 controller shall establish a pending-exception barrier at that instruction.
@@ -2649,7 +2667,7 @@ tracing. Compressed decoding is defined in [architecture, Section 15.1](uqu_spec
 Selected-word assembly and fault portions are defined in Section 15.3; the
 fetched-word buffer and prefetch fixture are defined in Section 15.4. Production
 IF and accepted redirect handling are defined in Section 15.5; full-core event
-arbitration remains integration work.
+arbitration is connected in Section 3.13.
 
 Fetch shall continue filling available buffer space during downstream pipeline
 stalls. A downstream stall alone shall not suppress new instruction requests:
@@ -2683,8 +2701,8 @@ those choices for uquintus.
 
 ### 15.1. Configurable compressed-instruction decoding
 
-**Status:** Three strategies implemented in IF/DE and checked across actual
-parent-owned boundary storage; full-core integration pending
+**Status:** Three strategies implemented in IF/DE, checked across actual
+parent-owned boundary storage and integrated into the core
 
 `ISA_C` selects the software-visible extension. Two independent elaboration
 selectors configure its implementation without changing the ISA:
@@ -2807,7 +2825,7 @@ presented request shall still finish its handshake and drain its response.
 Discarded words, including their errors, shall produce no result or trap.
 Reset shall clear only transaction control under the coordinated bus-reset
 contract. IF/core shall own redirect targets, invalidation and request holds.
-The later buffer/aligner shall associate each word error with a surviving
+The buffer/aligner shall associate each word error with a surviving
 instruction and its faulting byte portion before generating cause 1; a word
 error alone shall not perform architectural trap entry.
 
@@ -2817,8 +2835,8 @@ permissions, independent privilege, concurrent bus progress, retained outcomes
 and discarded IF error responses. Standalone ifetch tests cover permission,
 bus waits/errors, backpressure, killed drains and reset. The aligner is defined
 in Section 15.3 and buffering in Section 15.4. The prefetch fixture combines
-them; production IF is defined in Section 15.5. Full-core integration remains
-pending.
+them; production IF is defined in Section 15.5 and full-core integration in
+Section 3.13.
 
 ### 15.3. Stateless instruction aligner
 
@@ -2867,8 +2885,9 @@ The implementation and regressions cover C-disabled/enabled selection, all
 16-bit prefixes at both halfword positions, missing/error word combinations,
 informative fault portions, wraparound, and mixed-length stream consumption
 under stalls. Fetch/buffer/aligner integration is covered in Section 15.4;
-production IF is implemented in Section 15.5. Architectural verification remains
-pending.
+production IF is implemented in Section 15.5. Core RVFI, ELF and scoped Spike
+regressions add architectural observations as described in the verification
+specification; formal proofs remain deferred.
 
 ### 15.4. Fetched-word buffer and prefetch integration
 
@@ -2922,9 +2941,9 @@ instruction progression, mixed-length reuse, response errors, discarded
 transactions and repeated flushes. Capacities 2, 3, 4, 5 and 8 are exercised,
 with C disabled/enabled for integration. This does not implement the production
 IF stage or IF/DE storage. Production IF, expansion placement and the two
-baseline prediction modes are implemented in Section 15.5; privileged control,
-debug and FENCE.I arbitration remain core integration work. PMP remains the one
-core-owned checker.
+baseline prediction modes are implemented in Section 15.5. The core connects
+privileged control and FENCE.I arbitration in Section 3.13; debug remains open.
+PMP remains the one core-owned checker.
 
 ### 15.5. Instruction-fetch stage and parent boundary
 
@@ -2995,10 +3014,9 @@ outputs in parent-owned storage and feed real DE. It shall test held boundary
 metadata, original-length links, taken/not-taken branches and wrong-path faults
 in all three compressed strategies. A DE branch accepted for transfer shall
 redirect IF in that cycle without echoing a flush into its own DE transaction.
-External core events shall retain priority. Full-core debug/trap/FENCE.I
-arbitration and the deferred standard CV-X-IF compressed channel remain outside
-this implementation; supplied hold, permit, flush and redirect ports shall
-support later controller integration.
+External core events shall retain priority. Full-core trap/FENCE.I arbitration
+uses the supplied hold, permit, flush and redirect ports under Section 3.13.
+Core debug and the standard CV-X-IF compressed channel remain deferred.
 
 ## 16. Optional instruction-fetch fence
 
@@ -3193,7 +3211,8 @@ commitment, reset, and precise-exception rules. The central controller shall
 continue to arbitrate global events, and the core-owned two-port PMP block shall
 consume the CSR module's PMP state. The module may use internal submodules while
 retaining this ownership boundary. The standalone module's initial port/event
-contract is defined in Section 18.2; full-controller integration remains pending.
+contract is defined in Section 18.2 and integrated with WB/core control in
+Section 3.13.
 
 The CSR module shall be able to report an exception for an invalid access.
 An explicit CSR instruction targeting an
@@ -3219,8 +3238,8 @@ trap entry at WB under [architecture, Section 9.2](uqu_spec.arch.md#92-early-exc
 updates. Thus the CSR module's local fault report shall feed the same precise
 exception path as faults from other units. Discarded instructions shall have
 no CSR access side effects. The initial module ports, fault report, and local
-update priorities are defined in Section 18.2; global-event arbitration remains
-controller integration work.
+update priorities are defined in Section 18.2; global-event arbitration is
+connected through the core controller and WB.
 
 Native CSR instruction processing shall complete within one WB processing cycle
 once the instruction is eligible to commit. The CSR module shall provide the
@@ -3308,7 +3327,7 @@ this baseline profile. See the
 
 ### 18.1. Serialized MRET at WB
 
-**Status:** Agreed; detailed controller sequencing TBD
+**Status:** Serialized DE-to-WB sequencing, CSR updates and redirect implemented
 
 `MRET` shall be a serialization point. Once recognized in DE, it shall block
 younger normal execution and new sequential fetch requests while allowing
@@ -3391,8 +3410,8 @@ bits, with no CSR payload memory or duplicated alias state. Representative
 Yosys checks confirm the widths and reset coverage, including only 270 state
 bits for the default M+U configuration. Tests cover all sixteen combinations
 of U/C/Zfinx-CSR/PMP state, with representative I/E/M identification settings.
-This is a standalone-component milestone; complete pipeline/CSR/PMP integration
-and an operational Zfinx execution backend remain pending. With `DEBUG=1`,
+Pipeline/CSR/PMP integration is implemented in the core; an operational Zfinx
+backend and core debug sequencing remain open. At component level with `DEBUG=1`,
 debug-only DCSR/DPC/dscratch0 state and counter freezing follow the
 [WB interface guide](../verif/sim/wb/README.md); disabled debug outputs are zero
 and debug CSR accesses trap. Full-F and atomic configurations remain unsupported.
@@ -3473,7 +3492,7 @@ be resolved when their implementation milestone is undertaken:
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
 | ISA/CSR/PMP | WB CSR state/access checks, counters, trap/MRET updates, core control/PMP and initial XIF tracking are integrated. Broader architectural verification and core debug integration remain; FPU state awaits its backend. |
 | Frontend | Full-core event arbitration, expansion placement, prefetch/fault association, redirects and none/static_not_taken behavior are connected. Dynamic predictors and the standard XIF compressed channel remain future work. |
-| Milestones | Implementation order and acceptance criteria for optional ISA features, PMP, XIF, latch storage, and non-default configurations after the baseline milestone. |
+| Milestones | Complete baseline formal/physical acceptance, broaden verification of implemented optional configurations, and define remaining FPU/debug and future-feature milestones. |
 
 Full F and its separate register file are deferred in favor of Zfinx. `ISA_A`
 and `MUA_HARDENED` are future options whose enabled settings remain unsupported
@@ -3505,7 +3524,7 @@ later decisions determine the active contract.
 | D-045 | Default ISA extension parameters to `ISA_M = 0`, `ISA_C = 0`, and `ISA_F = 0`. | Provide RV32I as the default ISA configuration. | Agreed |
 | D-046 | Add `ISA_E`, defaulting to `0`, to select RV32E instead of RV32I when enabled. | Allow a reduced 16-register integer base while keeping `XLEN = 32` and RV32I as the default. | Agreed |
 | D-047 | Enable operand forwarding by default while retaining the option to disable it. | Use available results before writeback in the default configuration and support stall-only experiments. | Agreed |
-| D-048 | Hold native multi-cycle instructions in EX and apply backpressure to predecessor stages; allow older instructions in successor stages to complete. | Keep execution in order while avoiding unnecessary downstream stalls and preserving memory-response handling; custom operation integration remains TBD. | Agreed; native EX policy retained; XIF follows D-234 |
+| D-048 | Hold native multi-cycle instructions in EX and apply backpressure to predecessor stages; allow older instructions in successor stages to complete. | Keep execution in order while avoiding unnecessary downstream stalls and preserving memory-response handling; custom operation integration remains TBD. | Agreed; native EX policy implemented; initial XIF lifecycle under D-234 and D-301 |
 | D-049 | Make ordinary synchronous instruction exceptions precise and prioritize the oldest faulting instruction; define external bus-error side effects separately in the memory-interface contract. | Provide a defined architectural state at trap entry while distinguishing core precision from external transaction guarantees. | Agreed |
 | D-055 | Support both standard `mtvec` Direct and Vectored modes. | Allow shared trap dispatch or interrupt-specific vector entries while synchronous exceptions always enter at BASE. | Agreed |
 | D-056 | Execute permitted `WFI` instructions as no-ops in the baseline implementation. | Avoid a dedicated sleep/wakeup state while preserving architectural privilege checks and normal instruction retirement. | Agreed |
@@ -3520,19 +3539,19 @@ later decisions determine the active contract.
 | D-099 | Complete all base integer ALU operations, including shifts, in one EX execution cycle, subject to operand availability and pipeline backpressure. | Keep base integer execution latency uniform in the five-stage pipeline. | Agreed; optional execution-unit latencies remain separate |
 | D-100 | Support an SRAM-backed integer register file with technology-specific macro integration isolated from common core logic. | Allow SRAM storage while retaining the configured logical port requirements. | Superseded by D-101; SRAM-backed support no longer required |
 | D-101 | Use flip-flop or latch storage with combinational DE reads for the initial integer register file. | Preserve the required operand-read timing and logical ports without an SRAM macro mapping. | Agreed; both backends and default defined in D-103 |
-| D-103 | Support both flip-flop and latch register-file backends, selected at elaboration time, with flip-flops as the default. | Provide a portable default and a latch implementation option under the same architectural contract. | Agreed; parameter name defined by [D-135](uqu_spec.style.md#8-style-decision-record), encoding TBD |
+| D-103 | Support both flip-flop and latch register-file backends, selected at elaboration time, with flip-flops as the default. | Provide a portable default and a latch implementation option under the same architectural contract. | Implemented FF/latch backends; encodings in config/selectors.json; physical mapping/timing open |
 | D-104 | Handle WB-to-DE bypassing in pipeline forwarding logic, with dependency stalls when forwarding is disabled; do not add an independent write-through bypass to either register-file backend. | Keep dependency handling centralized and consistent for native operands, decode-stage control flow, and XIF sources and paired destinations. | Agreed; paired XIF forwarding limited to the primary destination by D-230 |
 | D-106 | Perform the architecturally required read/modify/write of native CSR instructions in WB, with returned GPR data and CSR updates tied to the same retiring instruction. | Keep explicit CSR execution precise without speculative architectural CSR updates; implicit updates retain their own contracts. | Agreed; uniform baseline serialization defined in D-107 |
 | D-107 | Uniformly serialize all native CSR instructions, including read-only accesses: allow older instructions to drain and block younger progression beyond DE until CSR retirement or exception/flush handling. | Avoid CSR-state forwarding and per-CSR pipeline hazard classifications in the baseline. | Agreed |
 | D-113 | Implement base-ISA `FENCE` as a conservative full barrier for memory and device-I/O accesses rather than selectively interpreting predecessor/successor sets. | Minimize implementation effort; fence performance is not a priority for the intended use. | Agreed; stage control and interface defined by D-205 and D-208; system-specific ordering details TBD |
-| D-115 | Fail builds for unsupported parameter values or combinations, with clear diagnostics identifying the invalid settings and constraint. | Detect configuration mistakes before simulation or synthesis and prevent silent configuration changes or missing requested features. | Agreed; checking mechanism TBD |
+| D-115 | Fail builds for unsupported parameter values or combinations, with clear diagnostics identifying the invalid settings and constraint. | Detect configuration mistakes before simulation or synthesis and prevent silent configuration changes or missing requested features. | Implemented shared configuration validation and RTL elaboration guards; Section 2 |
 | D-117 | Report faulting addresses in `mtval` for instruction/data misalignment and access faults, and original instruction bits for illegal-instruction traps; write zero for the baseline's other traps. | Provide useful software trap diagnostics while preserving precise instruction and fault-address association. | Agreed; custom-memory fault details remain separate |
 | D-118 | Hardwire `misa` to a constant derived from the implemented RTL configuration; ignore permitted writes and provide no runtime ISA switching. | Identify the configured ISA without writable extension-selection state. | Agreed; custom-extension identification details TBD |
 | D-119 | Initially hardwire `mvendorid`, `marchid`, and `mimpid` to zero as standard read-only identification CSRs. | Use permitted initial values while deferring project-specific identifiers. | Agreed |
 | D-139 | Configure instruction-fetch buffer capacity through `MUA_IF_BUFFER_WORDS`, defaulting to two 32-bit word slots while retaining one outstanding fetch request. | Support instruction reuse and assembly with an adjustable buffer size independent of bus concurrency. | Agreed; supported capacities defined by D-217, prefetch policy defined by D-140 |
-| D-140 | Continue filling available instruction-buffer space during downstream stalls, subject to capacity, one outstanding request, and control-flow/synchronization restrictions. | Overlap fetch latency with pipeline stalls while retaining precise fault handling and correct redirect recovery. | Agreed; detailed frontend control implementation TBD |
-| D-141 | Implement compressed-instruction expansion in a separate module, initially in IF before the IF/DE register, retaining original encoding, PC, length, and fault metadata. | Reuse the native DE decoder and keep decompression placement easy to revisit after timing evaluation. | Native component under D-282; strategies under D-283; IF integration under D-287; full-core integration and timing evaluation pending |
-| D-142 | Keep PMP CSRs and permission checks inside the core before memory requests; expose no privilege/PMP attributes for external enforcement, and consume external bus faults through the normal error responses. | Make protection a core responsibility while keeping the memory interface independent of PMP implementation. | Agreed; enable/default defined by D-143 and fixed capacity by D-251; remaining field details and milestone open |
+| D-140 | Continue filling available instruction-buffer space during downstream stalls, subject to capacity, one outstanding request, and control-flow/synchronization restrictions. | Overlap fetch latency with pipeline stalls while retaining precise fault handling and correct redirect recovery. | Implemented in IF and integrated core; Sections 15.4–15.5 and 3.13 |
+| D-141 | Implement compressed-instruction expansion in a separate module, initially in IF before the IF/DE register, retaining original encoding, PC, length, and fault metadata. | Reuse the native DE decoder and keep decompression placement easy to revisit after timing evaluation. | Implemented standalone, IF/DE and full-core paths under D-282/D-283/D-287/D-289; timing evaluation open |
+| D-142 | Keep PMP CSRs and permission checks inside the core before memory requests; expose no privilege/PMP attributes for external enforcement, and consume external bus faults through the normal error responses. | Make protection a core responsibility while keeping the memory interface independent of PMP implementation. | Implemented internal PMP/CSR/core boundary; enabled profile in Section 8.1 and storage in Section 18.2 |
 | D-143 | Select internal PMP through `ISA_PMP`, defaulting to `0`; omit permission-checking logic and writable PMP-entry storage when disabled. | Keep PMP optional and preserve the default implementation scope. | Agreed; disabled CSR behavior defined by D-144; fixed sixteen-entry enabled capacity by D-251 |
 | D-144 | When `ISA_PMP = 0`, keep standard PMP CSRs accessible in M-mode with reads returning zero and permitted writes ignored; retain normal CSR privilege checks. | Allow software probing without writable PMP-entry storage. | Agreed |
 | D-145 | Configure the enabled internal PMP entry count through `ISA_PMP_REGIONS`, with consecutive entries starting at zero; ignore the setting when `ISA_PMP = 0`. | Allow hardware configurations to select PMP capacity while retaining the standard priority structure. | Superseded by D-251: fixed sixteen-entry capacity and no count parameter |
@@ -3556,12 +3575,12 @@ later decisions determine the active contract.
 | D-163 | Share one iterative chain between MUL and DIV, comprising the EX ALU's first arithmetic step and `F - 1` additional configurable slices, where `F = MUA_MULDIV_ITERUNROLL`; when MUL is parallel, only DIV uses the iterative chain and MUL has its own parallel datapath. | Use the full configured unroll capacity for either iterative operation without separate arithmetic chains or independent factors. | Agreed; initial implementation described in Sections 3.4 and 3.5 |
 | D-164 | Limit initial parallel multiplication to `parallel` (one EX cycle, default) and `parallel+stages+2` (two EX cycles with an internal register boundary); reject other explicit stage counts. | Provide one registered parallel option while keeping the implementation scope limited. | Agreed; parallel default superseded by D-262; initial partial-product partition described in Section 3 |
 | D-165 | Execute division and remainder instructions independently, without instruction fusion or reuse of a previous instruction's quotient/remainder. | Retain independent computation, fixed latency, and retirement for every division or remainder instruction. | Agreed |
-| D-166 | Use common request/result `valid`/`ready`/`fire` handshakes for native arithmetic execution units, with stable blocked payloads, one start and one result per live instruction, and same-edge request/result transfer for single-cycle units. | Integrate arithmetic implementations consistently while preserving fixed execution latency, blocking EX behavior, and correct backpressure handling. | Agreed; ALU/MUL/DIV cancellation defined by D-167; exact payloads, adapters, and status fields TBD |
+| D-166 | Use common request/result `valid`/`ready`/`fire` handshakes for native arithmetic execution units, with stable blocked payloads, one start and one result per live instruction, and same-edge request/result transfer for single-cycle units. | Integrate arithmetic implementations consistently while preserving fixed execution latency, blocking EX behavior, and correct backpressure handling. | Implemented ALU/MUL/DIV interfaces and EX ownership; FPU stub present, backend adapter open; D-167 cancellation retained |
 | D-167 | Immediately cancel an affected native ALU/MUL/DIV operation on its instruction's flush, clearing active/busy, pending-result validity, and request tracking at the active clock edge with priority over stalls, progress, and transfers; suppress stale results and release the unit without waiting for completion. | Discard flushed arithmetic work promptly while preserving instruction ownership, precise side effects, and the separate memory, CV-X-IF, and interrupt contracts. | Agreed; extended to FPU operations by D-239 |
-| D-168 | Use one central arbiter/controller for global events, redirects, affected-instruction flushes, and trap/interrupt draining; retain local stage/unit handshake and progress control and a separate hazard/forwarding block, preserving combinational DE branch redirection. | Make global priorities explicit while keeping execution, memory, and dependency control modular. | Agreed; exact interfaces, controller states, and detailed event eligibility/priority TBD |
-| D-169 | Contain a live synchronous exception as soon as it is recognized, block or discard younger instructions, let older instructions finish, and carry the faulting instruction's metadata to WB for one architectural trap-entry event without normal retirement. | Keep trap-state updates at one point while preventing younger effects before the exception reaches WB. | Agreed; detailed event interfaces and sequencing TBD |
-| D-170 | Gate younger data-memory requests until every older instruction has completed successfully or is proven unable to fault; cover reads, writes, shared-LSU custom accesses, and equivalent irreversible-effect ordering on separate custom paths. | Prevent stores and device reads from escaping before an older fault is resolved, without blocking older work or requiring a custom request's own WB commit permission. | Agreed; exact permission timing and separate-path mechanisms TBD |
-| D-171 | Serialize `MRET` from DE, let older instructions finish, and perform return-state reads/updates and the redirect to `mepc` at WB; preserve DE resolution for ordinary `ret`/`JALR` and accept the later `MRET` redirect. | Favor explicit privilege-state updates and simple ordering over trap-return performance. | Agreed; detailed controller sequencing TBD |
+| D-168 | Use one central arbiter/controller for global events, redirects, affected-instruction flushes, and trap/interrupt draining; retain local stage/unit handshake and progress control and a separate hazard/forwarding block, preserving combinational DE branch redirection. | Make global priorities explicit while keeping execution, memory, and dependency control modular. | Implemented controller interfaces/event sequencing and core binding; Section 3.2.1 and D-289; initial XIF under D-301; core debug open |
+| D-169 | Contain a live synchronous exception as soon as it is recognized, block or discard younger instructions, let older instructions finish, and carry the faulting instruction's metadata to WB for one architectural trap-entry event without normal retirement. | Keep trap-state updates at one point while preventing younger effects before the exception reaches WB. | Implemented native early containment and WB trap path; Sections 3.2.1, 3.13 and 9.2 |
+| D-170 | Gate younger data-memory requests until every older instruction has completed successfully or is proven unable to fault; cover reads, writes, shared-LSU custom accesses, and equivalent irreversible-effect ordering on separate custom paths. | Prevent stores and device reads from escaping before an older fault is resolved, without blocking older work or requiring a custom request's own WB commit permission. | Implemented native MEM effect permission; future custom-memory mechanisms remain deferred under D-234 |
+| D-171 | Serialize `MRET` from DE, let older instructions finish, and perform return-state reads/updates and the redirect to `mepc` at WB; preserve DE resolution for ordinary `ret`/`JALR` and accept the later `MRET` redirect. | Favor explicit privilege-state updates and simple ordering over trap-return performance. | Implemented serialized MRET control, CSR updates and WB redirect; Sections 3.13 and 18.1 |
 | D-172 | Support every four-byte-aligned 32-bit `mtvec.BASE` in Direct and Vectored modes, with all BASE bits writable and no additional Vectored-mode alignment restriction. | Preserve software placement flexibility and compute the full vectored interrupt target without imposing stronger hardware alignment requirements. | Agreed |
 | D-174 | Pin the 20260120 Unprivileged and Privileged Architecture manuals for the selected ISA and privilege features; require explicit decisions for additional extensions or baseline changes. | Give implementation and verification a fixed normative ISA reference while retaining separately agreed interface and debug versions. | Agreed |
 | D-175 | With `ISA_E = 1`, trap instructions that use unavailable integer registers `x16`–`x31` as illegal, without execution, low-register aliasing, or CV-X-IF offload; check actual operands rather than unused or immediate fields. | Make RV32E register restrictions explicit and consistent across native and custom instructions. | Agreed |
@@ -3583,9 +3602,9 @@ later decisions determine the active contract.
 | D-199 | Give native load/store address-misaligned exceptions priority over PMP access denial for the same instruction, without requiring a PMP check or issuing a bus request; preserve the original effective address for trap reporting. | Reject unsupported misaligned data accesses early while preserving precise exception ordering. | Agreed |
 | D-200 | In M+U configurations, retain written MPP values U (`0`) and M (`3`) and map unsupported values `1` or `2` to M; in M-only configurations hardwire MPP to M. Preserve architectural trap/MRET updates and normal CSR access checks. | Define deterministic privilege-field WARL behavior without storing unsupported return modes. | Agreed |
 | D-201 | Hardwire `mepc[1:0]` to zero with C disabled; with C enabled, hardwire bit 0 to zero and allow bit 1 to be written. Retain upper address bits and use the same aligned value for CSR reads and MRET. | Match the configured instruction alignment and preserve halfword-aligned return addresses in compressed-instruction configurations. | Agreed |
-| D-202 | Use a dedicated CSR module that checks accesses and reports exceptions; trap accesses outside the documented map as illegal, preserve mapped constant-zero/WARL behavior, and suppress ordinary CSR/GPR updates on faults through the core's precise WB trap path. | Centralize CSR legality and register semantics while retaining one architectural trap-entry mechanism. | Agreed; exact module interface and global-event update sequencing TBD; native access timing defined by D-203 |
+| D-202 | Use a dedicated CSR module that checks accesses and reports exceptions; trap accesses outside the documented map as illegal, preserve mapped constant-zero/WARL behavior, and suppress ordinary CSR/GPR updates on faults through the core's precise WB trap path. | Centralize CSR legality and register semantics while retaining one architectural trap-entry mechanism. | Implemented CSR interface, legality and precise WB trap path; Sections 18.2 and 3.13; access timing under D-203 |
 | D-203 | Process native CSR instructions in one eligible WB cycle with combinational reads/checks/write calculation and successful updates on the active clock edge; add no CSR-unit wait states and prevent repeated updates while held. | Keep uniformly serialized CSR execution simple while preserving atomic commitment, fault handling, and normal counter progression. | Agreed |
-| D-204 | Make the CSR module own architectural CSR storage and updates, including counters and enabled PMP/floating-point CSR state; provide explicit state outputs and event inputs, with the PMP permission checker separate. | Give architectural CSR state one ownership boundary while keeping event detection, global arbitration, and permission checking modular. | Agreed; exact internal interfaces and event arbitration details TBD |
+| D-204 | Make the CSR module own architectural CSR storage and updates, including counters and enabled PMP/floating-point CSR state; provide explicit state outputs and event inputs, with the PMP permission checker separate. | Give architectural CSR state one ownership boundary while keeping event detection, global arbitration, and permission checking modular. | Implemented CSR state/events and shared-PMP connections; Sections 18.2 and 3.13; FPU backend and core debug sequencing open |
 | D-205 | Reuse DE serialization and WB completion for FENCE: block younger execution, let older work finish, and retire only after the required native/custom/external memory-ordering conditions are satisfied. | Reuse existing serialization control for the conservative full barrier while preserving the external ordering contract. | Agreed; interface defined by D-208; system-specific ordering details TBD |
 | D-206 | Reuse DE serialization and WB completion for optional FENCE.I; hold new fetches through required synchronization, invalidate stale instruction state at completion, and restart at the fence's successor while draining and discarding stale bus responses. | Reuse serialization control and define the instruction-fetch restart point without assuming internal caches or bypassing external visibility requirements. | Agreed; interface defined by D-207; system-specific synchronization requirements TBD |
 | D-209 | Hardwire `mstatush` and read-only `mconfigptr` to zero in every configuration; provide constant-zero `menvcfg` and `menvcfgh` only with U-mode enabled. Ignore otherwise permitted writes to the writable CSR addresses and preserve normal privilege, read-only-address, and unmapped-address checks. | Complete the baseline status/environment/configuration-discovery CSR choices without additional writable state. | Agreed |
@@ -3597,7 +3616,7 @@ later decisions determine the active contract.
 | D-220 | Add independent boolean `MUA_FORWARD_MEM_TO_EX`, defaulting to one and subordinate to `MUA_FORWARDING`; forward available MEM results to EX consumers or use another valid operand route or dependency stalls when the path is disabled. | Support adjacent dependent native ALU operations without requiring the combinational EX-to-DE path, while allowing experiments with MEM-to-EX bypass disabled. | Agreed; registered load-result rule defined by D-223; stall retention defined by D-224 |
 | D-221 | Add independent boolean `MUA_FORWARD_WB_TO_EX`, defaulting to one and subordinate to `MUA_FORWARDING`; forward available WB results to EX consumers with the existing youngest-writer and validity checks, or use another valid route or dependency stalls when disabled. | Supply operands whose producers have advanced beyond MEM without requiring earlier DE forwarding, while retaining independent path configuration. | Agreed; stall retention defined by D-224 |
 | D-222 | Resolve native integer store data through the configured operand forwarding/hazard logic in EX and retain it with the effective address before transfer to MEM; require no late store-data forwarding or register-dependency wait in MEM. | Keep register dependency resolution out of the MEM-stage LSU while preserving ordinary byte-lane and bus handling. | Agreed |
-| D-223 | Require successful native load responses to be captured in core registers before their data becomes forwardable; forward the correct selected/extended value through enabled paths, with no direct external-response bypass and no fixed load-use stall count. | Separate external response timing from dependent computation while preserving variable-latency memory and precise faults. | Agreed; detailed retained-result placement/routing TBD |
+| D-223 | Require successful native load responses to be captured in core registers before their data becomes forwardable; forward the correct selected/extended value through enabled paths, with no direct external-response bypass and no fixed load-use stall count. | Separate external response timing from dependent computation while preserving variable-latency memory and precise faults. | Implemented registered LSU/MEM completion and core forwarding qualification; Sections 3.8–3.9 and 3.13 |
 | D-224 | Retain correctly resolved operands needed by a stalled consumer, or its completed result, while older producers drain; allow necessary local capture without advancing or reissuing the held instruction, and invalidate retained validity on owning flush/reset. | Prevent a stalled consumer from losing a forwarded value when its producer leaves the forwarding stage. | DE source-retention requirement superseded by selectable policy D-275; executing-consumer/result retention and protocol stability remain required |
 | D-225 | Finalize nonfaulting branch/JAL/JALR resolution and any DE redirect only with the instruction's accepted DE-to-EX transfer, required operands ready, and central arbitration permitting it; wait while held and perform the action once. | Keep DE control flow simple without bookkeeping for an early redirect from a stalled branch. | Agreed; existing prediction, precise-fault, and XIF issue contracts preserved |
 | D-226 | Default both `MUA_FORWARD_EX_TO_DE` and `MUA_FORWARD_MEM_TO_DE` to one, retaining their independent disable controls and the `MUA_FORWARDING` master switch. | Enable all currently selectable operand-forwarding paths in the default configuration while preserving timing and stall experiments. | Agreed |
@@ -3615,26 +3634,26 @@ later decisions determine the active contract.
 | D-263 | Place the first shared `uqu_arith` instance and its input mux in parent EX, with ALU and MUL/DIV as siblings exposing combinational arithmetic ports; retain MUL/DIV's additional `F - 1` slices and existing execution timings. | Make resource ownership explicit in the stage that already owns the executing instruction and keep the unit boundaries independent. | Agreed; supersedes the earlier ALU-owned arrangement; interfaces described in Sections 3.5 and 3.6 |
 | D-264 | Keep DE/EX and EX/MEM registers in the EX stage parent; EX owns only local execution control/tracking, its functional units, and the first shared arithmetic instance. | Separate pipeline storage and instruction identity from stage execution while preserving one-time unit issue, backpressure, and age-qualified cancellation. | Agreed; EX component and parent-register fixture described in Section 3.7 |
 | D-265 | Instantiate the same stateless PMP checker separately in IF and MEM, consuming PMP configuration/address state owned solely by the CSR unit through core-parent connections. | Check instruction and data accesses independently while sharing implementation and keeping architectural protection state in one place. | Superseded by D-266: core-owned two-port block with shared region decoding |
-| D-266 | Place one stateless two-port PMP block in the pipeline-stage parent at core scope; share region decoding from CSR-owned state and perform concurrent independent IF/MEM address, priority, and permission checks. | Share configuration decoding explicitly while preserving simultaneous instruction/data checks and single ownership of architectural protection state. | Agreed; standalone dual-port block implemented, full-core wiring pending |
+| D-266 | Place one stateless two-port PMP block in the pipeline-stage parent at core scope; share region decoding from CSR-owned state and perform concurrent independent IF/MEM address, priority, and permission checks. | Share configuration decoding explicitly while preserving simultaneous instruction/data checks and single ownership of architectural protection state. | Implemented dual-port block, CSR state and concurrent IF/MEM core wiring; Sections 8.1, 18.2 and 3.13 |
 | D-267 | Implement CSRs as explicitly decoded state fields, allocating storage only for architecturally mutable fields in the selected configuration; assemble read values from state/constants/inputs/aliases and inspect representative synthesized storage. | Avoid a general writable CSR array and storage for hardwired, reserved, aliased, or disabled-feature payloads while preserving all architectural access and update semantics. | Implemented; standalone bindings and measured state budget in Section 18.2 |
 | D-268 | Implement the initial decoded CSR register file with one-shot WB commitment, explicit accepted architectural events, compact M/U/mtvec/mcause fields, optional Zfinx/PMP state, reserved PMP W-only writes legalized by clearing W, and explicit rejection of deferred debug/full-F/atomic configurations. | Provide the baseline CSR component with measured configuration-dependent storage while preserving architectural access semantics and leaving global pipeline arbitration in the parent. | Debug restriction superseded by D-271; implemented under D-267; exact bindings and local priorities in Section 18.2 |
 | D-269 | Keep EX/MEM and MEM/WB registers in the MEM stage's parent; MEM owns one LSU and local one-shot issue tracking, exposes the parent PMP query, and blocks replacement completion/issue while killed bus work drains without stalling older WB. | Preserve precise transaction/identity association and shared PMP ownership with minimal stage-local control. | Implemented; stage and parent-register fixture in Section 3.9 |
 | D-270 | Make WB own the CSR unit and native result/commit logic while MEM/WB, GPR storage, current privilege, arbitration and redirects remain in the core parent; qualify architectural token effects with one acceptance and defer XIF/debug explicitly. | Keep native WB precise and stateless around existing CSR storage, with independent fault reporting and no repeated held-token effects. | XIF/debug deferral superseded by D-271; stage/parent fixture and event contract in Section 3.10 |
 | D-271 | Complete WB standard CV-X-IF commit/result and conditional paired-write support, plus debug-only CSR state, EBREAK/DRET and debug exception routing; retain parent-owned pipeline registers, issue tracking, privilege/Debug Mode and global control. | Complete optional WB functionality with one XIF permission bit, no result queue or proprietary coprocessor channels, and compact debug state. | Implemented; extends D-268 and D-270; exact bindings and tests in the WB component guide |
-| D-272 | Implement a stateless native decoder under DE, alongside DE-owned operand and branch/target logic; retain core-owned GPR storage, boundary registers and shared control. Separate static native recognition/register legality from XIF recognition and runtime permission checks. | Begin DE with a reusable combinational component and preserve existing stage/parent responsibilities and precise-exception handling. | Decoder implemented in Section 3.11; branch under D-273; DE stage and local XIF issue implemented under D-280; full-core integration pending |
+| D-272 | Implement a stateless native decoder under DE, alongside DE-owned operand and branch/target logic; retain core-owned GPR storage, boundary registers and shared control. Separate static native recognition/register legality from XIF recognition and runtime permission checks. | Begin DE with a reusable combinational component and preserve existing stage/parent responsibilities and precise-exception handling. | Decoder, branch, DE and full-core integration implemented; Sections 3.11–3.13 and D-273/D-280/D-289/D-301 |
 | D-273 | Implement uqu_branch as a stateless DE component for comparisons, targets, links and alignment diagnostics; retain prediction/BTB in IF and transfer-qualified redirects and precise trap sequencing in DE/core. | Reuse native decoder controls while separating execution truth from frontend prediction and keeping branch arithmetic independent of EX. | Implemented; C-disabled/enabled component and decoder-fed tests, Section 6.1 |
 | D-274 | Supply DE with three resolved source values, a per-source current-readiness mask and a separate per-source EX-bypass guarantee mask; require current readiness for DE consumption and current readiness or a proven EX guarantee for native EX consumption. | Preserve adjacent dependent execution without requiring EX-to-DE forwarding, while distinguishing usable values from stale inputs and keeping hazard matching in the core parent. | Agreed; contract and dependent ADD/SUB example in Section 4.1; optional DE retention owned by hazard unit under D-275 |
-| D-275 | Centralize dependency/forwarding resolution in core-owned uqu_hazard, with boolean MUA_DE_OPERAND_RETENTION selecting continuous DE resolution (0, default) or local per-instruction source retention (1) behind the same DE interface. | Enable area/performance exploration without duplicating stage hazard logic, while preserving youngest-writer checks, EX guarantees and protocol-required holding state. | Implemented standalone under D-279; Section 4.2; supersedes unconditional DE retention in D-224; core/stage integration pending |
+| D-275 | Centralize dependency/forwarding resolution in core-owned uqu_hazard, with boolean MUA_DE_OPERAND_RETENTION selecting continuous DE resolution (0, default) or local per-instruction source retention (1) behind the same DE interface. | Enable area/performance exploration without duplicating stage hazard logic, while preserving youngest-writer checks, EX guarantees and protocol-required holding state. | Implemented component and core/stage integration; Sections 4.2 and 3.13; supersedes unconditional DE retention in D-224 |
 | D-276 | Make the core-owned hazard unit serve DE and EX with consumer-relative producer priority, common result qualification and register-source forwarding; preserve local stage handshakes and central global control. | Centralize dependency policy across both consumer stages without introducing late MEM operand waits or mixing bus/execution control into hazard tracking. | Implemented standalone under D-279; Section 4.2.1; MUA_DE_OPERAND_RETENTION affects only optional DE source storage |
-| D-277 | Feed the hazard unit normalized EX/MEM/WB producer descriptors containing slot occupancy, up to two pending destinations, primary-result availability/forwardability/data and actual stage advance; assemble these in the core from pipeline metadata and stage outputs. | Keep pending dependencies visible before completion, prevent forwarding intermediate values and separate instruction-specific completion semantics from dependency matching. | Standalone interface implemented under D-279; Section 4.2.3; parent descriptor assembly pending |
+| D-277 | Feed the hazard unit normalized EX/MEM/WB producer descriptors containing slot occupancy, up to two pending destinations, primary-result availability/forwardability/data and actual stage advance; assemble these in the core from pipeline metadata and stage outputs. | Keep pending dependencies visible before completion, prevent forwarding intermediate values and separate instruction-specific completion semantics from dependency matching. | Implemented normalized producer interface and core descriptor assembly; Sections 4.2.3 and 3.13 |
 | D-278 | Use three explicitly named DE/EX source slots with address/value/use information, a DE need-now mask, EX captured-valid bits and per-source resolved values/readiness; invalidate optional DE retention through de_valid_i/de_clear_i with clear priority at the edge and no combinational output suppression. | Keep operand availability separate from stage stall control and instruction lifetime explicit without introducing a second EX operand bank. | Standalone interface implemented under D-279; consumer/lifecycle bindings in Section 4.2.4 |
-| D-279 | Implement the standalone hazard unit with normalized producer inputs, DE/EX source resolution, movement-qualified guarantees and optional DE operand retention; add explicit boolean configuration support and a retained-RV32I preset. | Make the agreed dependency policies executable and testable before assembling DE or the full core. | Implemented; Section 4.2.5 and hazard component guide; forty-profile regression, lint, configuration guards and optimized storage checks; core/stage integration pending |
-| D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented; Section 3.12; component and native parent-fixture regressions, lint and optimized-state/signal-dependency checks; full-core controller/frontend/XIF ID integration pending |
-| D-282 | Implement stateless integer RV32C expansion with explicit original bits, compressed/illegal/HINT flags, C-disabled bypass and unchanged native words; preserve HINT register fields for downstream RV32E checks. | Reuse the decoder and DE, retain precise fault/link identity and eliminate expansion logic when C is disabled. | Implemented; Section 15.1; exhaustive halfword and decoder/DE integration tests; fetch assembly and optional XIF compressed-channel integration pending |
-| D-283 | Select compressed decoding through MUA_C_IMPL = decompress or decode_compressed, with MUA_C_DECOMPRESS_STAGE = if or de for expansion placement; default to decompress/if and ignore the selectors when C is disabled. | Compare expansion placement against parallel direct decoding while preserving ISA, original instruction identity, shared DE execution control and standard XIF ownership. | IF/DE paths implemented and tested; Sections 15.1 and 15.5; full-core integration and PPA evaluation pending |
-| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented; Section 15.2; standalone and real shared-PMP/LSU fixture tests; aligner under D-285, buffer/prefetch fixture under D-286; production IF under D-287; full-core integration pending |
-| D-285 | Implement stateless uqu_if_aligner over two ordered words with original instruction/length, next-PC and qualified-consumption suggestions; contain fetch faults with the correct first/second portion address and leave storage, PMP, decode and transfer control outside. | Separate word selection/assembly from transaction handling and configurable compressed decoding while preserving precise fault identity and word reuse. | Implemented; Section 15.3; C-disabled/enabled exhaustive prefix, error/availability, randomized and stream checks; buffer/prefetch fixture under D-286; production IF under D-287; full-core integration pending |
-| D-286 | Implement uqu_if_buffer as a fetched-word FIFO with two read windows, simultaneous pop/push, non-power-of-two capacity and minimal reset; keep prefetch addresses, response reservation and redirect control in IF, verified by a real fetch/buffer/aligner fixture. | Separate storage from instruction selection and bus handling, reserve capacity without duplicate tracking for the one-writer/one-outstanding baseline, and preserve killed-response obligations. | Implemented; Section 15.4; standalone deque tests and C-disabled/enabled prefetch integration at depths 2, 3, 4, 5 and 8; production IF under D-287; full-core integration pending |
-| D-287 | Assemble uqu_stage_if around fetch, word storage, alignment and selected IF expansion; own frontend pointers/containment while leaving IF/DE, PMP and global arbitration in the core; implement none/static_not_taken control with canonical encodings 0/1. | Make native frontend behavior concrete with reserved capacity, independent request/delivery holds, precise original instruction identity and persistent stale-transaction draining. | Implemented; Section 15.5; standalone and real IF/DE/DE parent-fixture tests across compressed paths, both branch modes and variable depths; full-core and standard XIF compressed-channel integration remain pending |
-| D-288 | Implement core-owned uqu_pipeline_ctrl with separate occupancy/completion, parent-owned slot enables/validity, age-qualified fault flushes, live IRQ drain/dispatch, serial metadata, older-WB memory safety proof and two-bit fence request/ack tracking; keep WB readiness independent of result completion and preserve WB's own accepted event. | Make native global sequencing executable without duplicating pipeline/CSR/unit state or creating protocol feedback paths; provide normalized drain/admission hooks for later optional adapters. | Implemented; Section 3.2.1; standalone and real parent/MEM/WB regressions, fence-disabled/enabled profiles and loop/storage checks; full core, XIF-ID and debug adapters remain integration work |
-| D-289 | Integrate native uqu_core with actual five stages, parent-owned boundaries/GPR/hazards/shared PMP/control, precise WB recovery, live privilege and MPRV-aware data checks; reject unfinished optional backends/adapters at elaboration. | Make the agreed first native implementation executable while keeping unsupported features explicit and preserving the existing component contracts. | Implemented; Section 3.13; full-core program regressions available; Spike/RVFI/formal, FPU, core XIF/debug adapters and ASIC flow remain unfinished |
+| D-279 | Implement the standalone hazard unit with normalized producer inputs, DE/EX source resolution, movement-qualified guarantees and optional DE operand retention; add explicit boolean configuration support and a retained-RV32I preset. | Make the agreed dependency policies executable and testable before assembling DE or the full core. | Implemented component and core/stage integration; Section 4.2.5 and hazard guide; component regression, lint and storage checks retained |
+| D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented DE and native parent-fixture/core integration; Sections 3.12–3.13; initial XIF ID/cleanup connected under D-301 |
+| D-282 | Implement stateless integer RV32C expansion with explicit original bits, compressed/illegal/HINT flags, C-disabled bypass and unchanged native words; preserve HINT register fields for downstream RV32E checks. | Reuse the decoder and DE, retain precise fault/link identity and eliminate expansion logic when C is disabled. | Implemented expansion, fetch assembly and core integration; Sections 15.1–15.5 and 3.13; standard XIF compressed channel deferred |
+| D-283 | Select compressed decoding through MUA_C_IMPL = decompress or decode_compressed, with MUA_C_DECOMPRESS_STAGE = if or de for expansion placement; default to decompress/if and ignore the selectors when C is disabled. | Compare expansion placement against parallel direct decoding while preserving ISA, original instruction identity, shared DE execution control and standard XIF ownership. | All three paths implemented in IF/DE and core; Sections 15.1, 15.5 and 3.13; PPA evaluation open |
+| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented standalone/shared-PMP fixtures, production IF and core integration; Sections 15.2–15.5 and 3.13 |
+| D-285 | Implement stateless uqu_if_aligner over two ordered words with original instruction/length, next-PC and qualified-consumption suggestions; contain fetch faults with the correct first/second portion address and leave storage, PMP, decode and transfer control outside. | Separate word selection/assembly from transaction handling and configurable compressed decoding while preserving precise fault identity and word reuse. | Implemented standalone, prefetch, IF and core integration; Sections 15.3–15.5 and 3.13; component error/availability and stream checks retained |
+| D-286 | Implement uqu_if_buffer as a fetched-word FIFO with two read windows, simultaneous pop/push, non-power-of-two capacity and minimal reset; keep prefetch addresses, response reservation and redirect control in IF, verified by a real fetch/buffer/aligner fixture. | Separate storage from instruction selection and bus handling, reserve capacity without duplicate tracking for the one-writer/one-outstanding baseline, and preserve killed-response obligations. | Implemented standalone, prefetch, IF and core integration; Sections 15.4–15.5 and 3.13; non-power-of-two/depth regressions retained |
+| D-287 | Assemble uqu_stage_if around fetch, word storage, alignment and selected IF expansion; own frontend pointers/containment while leaving IF/DE, PMP and global arbitration in the core; implement none/static_not_taken control with canonical encodings 0/1. | Make native frontend behavior concrete with reserved capacity, independent request/delivery holds, precise original instruction identity and persistent stale-transaction draining. | Implemented IF, parent fixtures and full-core connection; Sections 15.5 and 3.13; standard XIF compressed channel deferred |
+| D-288 | Implement core-owned uqu_pipeline_ctrl with separate occupancy/completion, parent-owned slot enables/validity, age-qualified fault flushes, live IRQ drain/dispatch, serial metadata, older-WB memory safety proof and two-bit fence request/ack tracking; keep WB readiness independent of result completion and preserve WB's own accepted event. | Make native global sequencing executable without duplicating pipeline/CSR/unit state or creating protocol feedback paths; provide normalized drain/admission hooks for later optional adapters. | Implemented standalone, parent/MEM/WB fixtures and full-core binding; Sections 3.2.1 and 3.13; XIF ID adapter under D-301; core debug open |
+| D-289 | Integrate native uqu_core with actual five stages, parent-owned boundaries/GPR/hazards/shared PMP/control, precise WB recovery, live privilege and MPRV-aware data checks; reject unfinished optional backends/adapters at elaboration. | Make the agreed first native implementation executable while keeping unsupported features explicit and preserving the existing component contracts. | Implemented; Section 3.13; RVFI/CSR, ELF/riscv-tests, scoped Spike and initial XIF available under D-290 through D-301; FPU, core debug, formal and ASIC flow unfinished |

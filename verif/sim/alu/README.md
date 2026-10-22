@@ -8,8 +8,8 @@ the shared `uqu_arith` instance used by both ALU and MUL/DIV.
 The local [standalone wrapper](uqu_alu_tb.v) supplies that instance. The
 [shared-parent regression](../exec_arith/README.md) connects the real ALU and
 MUL/DIV as siblings around one external arithmetic instance. The [EX component](../ex/README.md) now integrates these units with
-[parent-owned boundary registers](../ex_pipeline/README.md); the full processor
-pipeline remains pending.
+[parent-owned boundary registers](../ex_pipeline/README.md) and is integrated
+in the [processor core](../core/README.md).
 
 ## Request and result
 
@@ -105,4 +105,5 @@ combination, ignored upper shift bits, and reserved operation fallback.
 `randomized` varies all operations, operands, and backpressure. `control`
 checks reset/flush before acceptance and on retained results, pending requests,
 consecutive one-cycle transfers, and recovery without stale results. Timing
-closure and full-pipeline forwarding/control integration remain pending.
+closure remains open. Full-pipeline forwarding/control is integrated and
+exercised separately by the [core regression](../core/README.md).

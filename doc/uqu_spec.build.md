@@ -19,7 +19,8 @@ does not imply that the documented hardware or build infrastructure exists.
 
 ## 1. Bender and GNU Make build structure
 
-**Status:** Agreed; detailed targets and tool integration TBD
+**Status:** Bender/Make simulation, lint, software and reporting flows implemented;
+formal and ORFS integration open
 
 The project shall use Bender for HDL source/dependency management and GNU Make
 as the build entry point. The responsibilities shall be:
@@ -44,8 +45,10 @@ The flow shall accommodate the agreed simulation/reference-model checks,
 implementation targets. Simulator selection is defined in [build, Section 3](uqu_spec.build.md#3-selectable-simulation-backend);
 ORFS integration is defined in [build, Section 4](uqu_spec.build.md#4-openroad-flow-scripts-asic-backbone), with detailed PDK-specific setup
 still to be defined.
-Configuration schema, command/target names, directory layout, script
-languages, exact tool versions, and technology-specific integration remain TBD.
+The current configuration schema, simulation/software commands, Python helpers
+and output layout are implemented below and in the shared simulation guide.
+Formal and ASIC target definitions, broader tool-version pins and
+technology-specific integration remain open.
 The shared core-configuration and separate build-target requirements are
 defined in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
 
@@ -118,15 +121,16 @@ Retain the optional ELF `.uqu.irqs` table; its stimulus contract is defined in
 
 ## 2. Shared core configuration and separate build targets
 
-**Status:** Agreed; YAML selected, schema and target details TBD
+**Status:** Strict YAML validation, selector generation, presets and simulation
+target manifests implemented; formal/ASIC consumers remain open
 
 Each supported core configuration shall be defined once in a shared
 YAML configuration file. Simulation, formal checking, synthesis, and CI shall
 consume that definition for the selected hardware parameters. Tool-specific
 parameter overrides and matching reference-model ISA settings shall be derived
 from the shared definition rather than maintained independently for each flow.
-The YAML schema and translation mechanism remain TBD. A project helper shall
-validate the selected configuration and translate it into tool inputs. This
+`verif/sim/common/hw_config.py` validates the complete parameter set, types,
+selector labels and supported combinations, and translates it into tool inputs. This
 file shall describe core hardware parameters separately from Bender's source
 and dependency manifest. Its parser shall be provided by the externally
 provisioned build environment, consistent with [build, Section 5](uqu_spec.build.md#5-externally-provisioned-build-environment).
@@ -181,8 +185,9 @@ configuration defaults: each configuration shall still set all parameters.
 
 Core configuration files and simulation-target configuration shall remain under
 the repository-root `config/` directory. Simulation-target configuration shall
-not move into `verif/sim/`. The exact subdivision and configuration catalog
-within `config/` remain to be defined.
+not move into `verif/sim/`. Hardware presets use `config/<hw>.yml`;
+component/fixture manifests use `config/sim/<component>.yml`, and shared selector
+encodings use `config/selectors.json`.
 
 The hardware configuration name `<hw>` shall be the selected YAML filename's
 basename without its extension. For example, `rv32i_zifence.yml` shall select
@@ -202,9 +207,11 @@ of the module interface, but project configuration files shall state those
 values explicitly when selecting them.
 
 The project shall provide complete predefined configuration files as starting
-points for users to copy and adapt. Illustrative profile names include
-`rv32i-fast` and `rv32e-minimal`; their exact parameter values and the initial
-preset catalog remain TBD. Adapted configurations shall satisfy the same
+points for users to copy and adapt. Existing presets include `rv32i`, `rv32im`,
+the three compressed strategies, `rv32i_pmp`, `rv32i_zifencei`,
+`rv32i_retained` and `rv32i_xif`. The `rv32i_xif_debug` profile exercises
+component-level debug support; it is not an enabled-debug core configuration.
+Adapted configurations shall satisfy the same
 completeness and supported-combination checks as supplied presets. Adding a
 new configurable hardware parameter shall require updating the supported
 configuration files to include an explicit value. Simulator, implementation,
@@ -228,21 +235,21 @@ simulation testbenches and file-writing monitors shall not enter the
 synthesizable design source set. Technology-specific setup shall remain part
 of the synthesis/implementation target rather than redefine the ISA.
 
-For example, `make sim CONFIG=rv32i` and `make synth CONFIG=rv32i` could select
-different build flows using the same core parameter definition. These command
-and configuration names are illustrative; exact names, configuration-file
-organization, and target/platform selection syntax remain TBD.
+`make sim COMPONENT=core CONFIG=rv32i` selects the integrated core simulation;
+`make test` is its alias, with `COMPONENT` defaulting to `gpregfile`.
+`make lint COMPONENT=core CONFIG=rv32i` checks the corresponding source set.
+Formal and synthesis/implementation commands and platform selectors remain
+undefined; `make synth` is not an implemented target.
 
 ## 3. Selectable simulation backend
 
-**Status:** Agreed; additional backends and detailed integration TBD
+**Status:** Verilator integration implemented; additional backends open
 
 Simulation builds shall select their simulator backend through the GNU Make
 argument `SIM`, defaulting to `verilator`. This selection shall be independent
 of the shared core configuration and the simulation target/testbench. For
-example, `make sim CONFIG=rv32i` shall use the default backend, equivalent to
-`make sim CONFIG=rv32i SIM=verilator`; the surrounding command/configuration
-names remain illustrative as noted in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
+example, `make sim COMPONENT=core CONFIG=rv32i` uses the default backend,
+equivalent to adding `SIM=verilator` to the same command.
 
 The build structure shall allow additional simulator backends to be integrated
 with their own tool invocation and settings. The set of additional supported
@@ -259,7 +266,8 @@ RTL language requirement.
 Simulation testbenches shall use the project-wide cocotb/pyuvm stack defined in
 the [verification specification](uqu_spec.verif.md#21-python-simulation-framework).
 The shared component flow uses the pinned cocotb Python runner described in
-the simulation guide; additional backend and full-core integration remain TBD.
+the simulation guide for component, subsystem and full-core tests. Additional
+simulator backends remain open.
 
 ## 4. OpenROAD-flow-scripts ASIC backbone
 
@@ -329,7 +337,8 @@ platform environment used to build the design.
 
 ## 6. Build output naming
 
-**Status:** Agreed; target name catalog and internal artifact layout TBD
+**Status:** Simulation, software and reporting layouts implemented; physical and
+formal target layouts open
 
 Generated build artifacts shall live under
 `build/uquintus-<hw>/<target>/` for each selected hardware configuration and
@@ -351,12 +360,16 @@ build/uquintus-rv32i_zifence/orfs_sky130/
 build/uquintus-rv32i-fast/verilator/
 ```
 
-The ORFS target name is illustrative; the exact supported target catalog remains
-TBD. Netlists, reports, waveforms, software binaries, and translated build inputs
-shall be kept within the applicable output directory. Tools may use internal
-subdirectories as needed; this convention defines the project build root for
-the selected pair. Exact internal artifact filenames and ignore rules remain
-TBD.
+The ORFS target name is illustrative; physical and formal target names remain
+open. Netlists, reports, waveforms, software binaries and translated build inputs
+shall be kept within the applicable output directory. Current simulation runs use
+`build/uquintus-<hw>/verilator/<component>/<run>/`; `<run>` includes action,
+test selection, seed and a unique run suffix. Runs retain metadata, logs,
+results and requested traces/waveforms. Software builds use
+`build/uquintus-<hw>/sw/<program>/`. The shared report uses `build/report/`,
+and fetched dependency caches use `build/deps/`. The execution guides document
+artifact filenames; repository-root `.gitignore` excludes generated `build/`
+and local `.venv/` outputs.
 
 The component flow uses Bender's file list for compilation sources and its
 structured selected source tree for include directories. Both simulation and
@@ -531,21 +544,26 @@ The `impl/asic/` directories would hold project-specific settings and references
 externally provisioned platforms, rather than copies of ORFS or the PDKs.
 
 Generated artifacts shall use `build/uquintus-<hw>/<target>/` as defined in
-[build, Section 6](uqu_spec.build.md#6-build-output-naming). Exact internal artifact paths and ignore rules remain TBD.
+[build, Section 6](uqu_spec.build.md#6-build-output-naming), which records the implemented
+simulation/software/report layouts and ignore rules. Physical/formal artifact
+layouts remain to be defined with those flows.
 `make clean` shall remove the generated `build/` directory.
 Directories could be added as their contents are implemented.
 
 ## 8. Build follow-ups
 
-Define the complete YAML schema, canonical selector catalog and numeric
-encodings, preset catalog, configuration translator, Bender targets, Make
-targets, and concrete simulator/formal/ORFS invocations. Resolve exact source
-frontends for imported SystemVerilog without changing project-owned RTL rules.
+Strict hardware YAML validation, canonical selector encodings/header generation,
+complete presets, Bender source groups and Make simulation/lint/software/report
+targets are implemented. Extend those shared definitions when adding features;
+implement formal and ORFS consumers without creating separate hardware schemas.
+Resolve source frontends for selected imported SystemVerilog IP without changing
+project-owned RTL rules.
 
 Pin tool/IP/PDK revisions, platform/library variants, operating corners,
 constraints, and supported backends. Document the externally supplied ORFS
 launcher contract, environment variables, Docker images and optional Compose
-services, target naming, generated artifacts, ignore rules, and CI wiring.
+services, physical/formal target names and artifacts, and CI wiring. Additional
+simulator backends still require integration; Verilator is the current backend.
 No container build or dependency installation shall become implicit in Make.
 
 The directory tree retains its explicit proposed subdivisions. Add directories
@@ -561,21 +579,21 @@ later decisions determine the active contract.
 
 | ID | Decision | Rationale | Status |
 | --- | --- | --- | --- |
-| D-121 | Use Bender for HDL source/dependency management and GNU Make as the build entry point, with tool-specific scripts for integration. | Centralize HDL sources and dependency revisions while keeping verification and ASIC tool invocation explicit. | Agreed; YAML selected by D-126; detailed targets and tool integration remain follow-ups |
-| D-122 | Define each supported core configuration once in a shared file, consumed across flows; distinguish simulation, formal, and synthesis/implementation targets from the selected hardware configuration. | Reuse consistent hardware parameters while allowing flow-specific sources, top levels, tests, constraints, and tool settings. | Agreed; YAML and explicit configuration requirements defined by D-126 and D-134; schema and targets remain follow-ups |
+| D-121 | Use Bender for HDL source/dependency management and GNU Make as the build entry point, with tool-specific scripts for integration. | Centralize HDL sources and dependency revisions while keeping verification and ASIC tool invocation explicit. | Implemented Bender/Make simulation, lint, software and report flows; formal/ORFS integration remains open |
+| D-122 | Define each supported core configuration once in a shared file, consumed across flows; distinguish simulation, formal, and synthesis/implementation targets from the selected hardware configuration. | Reuse consistent hardware parameters while allowing flow-specific sources, top levels, tests, constraints, and tool settings. | Implemented strict shared YAML, complete presets and separate simulation manifests; formal/ASIC consumers remain open |
 | D-123 | Select the simulation backend through the GNU Make argument `SIM`, defaulting to `verilator`, independently of core configuration and simulation target. | Support alternative simulator integrations while retaining a defined default and consistent hardware configuration. | Agreed; additional supported backends and integration details TBD |
 | D-124 | Use OpenROAD-flow-scripts as the default ASIC build backbone, including its Yosys synthesis stage; invoke its stages through the project GNU Make interface with Bender-supplied sources. | Reuse a coordinated synthesis-to-layout flow and its platform configurations while keeping uquintus-specific setup in this repository. | Agreed; detailed integration, environment, and revisions TBD |
 | D-125 | Keep the project Makefile independent of container execution and toolchain/PDK provisioning; discover externally provisioned ORFS through `ORFS_ROOT` or an environment-supplied `orfs` launcher on `PATH`, with dependency provisioning handled separately in containers. | Give the design build a consistent environment contract across container and compatible local environments. | Agreed; exact launcher interface, container setup, and full environment contract TBD |
-| D-126 | Use YAML for the shared core hardware configuration files, validated and translated into tool inputs by project helpers. | Keep configurations readable and reusable across simulation, formal, synthesis, and CI, separately from Bender source/dependency metadata. | Agreed; schema and file layout TBD |
+| D-126 | Use YAML for the shared core hardware configuration files, validated and translated into tool inputs by project helpers. | Keep configurations readable and reusable across simulation, formal, synthesis, and CI, separately from Bender source/dependency metadata. | Implemented validation/translation in verif/sim/common/hw_config.py and root config/ layout |
 | D-127 | Place ASIC implementation setup under `impl/asic/`, allowing a future `impl/fpga/` sibling. | Group implementation targets under a shared directory while retaining separate technology-specific flows. | Agreed; FPGA implementation remains a future option |
-| D-128 | Use `verif/` for verification collateral and place bare-metal verification programs and software execution tests under `verif/sw/`. | Group hardware verification and its software workloads in one project area. | Agreed; other verification subdirectories remain proposed |
+| D-128 | Use `verif/` for verification collateral and place bare-metal verification programs and software execution tests under `verif/sw/`. | Group hardware verification and its software workloads in one project area. | Implemented simulation/common/software layout; formal subdivision remains proposed |
 | D-129 | Use `docker/` for dependency-provisioning Dockerfiles and optional Docker Compose definitions. | Make the selected container tooling explicit while retaining a container-independent project Makefile. | Agreed; exact images, services, and versions TBD |
-| D-130 | Keep shared core and simulation-target configuration under the repository-root `config/` directory. | Retain a central configuration location across build flows while keeping verification sources under `verif/`. | Agreed; internal configuration-directory subdivision and filenames TBD |
+| D-130 | Keep shared core and simulation-target configuration under the repository-root `config/` directory. | Retain a central configuration location across build flows while keeping verification sources under `verif/`. | Implemented config/<hw>.yml, config/sim/<component>.yml and config/selectors.json |
 | D-131 | Use `src/uquintus/core/` for common processor RTL, `src/uquintus/wrap/` for processor wrappers, and `src/uquintus/adapt/` for reusable protocol adapters. | Group uquintus source code under a project namespace with short functional subdirectory names. | Superseded by D-258 |
 | D-132 | Place generated artifacts under `build/uquintus-<hw>-<target>/`, using the shared hardware-configuration name and concrete simulator or implementation target. | Keep build outputs separate with a simple two-field directory name. | Superseded by D-133 |
-| D-133 | Use `build/uquintus-<hw>/<target>/`, grouping concrete target output directories under the selected hardware configuration. | Keep related hardware builds together while isolating target artifacts. | Agreed; target catalog and internal artifact layout TBD |
-| D-134 | Derive `<hw>` from the YAML filename stem; require complete explicit hardware parameter values and provide predefined configurations for users to adapt. | Support descriptive and purpose-oriented profile names without hidden parameter inheritance or dependence on RTL defaults. | Agreed; schema, preset values, and catalog TBD |
-| D-137 | Use readable YAML labels for enumerated hardware selectors and translate validated labels into integer RTL parameter values; initially use predictor labels `none`/`static_not_taken` and register-file labels `ff`/`latch`. | Keep hardware configurations readable while providing consistent numeric tool inputs across build flows. | Agreed; exact integer encodings TBD, declaration mechanism defined by D-138 |
-| D-138 | Generate guarded Verilog-2005 `.vh` macro headers for shared selector encodings from one canonical definition also used by YAML configuration translation. | Keep synthesis-compatible RTL constants and build-tool mappings consistent without SystemVerilog packages in the synthesizable design. | Agreed; catalog format, numeric values, and generator details TBD |
+| D-133 | Use `build/uquintus-<hw>/<target>/`, grouping concrete target output directories under the selected hardware configuration. | Keep related hardware builds together while isolating target artifacts. | Implemented simulation/software/report layouts in Section 6; formal/ASIC target layout open |
+| D-134 | Derive `<hw>` from the YAML filename stem; require complete explicit hardware parameter values and provide predefined configurations for users to adapt. | Support descriptive and purpose-oriented profile names without hidden parameter inheritance or dependence on RTL defaults. | Implemented explicit schema, complete presets and filename-stem selection; extend catalog with supported features |
+| D-137 | Use readable YAML labels for enumerated hardware selectors and translate validated labels into integer RTL parameter values; initially use predictor labels `none`/`static_not_taken` and register-file labels `ff`/`latch`. | Keep hardware configurations readable while providing consistent numeric tool inputs across build flows. | Implemented canonical encodings in config/selectors.json and shared configuration translator; Section 2 |
+| D-138 | Generate guarded Verilog-2005 `.vh` macro headers for shared selector encodings from one canonical definition also used by YAML configuration translation. | Keep synthesis-compatible RTL constants and build-tool mappings consistent without SystemVerilog packages in the synthesizable design. | Implemented canonical JSON catalog and guarded-header generator in verif/sim/common/hw_config.py; Section 2 |
 | D-258 | Place common processor RTL directly in `src/uquintus/`, with `src/wrap/` for protocol-specific top levels and `src/adapt/` for reusable protocol adapters as sibling directories. | Keep common core files together without an extra directory level. | Agreed; replaces D-131 |
 | D-295 | Generate a shared static report under build/report with an HTML landing page, category/run pages, configuration comparison, Markdown summary and versioned JSON data; collect existing flow artifacts and accept a common per-run record for future flows. | Visualize evidence across configurations without losing failures, provenance or comparison conditions, and produce a portable artifact suitable for later website publication. | Initial aggregation implemented; Section 6.1; synthesis/formal/benchmark producers, CI retention and deployment remain follow-ups |

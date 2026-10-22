@@ -116,7 +116,7 @@ IF neither owns PMP CSRs/checkers nor adds privilege signals to OBI.
 The local environment uses byte images, retained permission/error decisions and
 accepted-word credits without reading RTL internals. The separate
 [parent fixture](../if_pipeline/README.md) verifies real IF/DE storage and DE
-branch feedback in all three strategies. Full-core exception/debug/FENCE.I
-arbitration, dynamic prediction and the deferred CV-X-IF compressed channel are
-not implemented by this stage. The core can implement its global holds and
-restart events through the provided ports.
+branch feedback in all three strategies. The [core](../core/README.md) supplies
+global holds and restarts through the stage ports, including exception and
+FENCE.I arbitration. Core debug, dynamic prediction and the standard CV-X-IF
+compressed channel remain open.

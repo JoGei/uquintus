@@ -41,4 +41,5 @@ with `CONFIG=/path/to/profile.yml`. Single-cycle ALU operations and all existing
 MUL/DIV phase counts remain unchanged by the parent mux. See the
 [ALU](../alu/README.md) and [MUL/DIV](../muldiv/README.md) guides for port and
 operation details. The EX component and its parent-register fixture have separate regression targets.
-Physical implementation and full-core verification remain pending.
+The [core regression](../core/README.md) exercises the integrated EX datapath.
+Physical implementation and formal verification remain open.

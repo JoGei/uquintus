@@ -28,7 +28,9 @@ to a memory subsystem. The core shall not issue writes through `imem`.
 The standalone [LSU](../verif/sim/lsu/README.md) implements the native data port
 and its transaction/completion handling. The [MEM stage](../verif/sim/mem/README.md)
 owns the LSU and connects it to the parent pipeline/protection boundary.
-Full-core integration and instruction-memory RTL remain separate work.
+The [IF stage](../verif/sim/if/README.md) owns the corresponding instruction
+fetch engine, word buffer and aligner. Both ports and their shared protection
+checks are connected in the [core](../verif/sim/core/README.md).
 
 Both core-facing memory interfaces shall use 32-bit byte addresses and 32-bit
 data. The `imem` interface shall return a 32-bit instruction-data word per read
@@ -331,8 +333,9 @@ The core clock/reset inputs shall use these agreed names:
 | `rst_ni` | Active-low synchronous core reset. |
 | `boot_addr_i[31:0]` | Four-byte-aligned reset entry byte address. |
 
-Exact register coverage and values beyond those already specified, and external
-reset conditioning, remain TBD. Naming conventions are defined in the
+Implemented storage/reset coverage is documented in the stage/unit guides and
+the CSR field contract in architecture Section 18.2. External reset conditioning
+remains system-specific. Naming conventions are defined in the
 [RTL style guide](uqu_spec.style.md).
 
 ## 4. External machine interrupt sources
@@ -527,7 +530,9 @@ and its multi-interface offload model. The initial core connection shall use
 the standard-only scope in [interfaces, Section 5.1](uqu_spec.interfaces.md#51-initial-standard-only-scope-and-deferred-memory-features); shared-LSU access and
 coprocessor-generated execution traps shall be deferred. Independent
 coprocessor memory paths remain system-integration concerns under that scope.
-The remaining optional interface features and implementation details remain TBD.
+The initial issue/register/commit/result declarations and lifecycle are
+implemented under D-301; optional additions remain deferred as listed in
+Section 12.
 
 With `XIF = 0`, extension-specific logic shall be excluded at elaboration or
 eliminated by synthesis. The core shall not issue extension requests, depend on
@@ -999,8 +1004,9 @@ through a 32-bit core input, rather than an RTL parameter. Candidate names are
 code entry point; the second selects the handler for exceptions during debug
 instruction execution. Both shall satisfy the configured instruction alignment.
 The inputs shall be ignored when `DEBUG = 0`. Exact sampling/stability
-requirements, debug-memory mapping, required debug CSR details,
-and exact DM handshakes remain TBD.
+requirements, debug-memory mapping and exact DM handshakes remain open.
+Component-level debug CSR fields and update behavior are implemented in WB/CSR
+and described below; they still require core debug control integration.
 For an example of execution-based integration, see the
 [PULP debug-module core interface](https://github.com/pulp-platform/riscv-dbg/blob/master/doc/debug-system.md#core-interface).
 This architecture shall preserve the existing external-memory boundary and
@@ -1172,7 +1178,8 @@ behavior, timing, and integration requirements.
 
 These native ports are implemented by `src/uquintus/uqu_core.v`; its
 [integration guide](../verif/sim/core/README.md) records connections and current
-feature guards. Optional core XIF/debug adapters and the FPU remain unfinished.
+feature guards. The initial standard-channel XIF profile is connected under
+Section 5. Core debug integration and the FPU backend remain unfinished.
 
 | Function | Port(s) | Direction | Width | Definition |
 | --- | --- | --- | --- | --- |
@@ -1225,7 +1232,7 @@ list implicitly. Remaining system-specific guarantees are listed below.
 | --- | --- |
 | Memory system | Document faulting-transaction side effects, device-access guarantees, external timeout recovery, and coordinated reset/stale-response isolation for each integration. |
 | Fences | Specify cache/write-buffer and separate-memory-path ordering/visibility actions, late-fill handling, and reset during external maintenance; preserve the two agreed handshakes. |
-| CV-X-IF | Exact plain-Verilog declarations/adapters, optional standard features, result buffers, identifier reuse/notification wiring, and verification mapping for paired results. |
+| CV-X-IF | Initial issue/register/commit/result declarations, ID/kill lifecycle, direct WB backpressure and paired-result observation are implemented under D-301. Compressed offload, shared-LSU access, execution traps and a custom Spike reference contract remain deferred. |
 | Independent coprocessor memory | Enforce integration-level protection, ordering, completion, and speculative-kill safety without new core/CV-X-IF sidebands; shared-LSU access and execution traps remain deferred. |
 | FPU/reset | Reconcile a selected imported unit's internal reset/flush behavior with the synchronous core reset and immediate cancellation contracts. |
 | Debug | Select a compatible external DM and resolve minimal port/CSR declarations, disabled behavior, reset-halt, address stability, memory attributes, and remaining debug-cause arbitration using the simplest compliant implementation. |
@@ -1302,7 +1309,7 @@ later decisions determine the active contract.
 | D-215 | Name the clock/reset inputs `clk_i`, `rst_ni`, and 32-bit `boot_addr_i`; require a four-byte-aligned boot byte address in every configuration, without restricting subsequent halfword-aligned execution when C is enabled. | Finalize the basic integration port names and a simple boot alignment contract. | Agreed |
 | D-216 | Express initial portable pipeline holds through register update enables without explicit pipeline clock-gate instantiations; permit functionally equivalent synthesis-inserted gating and isolate explicit clock control needed by the latch register file inside that backend. | Keep pipeline RTL and verification simple while preserving ASIC power optimization and the latch-storage option. | Agreed; target-specific gating implementation and verification details TBD |
 | D-228 | With XIF disabled, stop new DE-to-EX transfers when interrupt draining begins, complete native instructions already in EX/MEM/WB, and use the first unexecuted instruction's PC as interrupt mepc. | Define a precise drain boundary while leaving a waiting DE instruction for execution after interrupt return. | Agreed; extended to XIF by the DE-only eviction rule in D-229 |
-| D-229 | On interrupt draining, kill an accepted speculative XIF offload still held in DE before interrupt entry, preserve its PC for reissue, and leave EX/MEM/WB offloads subject to completion before entry; preserve no-side-effect kill semantics and accepted-memory completion tracking. | Apply the EX-entry drain boundary to XIF without waiting for speculative DE computation or canceling committed operations. | Agreed; detailed notification/recovery sequencing and custom-memory enforcement remain implementation/interface work |
+| D-229 | On interrupt draining, kill an accepted speculative XIF offload still held in DE before interrupt entry, preserve its PC for reissue, and leave EX/MEM/WB offloads subject to completion before entry; preserve no-side-effect kill semantics and accepted-memory completion tracking. | Apply the EX-entry drain boundary to XIF without waiting for speculative DE computation or canceling committed operations. | Implemented initial notification/recovery sequencing under D-301; independent custom-memory enforcement remains a system-integration responsibility |
 | D-230 | Forward a matching valid XIF result at WB through enabled WB-to-DE/WB-to-EX paths before register-file write visibility; for paired results, forward only primary even `rd` from the lower 32 bits and retain hazard tracking for the secondary odd destination until it is readable from storage. | Reuse the existing single-destination forwarding network while preserving simultaneous paired writeback and correct secondary-destination dependencies. | Agreed |
 | D-231 | Support up to four accepted live XIF offloads in DE/EX/MEM/WB with fixed `X_ID_WIDTH = 3`; use sequential identifiers reserved at issue presentation, carried with pipeline instructions, and reused only under the protocol's completion/kill and wraparound rules, stalling issue when necessary. | Identify related offload transactions and targeted kills while retaining simple in-order tracking without a separate offload queue or result-reordering structure. | Implemented initial profile under D-301; direct WB result backpressure |
 | D-232 | Permit documented partial memory/device effects when a later access of the same live multi-access custom instruction faults, with explicit recovery/retry semantics and no core rollback; retain normal register-write suppression, WB trap ordering, and no-effect guarantees for speculative kills and younger instructions. | Support custom multi-access operations without requiring all-or-nothing memory effects, while making partial completion visible in the instruction's software contract. | Deferred outside the initial profile by D-234; no all-or-nothing memory engine selected in its place |

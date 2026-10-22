@@ -54,4 +54,6 @@ flush. Interrupt entry requires already-empty EX/MEM/WB occupancy, so its
 external WB trap input has no combinational dependence on WB completion.
 Lint and flattened Yosys SCC checks cover these actual connections. The
 [controller guide](../pipeline_ctrl/README.md) defines the reusable ports,
-permission proofs, generic drain endpoint and remaining full-core adapters.
+permission proofs and generic drain endpoint. The [core](../core/README.md)
+connects these controls to actual stage boundaries and initial XIF cleanup;
+core debug integration remains open.

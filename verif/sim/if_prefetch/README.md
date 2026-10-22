@@ -56,4 +56,5 @@ decompressor, IF/DE register, predictor, privileged controller, debug controller
 FENCE.I handshake or architectural retirement in this fixture. Production
 [IF](../if/README.md) and the [IF/DE fixture](../if_pipeline/README.md) now cover
 frontend control, expansion and DE branch feedback. Full-core arbitration and
-architectural retirement remain integration work.
+architectural retirement are implemented and tested in the
+[core](../core/README.md), outside this fixture's scope.

@@ -113,7 +113,8 @@ strategies, including held compressed tokens. An additional direct-mode profile
 with placement `de` verifies that its inactive placement choice has no effect.
 Synthesis checks establish storage-free native DE paths, removal of
 unselected compressed units and invalid-selector rejection. These checks do not
-replace future fetch/stitching, bus-fault, full-core RVFI or Spike regressions.
+replace the separate fetch/stitching, bus-fault and
+[core RVFI/software regressions](../core/README.md).
 
 Combinational strategy tests are supplemented by the
 [parent-register fixture](../de_pipeline/README.md): IF mode runs the RTL

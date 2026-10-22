@@ -118,8 +118,9 @@ resolution independently of the ALU's immediate operand selection. EX operands
 or completed results must still be preserved by their existing owning
 registers/FUs after acceptance; the hazard unit adds no EX retention bank.
 XIF protocol-required holding state is separate and remains mandatory in
-continuous mode. Full-core integration and the DE stage are not implemented by
-this component.
+continuous mode. The [core](../core/README.md) assembles producer descriptors
+and connects this component to DE/EX; boundary ownership and global control
+remain outside the hazard unit.
 
 ## Regression and synthesis
 

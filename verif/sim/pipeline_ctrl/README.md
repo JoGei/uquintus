@@ -143,12 +143,12 @@ The requester must remove or requalify its request after acceptance; a held raw
 DM request must not repeatedly enter through this endpoint.
 
 The core must keep `drain_ready_i` low until accepted data transactions and
-required DE-only XIF kill cleanup finish. XIF ID ownership, standard commit-kill
-arbitration, replay after canceled eviction, debug request/step sequencing and
-Debug Mode remain future core adapters. They must keep `de_admit_i` low across
-unfinished cleanup and arrange restart of an evicted instruction if entry is
-canceled. Native configurations can tie cleanup readiness high once relevant
-data work has finished.
+required DE-only XIF kill cleanup finish. The [core](../core/README.md) connects
+XIF ID ownership, standard commit-kill arbitration and replay after canceled
+eviction through its XIF controller. Debug request/step sequencing and Debug Mode
+remain future core adapters. Cleanup must keep `de_admit_i` low while unfinished
+and arrange restart of an evicted instruction if entry is canceled. Native
+configurations can tie cleanup readiness high once relevant data work has finished.
 
 ## Fences
 

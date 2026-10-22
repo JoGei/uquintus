@@ -2,12 +2,12 @@
 
 `src/uquintus/uqu_pmp.v` is a combinational Verilog-2005 checker for the fixed
 sixteen-entry, G=0 PMP profile in [architecture, Section 8.1](../../../doc/uqu_spec.arch.md#81-internal-pmp-and-memory-fault-boundary).
-The pipeline-stage parent at core scope will own one instance. It consumes
-CSR-owned PMP state once and IF/MEM access addresses/control independently,
-then returns each stage's permission result. Shared region decoding feeds
-separate concurrent comparison/priority/permission logic. Stage integration,
-CSR storage, CSR write legalization/locking, and effective-privilege selection
-remain to be implemented. This component alone does not enable full-core PMP.
+The [core](../core/README.md) owns one instance. It consumes CSR-owned PMP state
+once and IF/MEM access addresses/control independently, then returns each stage's
+permission result. Shared region decoding feeds separate concurrent comparison,
+priority and permission logic. Core integration includes CSR storage, write
+legalization/locking and effective-privilege selection. This standalone
+regression checks the permission block; core tests cover its pipeline use.
 
 | Port/parameter | Meaning |
 | --- | --- |

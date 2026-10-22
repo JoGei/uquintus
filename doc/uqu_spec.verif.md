@@ -39,13 +39,16 @@ retain visibility into stalled and subsequently discarded instructions.
 
 Pipeline visibility shall use the instruction PC and validity without an
 additional per-instruction sequence tag. This does not remove operation or
-transaction identifiers required by interfaces such as CV-X-IF. Trace encoding
-and other trace metadata remain TBD.
+transaction identifiers required by interfaces such as CV-X-IF. The implemented
+RVFI/CSR observation and JSONL encoding are defined in Sections 1.1–1.2 and the
+[collector guide](../verif/common/README.md); initial XIF companion observations
+are defined in Section 2.4.
 
 Trace collection, formatting, and file writing shall be implemented in
 SystemVerilog verification monitors, not in the synthesizable processor RTL.
 The plain-Verilog RTL shall expose the instruction and state signals needed by
-these monitors; the exact connection method remains TBD.
+these monitors. The simulation wrapper isolates hierarchical references to the
+core's existing signals, as described in Section 1.1.
 
 **Verification interface:**
 [RVFI](https://yosyshq.readthedocs.io/projects/riscv-formal/en/latest/rvfi.html)
@@ -57,9 +60,10 @@ signals; formatting and file writing shall remain in simulation monitors.
 
 The initial native profile and simulation connections are defined in Section 1.1.
 The pinned formal-tool revision, formal core binding and checker integration
-remain TBD. CSR, floating-point, custom-instruction, and memory-side-effect
-coverage shall be specified explicitly rather than assumed from the base RVFI
-interface. Instrumentation used for formal checking must be compatible with the
+remain deferred under D-291. Native CSR observations and initial XIF companion
+traces are implemented; floating-point/debug observations, RVFI_BUS and broader
+memory-side-effect coverage remain open. Coverage shall be specified explicitly
+rather than assumed from the base RVFI interface. Instrumentation used for formal checking must be compatible with the
 chosen formal tools; simulation file-writing code is separate from that logic.
 
 An RVFI event-order counter may be generated in verification instrumentation
@@ -171,8 +175,9 @@ latency on the instruction and data OBI ports while preserving the agreed
 protocol. They shall exercise error responses, redirects, and reset with
 transactions pending, respecting the existing reset integration contract.
 Randomized tests shall accept an explicit seed and report the seed used so
-failures can be reproduced. Exact testbench structure and seed controls remain
-verification implementation details.
+failures can be reproduced. The shared runner exposes `SEED`, with component and
+core agents implementing these scenarios; their guides document test selections
+and retained artifacts.
 
 Formal instrumentation and harnesses shall be compatible with the selected
 formal tools. Trace formatting and file writing shall remain separate simulation
@@ -180,11 +185,13 @@ code. Project-owned synthesizable processor RTL shall remain plain Verilog;
 imported IP and its dependencies may use SystemVerilog under the style-guide
 exception, and verification collateral may use SystemVerilog.
 
-The exact check set, core configuration matrix, solver and tool versions, proof
-strategy and depth, simulation tests and reference-model integration, and coverage for
-privileged state, optional extensions, custom operations, and memory protocols
-remain TBD. Verification results shall state the checks, configurations, and
-assumptions used so that the demonstrated scope is explicit.
+Component manifests, core suites, ELF/riscv-tests execution and scoped Spike
+comparison define the current simulation checks. Python package pins are in
+`verif/requirements.txt`; the reference adapter records its qualified Spike
+binary identity. The formal toolchain, proof assumptions/depth, broader coverage
+and automated supported-configuration matrix remain open. Verification results
+shall state the checks, configurations and assumptions used so that the
+demonstrated scope is explicit.
 
 The [shared build report](uqu_spec.build.md#61-shared-build-report) shall visualize
 retained verification results across configurations and preserve drill-down to
@@ -310,15 +317,17 @@ remain implementation choices.
 
 ### 2.3. Testbench organization
 
-**Status:** Test layout agreed; suite organization and runner integration open
+**Status:** Component, subsystem and core suites use the shared runner;
+CI cadence and coverage targets open
 
 Use component, subsystem, and full-core test levels, sharing protocol agents,
 transactions, reference models, and checking utilities where applicable. For
 example, an OBI memory agent could serve both an isolated LSU test and the
 core-level environment. A component regression shall remain runnable without
 executing the full-core regression. A small smoke suite and a larger multi-seed
-regression are proposed; exact CI cadence, test matrix, coverage targets, and
-runner integration remain open.
+regression are proposed; the runner already supports independent components,
+named tests and explicit seeds. Exact CI cadence, the automated configuration
+matrix and coverage targets remain open.
 
 Keep verification sources under `verif/`, bare-metal programs under `verif/sw/`,
 and simulation-target configuration under repository-root `config/`.
@@ -644,7 +653,7 @@ TIME shall remain rejected and no additional core ISA feature is implied.
 `SW=counters` shall exercise these contracts, including memory/multi-cycle stalls,
 synchronous trap exclusion and optional U-mode permissions. `SW=interrupts` shall
 exercise masked pending reads and ignored MIP writes. Full CSR/WARL coverage and
-WFI remain follow-ups.
+Spike WFI comparison remain follow-ups; native WFI behavior is already implemented.
 
 A verification-only Spike device may use its platform external-input API via
 bounded debugger commands. This helper shall not add target instructions or
@@ -668,7 +677,8 @@ declarations, unsupported events, log formats and process timeout.
 
 ## 3. Supported-configuration CI coverage
 
-**Status:** CI requirement agreed; detailed build flow TBD
+**Status:** CI requirement agreed; simulation flow implemented, synthesis flow
+and CI automation open
 
 CI shall at least elaborate and synthesize every configuration explicitly marked
 as supported by the project. The supported configuration set shall be documented
@@ -680,31 +690,32 @@ The initial deeper simulation and formal verification scope shall follow
 elaboration and synthesis alone shall not imply full functional verification of
 a configuration; the demonstrated verification scope shall remain explicit.
 
-The detailed build flow shall be defined before implementing this CI requirement.
-Bender and GNU Make are selected in [build, Section 1](uqu_spec.build.md#1-bender-and-gnu-make-build-structure). Configuration representation,
-exact build targets, elaboration and synthesis tools and settings, tool/version
-management, CI execution environment, and result artifacts remain TBD.
+The current Bender/Make simulation and lint commands, complete hardware YAML,
+Verilator backend and retained run/report artifacts are defined in the
+[build specification](uqu_spec.build.md). ORFS synthesis integration, the CI
+configuration matrix/environment, broader tool-version pins and automated
+publication/retention remain to be implemented.
 
 ## 4. Verification follow-ups
 
 Maintain the Spike binary pin and extend its initial profile; pin its source
 revision when available, plus RVFI/riscv-formal, tools, solvers and library models.
-Define the first supported configuration matrix, tests, formal assumptions and
-proof scope/depth, coverage, seeds, CI environment, and result artifacts.
-Extend the shared component runner and pinned cocotb/pyuvm environment in
-Section 2.1 with additional component DUT manifests and independently runnable
-suites under Section 2.2; define full-core integration and supported tool versions.
-Implement the retirement/trap comparison and verification monitors, separating
-simulation file I/O from formal-compatible observation logic.
+The shared runner, pinned cocotb/pyuvm stack, component/subsystem/core suites,
+seed controls, RVFI/CSR monitors, ELF/riscv-tests execution and scoped Spike
+retirement/trap/interrupt/counter comparison are implemented. Preserve the
+separation between passive observations and simulation file I/O. Extend coverage
+and define the automated supported-configuration matrix, coverage targets,
+remaining tool-version pins and CI environment/retention.
 After selecting the formal toolchain under D-291, implement the shared-collector
 formal wrapper, symbolic OBI environment, RVFI_BUS observations and checker
 configuration specified in Section 2.5.
 
-Coverage for privilege, CSRs, memory side effects, Zfinx, custom instructions,
-paired writeback, and debug must be explicit. Initial RV32I formal checking
-shall not be presented as proof of those additional features. The agreed
-randomized memory-latency and error/reset scenarios remain first-milestone
-requirements rather than optional follow-ups.
+Existing privilege, CSR, memory, interrupt and paired-XIF checks shall retain
+their documented scope. Broader CSR/WARL/PMP/bus-fault reference comparison,
+Spike WFI support, a custom-instruction reference contract and eventual FPU/debug
+verification remain open. Initial RV32I formal checking shall not be presented
+as proof of those additional features. Randomized memory-latency and error/reset
+tests are implemented and remain first-milestone requirements.
 
 ## 5. Decision record
 
@@ -719,15 +730,15 @@ later decisions determine the active contract.
 | D-067 | Carry each instruction's original PC and validity through all five stages and preserve their association during stalls, transfers, and flushes. | Make instruction flow identifiable in waveforms and correlate pipeline activity with architectural trace events. | Agreed |
 | D-068 | Use PC and validity for pipeline visibility without an additional per-instruction sequence tag. | Keep observability metadata simple while retaining any identifiers required by functional interfaces. | Agreed |
 | D-069 | Implement trace collection, formatting, and file writing in SystemVerilog verification monitors outside the synthesizable core. | Keep trace processing in verification code while retaining plain-Verilog processor RTL and visible instruction/state signals. | Agreed |
-| D-070 | Use RVFI as the verification observation contract; do not require RVVI. | Connect tracing and open-source `riscv-formal` checks through a shared observation contract; define the required profile separately. | Agreed; profile TBD |
-| D-071 | Require simulation and formal checks with `riscv-formal`, starting with RV32I. | Establish both execution-based testing and formal instruction checks as verification requirements, with explicit scope and assumptions. | Agreed; detailed coverage TBD |
+| D-070 | Use RVFI as the verification observation contract; do not require RVVI. | Connect tracing and open-source `riscv-formal` checks through a shared observation contract; define the required profile separately. | Implemented simulation RVFI/CSR profile and XIF companion trace under D-290/D-292/D-301; formal profile/binding deferred under D-291 |
+| D-071 | Require simulation and formal checks with `riscv-formal`, starting with RV32I. | Establish both execution-based testing and formal instruction checks as verification requirements, with explicit scope and assumptions. | Simulation implemented with explicit scope; formal core binding/proofs deferred under D-291 pending toolchain selection |
 | D-072 | Require simulation comparison of standard-instruction retirement and trap outcomes against an independent software RISC-V reference model. | Check architectural execution independently of pipeline implementation; configure the model and adapter separately. | Agreed; Spike selected in D-073 |
 | D-073 | Use Spike as the simulation reference model. | Provide an independent executable ISA reference for architectural comparison. | Initial binary-pinned adapter in D-297; broader comparison remains open |
 | D-120 | Require CI to elaborate and synthesize every explicitly supported configuration; define the build flow before implementing this requirement. | Check supported configurations as the design grows while keeping deeper functional-verification coverage explicit. | Agreed; build tools selected by D-121, detailed flow and CI implementation TBD |
-| D-218 | Require randomized OBI grant/response timing tests from the first milestone, alongside directed tests and Spike comparison; exercise errors, redirects, and reset with pending transactions, and accept/report explicit random seeds. | Exercise variable-latency memory interactions and make randomized failures reproducible. | Agreed; testbench implementation deferred |
-| D-254 | Propose cocotb for Python-to-simulator interaction and pyuvm for reusable verification environments, retaining Verilator as the default simulator and the existing SV trace/RVFI and formal contracts. | Support Python verification with a reusable UVM structure while preserving the existing build and observation boundaries. | Proposal finalized by D-256; runner and versions remain TBD |
-| D-255 | Support independently selectable, self-checking component regressions using actual RTL dependencies, configuration-derived parameters, reproducible seeds, explicit failure/skip reporting, and isolated run artifacts. | Verify meaningful RTL blocks before full-core integration and reproduce failures without rerunning unrelated tests. | Agreed; exact suite catalog, command syntax, artifact formats, and CI cadence remain open |
-| D-256 | Use cocotb and pyuvm project-wide for component, subsystem, and full-core simulation testbenches, including simple leaf tests; allow lightweight tests without unnecessary UVM component hierarchies. | Keep one shared testbench structure while scaling verification complexity to the DUT. | Agreed; finalizes D-254, with runner and compatible versions TBD |
+| D-218 | Require randomized OBI grant/response timing tests from the first milestone, alongside directed tests and Spike comparison; exercise errors, redirects, and reset with pending transactions, and accept/report explicit random seeds. | Exercise variable-latency memory interactions and make randomized failures reproducible. | Implemented component/subsystem/core OBI agents and directed/randomized timing/error/redirect/reset tests with explicit seeds |
+| D-254 | Propose cocotb for Python-to-simulator interaction and pyuvm for reusable verification environments, retaining Verilator as the default simulator and the existing SV trace/RVFI and formal contracts. | Support Python verification with a reusable UVM structure while preserving the existing build and observation boundaries. | Finalized by D-256; shared runner and pinned Python environment implemented in Section 2.1 |
+| D-255 | Support independently selectable, self-checking component regressions using actual RTL dependencies, configuration-derived parameters, reproducible seeds, explicit failure/skip reporting, and isolated run artifacts. | Verify meaningful RTL blocks before full-core integration and reproduce failures without rerunning unrelated tests. | Implemented manifests, component/test selection, isolated run artifacts and shared reporting; CI cadence/matrix open |
+| D-256 | Use cocotb and pyuvm project-wide for component, subsystem, and full-core simulation testbenches, including simple leaf tests; allow lightweight tests without unnecessary UVM component hierarchies. | Keep one shared testbench structure while scaling verification complexity to the DUT. | Implemented project-wide stack, shared runner and version pins; Section 2.1; finalizes D-254 |
 | D-257 | Place component simulation tests in `verif/sim/<component>/` and full-core tests in `verif/sim/core/`, initially using `test_<module>.py`; keep local environments and HDL wrappers beside their tests and shared utilities in `verif/common/`. | Make tests easy to locate and run independently while growing their structure only as needed. | Agreed; simulation-specific shared helper/wrapper placement refined by D-259 |
 | D-259 | Put shared component-testing Make helpers, simulation utilities, and reusable HDL wrappers in `verif/sim/common/`; use `config/sim/<component>.yml` for DUT/test metadata and shared configuration helpers rather than separate component runner scripts. | Make invocation responsibilities explicit and reuse the flow as components are added. | Agreed; utilities shared with formal verification may remain in `verif/common/` |
 | D-290 | Add a verification-only single-channel RV32 RVFI collector, simulation core wrapper and separate SV JSONL writer; preserve actual consumed operands and raw memory responses, with explicit fault/handler/reset semantics. | Establish architectural observations without changing core RTL/ports or hiding forwarding errors; reuse the collector for later formal binding. | Implemented; Section 1.1; CSR channels added under D-292; formal core binding/proofs remain deferred; initial Spike adapter in D-297 |
@@ -736,7 +747,7 @@ later decisions determine the active contract.
 | D-293 | Make a reusable RVFI formal integration a verification goal: shared passive collectors, a formal-compatible core wrapper, symbolic OBI environment, RVFI_BUS observations and documented riscv-formal checker configuration. | Reuse execution observations across simulation and formal verification while checking their connection to actual core and bus behavior and stating the demonstrated proof scope. | Agreed goal; Section 2.5; implementation and proof execution remain deferred under D-291 |
 | D-294 | Add reusable ELF32 software execution with shared instruction/data RAM, PT_LOAD zero-fill, bare-metal startup/linker files, retired-store tohost completion, configurable watchdog and preserved ELF/RVFI diagnostics. | Establish a compiler-built software execution foundation reusable by later ISA suites without adding test-completion ports to the processor. | Implemented initial native environment; Section 2.6; riscv-tests added under D-296; architectural tests and broader Spike coverage remain follow-ups; initial adapter in D-297 |
 | D-296 | Integrate checksum/commit-pinned riscv-tests without submodules, using adapted bare-metal instruction tests, explicit ISA/misalignment exclusions, independent ELF runs, compatible simulator-build reuse and compiler family/version/target discovery from RISCV_CC, RISCV or PATH. | Add reproducible external instruction coverage while preserving the chosen core behavior, externally supplied tools and honest cross-configuration reporting. | Initial RV32I/M/C adapter implemented; Section 2.7; build contract in build Section 1.2; initial Spike checking in D-297; other ISA/privileged families and architectural certification remain separate |
-| D-297 | Add optional external Spike differential checking for native ELF/riscv-tests runs, with an exact qualified binary pin, strict bounded commit-log parsing, original instruction/PC/GPR/source/memory checks, deterministic CSR checks and retained first-mismatch/JUnit/report evidence. | Add the selected independent ISA reference without silently ignoring unsupported traps, interrupts, counters or implementation-dependent state; preserve external tools and native timing/error checks. | Initial profile implemented; Section 2.8; full CSR/trap/interrupt coverage and source-revision pin remain follow-ups |
-| D-298 | Add ELF-bound ordered expected-trap declarations and Spike v2 synchronous-trap/MRET comparison using independent read-only state snapshots; test M-only/M-U transitions, illegal/ECALL/EBREAK and alignment faults, implicit CSRs, suppressed effects and explicit breakpoint-MTVAL reconciliation. | Verify precise exception behavior end to end while preserving strict no-trap defaults and distinguishing permitted implementation choices from architectural mismatches. | Implemented; Sections 2.6 and 2.8; broader CSR/bus/PMP/interrupt synchronization remains open |
-| D-299 | Add ELF-bound deterministic IRQ stimuli, independent native masking/priority/drain checks and Spike v3 delivery alignment through a qualified verification device; retain full input/entry evidence and check architectural state without inventing retirement. | Compare asynchronous behavior at valid instruction boundaries while checking native timing independently; keep platform MMIO controllers outside the core and SDK/tool provenance explicit. | Implemented initial software/timer/external IRQ profile; Section 2.8; MIP/counters extended by D-300; WFI remains open |
-| D-300 | Check native counters on every clock edge and use verified model pre-state plus sampled MIP inputs for Spike v4 CSR execution; retain validated timing/replay evidence and counter/MIP metrics. | Verify native timing independently while comparing instruction semantics across different execution timing; preserve original target instructions/results and independently checked interrupt delivery. | Implemented; Section 2.8; counter software/IRQ regressions and corruption checks; full CSR/WARL and WFI remain follow-ups |
+| D-297 | Add optional external Spike differential checking for native ELF/riscv-tests runs, with an exact qualified binary pin, strict bounded commit-log parsing, original instruction/PC/GPR/source/memory checks, deterministic CSR checks and retained first-mismatch/JUnit/report evidence. | Add the selected independent ISA reference without silently ignoring unsupported traps, interrupts, counters or implementation-dependent state; preserve external tools and native timing/error checks. | Implemented initial native profile; trap/MRET, IRQ and counter/MIP support extended under D-298–D-300; broader CSR/WARL/PMP/bus-fault coverage and source-revision pin open |
+| D-298 | Add ELF-bound ordered expected-trap declarations and Spike v2 synchronous-trap/MRET comparison using independent read-only state snapshots; test M-only/M-U transitions, illegal/ECALL/EBREAK and alignment faults, implicit CSRs, suppressed effects and explicit breakpoint-MTVAL reconciliation. | Verify precise exception behavior end to end while preserving strict no-trap defaults and distinguishing permitted implementation choices from architectural mismatches. | Implemented; Sections 2.6 and 2.8; IRQ synchronization added under D-299/D-300; broader CSR/bus/PMP comparison open |
+| D-299 | Add ELF-bound deterministic IRQ stimuli, independent native masking/priority/drain checks and Spike v3 delivery alignment through a qualified verification device; retain full input/entry evidence and check architectural state without inventing retirement. | Compare asynchronous behavior at valid instruction boundaries while checking native timing independently; keep platform MMIO controllers outside the core and SDK/tool provenance explicit. | Implemented initial software/timer/external IRQ profile; Section 2.8; MIP/counters extended by D-300; Spike WFI comparison remains open |
+| D-300 | Check native counters on every clock edge and use verified model pre-state plus sampled MIP inputs for Spike v4 CSR execution; retain validated timing/replay evidence and counter/MIP metrics. | Verify native timing independently while comparing instruction semantics across different execution timing; preserve original target instructions/results and independently checked interrupt delivery. | Implemented; Section 2.8; counter software/IRQ regressions and corruption checks; full CSR/WARL and Spike WFI comparison remain follow-ups |

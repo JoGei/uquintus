@@ -222,5 +222,7 @@ IDs/harts, pending younger kills, ID wrap, paired/x0/E behavior, nonwriters and
 pre-permission cancellation. `debug` checks access restrictions, WARL state,
 counter freezing/explicit writes, DRET, EBREAK controls, step entry and debug
 exceptions. The parent fixture verifies physical GPR writes and mode changes.
-Full-core draining, DE issue tracking, external-DM operation and software/RVFI
-verification remain integration work.
+The [core](../core/README.md) connects native/XIF draining, DE issue/ID tracking
+and paired writeback. RVFI/CSR, ELF and scoped Spike tests add integrated native
+verification; XIF has its own behavioral oracle and companion trace. Core debug
+and external-DM operation remain open.

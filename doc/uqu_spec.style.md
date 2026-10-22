@@ -203,7 +203,9 @@ module ports shall add the direction suffixes from Section 4.
 
 The [execution-unit contract](uqu_spec.arch.md#31-common-native-execution-unit-handshake)
 defines instruction ownership, same-cycle completion, result retention, and
-flush cancellation. Exact payload widths and status fields remain TBD.
+flush cancellation. Concrete payload widths and status fields are defined by
+the implemented unit interfaces and their linked component guides; an imported
+FPU backend still requires its own adapter.
 
 **Pipeline control names:** Agreed. Use `*_stall` to hold a stage and `*_flush`
 to discard its instruction.
@@ -282,7 +284,7 @@ Gaps in this record are intentional; IDs have not been renumbered.
 | D-044 | Use nonblocking assignments for edge-triggered state and blocking assignments in combinational procedural logic; allow continuous assignments and prohibit unintended latches. | Model synchronous state consistently and prevent unintended storage and assignment races. | Agreed; intentional register-file latch exception defined in D-102 |
 | D-102 | Permit intentional register-file latch storage as an explicit coding-convention exception, isolated and documented with its timing and clock control. | Allow a latch backend while continuing to prohibit unintended storage in combinational logic. | Agreed |
 | D-114 | Standardize all synthesizable design files on Verilog-2005 (IEEE 1364-2005), using `.v` files parsed in Verilog-2005 mode; permit SystemVerilog for verification and testing. | Make the agreed plain-Verilog language boundary explicit and checkable across implementation tools. | Project-owned RTL rule retained; imported-IP exception added by D-238; exact tool versions TBD |
-| D-135 | Prefix microarchitecture configuration parameters with `MUA_`; name the initial controls `MUA_FORWARDING`, `MUA_BRANCH_PREDICTOR`, and `MUA_REGFILE_IMPL`. | Identify microarchitecture choices consistently within the hardware parameter set. | Agreed; predictor and register-file selector encodings TBD |
+| D-135 | Prefix microarchitecture configuration parameters with `MUA_`; name the initial controls `MUA_FORWARDING`, `MUA_BRANCH_PREDICTOR`, and `MUA_REGFILE_IMPL`. | Identify microarchitecture choices consistently within the hardware parameter set. | Implemented parameter namespace and canonical predictor/register-file selector encodings; build Section 2 |
 | D-136 | Prefix ISA and privilege configuration parameters with `ISA_`: `ISA_E`, `ISA_M`, `ISA_C`, `ISA_F`, `ISA_UMODE`, and `ISA_ZIFENCEI`. | Identify software-visible ISA and privilege selections consistently alongside the `MUA_` namespace. | Agreed; architectural extension and CSR field names retain their standard spelling |
 | D-238 | Allow synthesizable SystemVerilog for imported third-party IP and its required dependencies while retaining plain Verilog-2005 for all project-owned RTL, wrappers, and adapters. | Permit reuse of units such as CVFPU without changing the language convention for uquintus-owned design code. | Agreed; IP selection and compatible tool frontend integration remain open |
 | D-253 | Define uqu as the project short form; use uqu_ for project-owned RTL modules and matching source filenames, such as uqu_core.v, and UQU_ for shared macros and include guards. | Keep RTL names concise while retaining uquintus as the full project name. | Agreed; updates the earlier module prefix in D-039 |

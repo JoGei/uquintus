@@ -135,7 +135,8 @@ All hardware configurations explicitly set both selectors, even with C disabled.
 IF expansion, DE expansion and direct decoding are implemented. The
 [IF/DE fixture](verif/sim/if_pipeline/README.md) checks real stage outputs across
 parent-owned boundary storage and feeds accepted DE branch redirects back to IF.
-The complete-core controller and pipeline integration remain pending.
+The [core regression](verif/sim/core/README.md) covers these paths in the
+integrated five-stage pipeline with its shared controller, hazards and PMP.
 
 Make invokes the shared component-testing helper in
 [verif/sim/common/](verif/sim/common/README.md). Component-specific DUT and test

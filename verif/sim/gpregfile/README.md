@@ -69,8 +69,9 @@ high-phase input changes, asynchronous reads, and reset retention. Randomized
 tests mix writes, reads, collisions, and reset. Unwritten values are not checked.
 Test failures and watchdog expiry produce nonzero exit status.
 
-The full-core build, ORFS integration, formal checking, and technology mappings
-remain future work.
+The register file is connected in the [core](../core/README.md), including its
+forwarding and paired-XIF write paths. ORFS integration, formal checking and
+technology mapping/timing closure remain open.
 
 Initial local validation used Python 3.12, Bender 0.32.1, Verilator 5.020,
 Yosys 0.33, and the pinned Python packages. Directed and randomized tests passed

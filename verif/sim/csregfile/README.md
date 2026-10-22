@@ -171,8 +171,10 @@ project cocotb/pyuvm stack and an independent model of architectural words:
 Development regressions cover all sixteen combinations of U, C, Zfinx CSR state,
 PMP state (and representative I/E/M settings). Representative Yosys checks inspect
 state widths, reset coverage, absence of memories/latches, and full synthesis.
-Full-core serialization, trap arbitration, external-DM integration, retirement, and
-functional floating-point execution remain integration work.
+The [core](../core/README.md) connects serialization, trap arbitration, retirement
+and shared-PMP state; its RVFI/CSR and software tests add integrated observations.
+Core debug/external-DM integration and functional floating-point execution
+remain open.
 
 Reference semantics: [Zicsr 2.0](https://docs.riscv.org/reference/isa/v20260120/unpriv/zicsr.html),
 [machine-level privileged ISA](https://docs.riscv.org/reference/isa/v20260120/priv/machine.html),

@@ -5,8 +5,8 @@ operations. It owns the iterative state and fixed-shift wiring, borrows the
 parent EX stage's `uqu_arith` instance as slice zero, and generates only the
 remaining `F - 1` arithmetic instances. The standalone ALU and shared-parent
 fixture are implemented. The [EX component](../ex/README.md) integrates them
-without owning boundary pipeline registers; full processor integration remains
-pending. The local [Verilog wrapper](uqu_muldiv_tb.v) supplies the borrowed
+without owning boundary pipeline registers and is connected in the
+[core](../core/README.md). The local [Verilog wrapper](uqu_muldiv_tb.v) supplies the borrowed
 instance for standalone tests.
 
 ```text
@@ -161,5 +161,6 @@ result backpressure; `control` cancels at every execution cycle and while a
 result is held, using both flush and reset, and checks subsequent recovery.
 The wrapper includes the real borrowed arithmetic instance, so these tests also
 exercise the full combinational chain. Disabled profiles explicitly check
-inactive outputs rather than silently enabling M. Full-core verification,
-formal proofs, and ASIC timing/area characterization remain pending.
+inactive outputs rather than silently enabling M. The [core regression](../core/README.md)
+and M-enabled software suites add integrated execution coverage. Formal proofs
+and ASIC timing/area characterization remain open.

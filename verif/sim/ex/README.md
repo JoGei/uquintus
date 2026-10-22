@@ -139,7 +139,8 @@ and consecutive transfers. Tests count real unit request handshakes to prove
 one issue per instruction while the parent keeps `valid_i` asserted. Independent
 mathematical [models](../common/ex_model.py) are shared with the parent fixture.
 
-The complete processor, decode/hazard/forwarding blocks, global controller machinery,
-and full-pipeline integration remain pending. MEM/LSU and the standalone CSR
-register file have separate component implementations and tests.
+The [core](../core/README.md) connects EX to the decoder, hazards/forwarding,
+central controller and the remaining stages. Its regressions add integrated
+execution coverage; these component tests isolate EX behavior. MEM/LSU and the
+CSR register file also have separate implementations and tests.
 The [WB stage](../wb/README.md) also has standalone and real-parent/GPR tests.

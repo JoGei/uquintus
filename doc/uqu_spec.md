@@ -212,8 +212,8 @@ selection are defined in the [build specification](uqu_spec.build.md).
 
 ## 3. First implementation milestone
 
-**Status:** Default-configuration milestone and later optional features agreed;
-detailed test plan and later milestone ordering TBD
+**Status:** Baseline core and simulation flows implemented; formal and physical
+acceptance and remaining feature milestones open
 
 The first implementation milestone shall deliver the default RV32I core with
 mandatory Zicsr 2.0 (`rv32i_zicsr`), M-mode and U-mode privilege support, and
@@ -252,13 +252,19 @@ and system behavior, including dependencies, variable memory latency, control
 flow, reset, traps, interrupts, and privilege checks. Formal results shall state
 their scope and assumptions; the initial RV32I check scope shall not be treated
 as proof of all privileged behavior. The ISA baseline is fixed in [architecture, Section 1](uqu_spec.arch.md#1-fixed-32-bit-architecture)
-and OBI v1.6.0 in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories); the exact test plan, remaining memory-interface
-profile, and synthesis/physical-implementation acceptance details remain TBD.
+and OBI v1.6.0 in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories).
+Component/core regressions, ELF execution, pinned riscv-tests and scoped Spike
+comparison are implemented as described in the verification specification.
+Formal checks remain deferred under D-291; synthesis/physical-implementation
+acceptance details remain open. Existing simulation evidence does not complete
+all milestone acceptance requirements.
 
-Optional ISA features, PMP, XIF, hardware debug, the latch register-file backend, and
-non-default configurations shall follow this baseline. Their agreed overall
-requirements remain in force; implementation order and later milestone
-acceptance criteria remain TBD.
+The baseline remains the first acceptance focus. Optional E/M/C, PMP, Zifencei,
+initial XIF, latch storage and non-default forwarding configurations already
+have implementations and simulation coverage. Zfinx execution and core debug
+integration remain unfinished. Their agreed overall requirements remain in
+force; later milestone acceptance criteria and the order of remaining work
+remain open.
 Atomic-extension support (`ISA_A`) and OBI integrity under `MUA_HARDENED` are
 planned future options and shall not be first-milestone requirements.
 
@@ -270,10 +276,10 @@ shall not silently enable a deferred feature.
 
 | Work area | Follow-up home |
 | --- | --- |
-| Arithmetic algorithms, FPU selection/configuration, module wiring, CSR field mappings, and optional-feature milestone order | [Architecture follow-ups](uqu_spec.arch.md#21-implementation-follow-ups-and-deferred-scope) |
-| External memory guarantees, optional IP/DM integration, reset conditioning, and exact optional interface declarations | [Interface follow-ups](uqu_spec.interfaces.md#12-integration-follow-ups) |
-| Reference-model/checker revisions, tests, assumptions, RVFI profiles, and CI implementation | [Verification follow-ups](uqu_spec.verif.md#4-verification-follow-ups) |
-| YAML schema, selectors, presets, concrete targets, versions, and provisioned environments | [Build follow-ups](uqu_spec.build.md#8-build-follow-ups) |
+| FPU/backend selection, core debug integration, dynamic prediction, physical validation and remaining feature acceptance | [Architecture follow-ups](uqu_spec.arch.md#21-implementation-follow-ups-and-deferred-scope) |
+| External memory guarantees, optional IP/DM integration, reset conditioning and deferred XIF features | [Interface follow-ups](uqu_spec.interfaces.md#12-integration-follow-ups) |
+| Broader reference coverage, formal toolchain/binding/proofs, coverage targets and CI implementation | [Verification follow-ups](uqu_spec.verif.md#4-verification-follow-ups) |
+| Additional simulator backends, ORFS targets, tool/PDK pins and provisioned environments | [Build follow-ups](uqu_spec.build.md#8-build-follow-ups) |
 | Tool-compatible parsing of imported SystemVerilog and backend-specific latch timing | [RTL style guide](uqu_spec.style.md) |
 
 The proposed reproducibility/architectural-commitment principles and directory
@@ -301,6 +307,6 @@ later decisions determine the active contract.
 | D-008 | Target an ASIC implementation. | Selected implementation platform. | Agreed |
 | D-025 | Target SkyWater SKY130 and IHP SG13G2 initially, with predictive PDKs such as ASAP7 as possible later targets. | Support implementation across multiple process technologies using common processor RTL. | Agreed |
 | D-026 | Make open-source ASIC flows a major design goal, using OpenROAD for physical implementation without requiring proprietary tools. | Keep implementation accessible through open-source tooling. | Agreed |
-| D-105 | Target the default RV32I configuration with M/U privilege modes, forwarding, and the flip-flop register file for the first implementation milestone; add optional features and non-default configurations afterward. | Establish a coherent baseline before extending the design, validated through the agreed Spike/RVFI simulation and initial RV32I formal checks. | Agreed; detailed test plan and later milestone ordering TBD |
+| D-105 | Target the default RV32I configuration with M/U privilege modes, forwarding, and the flip-flop register file for the first implementation milestone; add optional features and non-default configurations afterward. | Establish a coherent baseline before extending the design, validated through the agreed Spike/RVFI simulation and initial RV32I formal checks. | Baseline core and simulation flows implemented; optional-feature implementation has progressed alongside baseline verification; formal/physical acceptance and remaining milestone criteria open |
 | D-173 | Finalize the first specification draft before splitting it into overview, combined ISA/microarchitecture, interfaces, verification, and build documents alongside the existing style guide; retain decision IDs and agreement statuses. | Establish the documentation boundaries now while deferring file moves until the first draft is complete. | Agreed; first draft finalized and restructuring completed by D-252 |
 | D-252 | Finalize the first specification draft and split requirements into overview, combined ISA/microarchitecture, interfaces, verification, build, and style documents, retaining decision IDs and explicit implementation follow-ups. | Make the agreed baseline ready for implementation planning without requiring premature IP, algorithm, wiring, or tool-version choices. | Agreed; implements D-173 |
