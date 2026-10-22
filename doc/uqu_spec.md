@@ -77,6 +77,7 @@ deferred pending selection of an open-source formal toolchain.
 | [Interfaces](uqu_spec.interfaces.md) | Clock/reset, native OBI ports, interrupts, CV-X-IF, debug, fence handshakes, hart identity, and the baseline port index. |
 | [Verification](uqu_spec.verif.md) | Pipeline visibility, trace/RVFI, Spike comparison, formal checking, randomized memory tests, and CI coverage. |
 | [Build](uqu_spec.build.md) | Bender/Make, configurations, simulation backends, ORFS, environment provisioning, and project/file layout. |
+| [Benchmarking and PPA measurement](uqu_spec.bench.md) | Measurement definitions, `T_min`/estimated maximum frequency, timing scope and qualification; benchmark-suite integration remains open. |
 | [RTL style](uqu_spec.style.md) | Language rules, imported-IP exception, names, coding conventions, and common handshakes. |
 
 Each detailed requirement has one topic home; other documents link to it.
@@ -234,7 +235,7 @@ the ISA parameter `ISA_M` shall remain `0` in this milestone.
 | Memory interfaces | Separate external 32-bit OBI v1.6.0 instruction/data interfaces, variable latency, one outstanding request per port, reserved response capacity with no response backpressure, blocking MEM, little-endian accesses. |
 | External fence synchronization | `fence_req_o`/`fence_ack_i` for data/I/O ordering; retain inactive `fencei_req_o`/`fencei_ack_i` ports with `ISA_ZIFENCEI = 0`. Acknowledge immediately when integration already guarantees the required ordering ([architecture, Section 16](uqu_spec.arch.md#16-optional-instruction-fetch-fence) and [architecture, Section 19](uqu_spec.arch.md#19-conservative-data-memory-fence)). |
 | Clock and reset | Single clock, active-low synchronous minimal reset, reset-entry address input. |
-| Hart identification | 32-bit `hart_id_i` integration input, readable through `mhartid` ([interfaces, Section 9](uqu_spec.interfaces.md#9-hart-identification-input)). |
+| Hart identification | 32-bit `HART_ID` elaboration parameter, default zero, readable through `mhartid`; no core hart-ID port ([interfaces, Section 9](uqu_spec.interfaces.md#9-hart-identification-parameter)). |
 
 The applicable agreed baseline system behavior shall be included: precise traps,
 machine interrupts, M/U privilege and CSR behavior, and the specified counters.
@@ -255,8 +256,9 @@ as proof of all privileged behavior. The ISA baseline is fixed in [architecture,
 and OBI v1.6.0 in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories).
 Component/core regressions, ELF execution, pinned riscv-tests and scoped Spike
 comparison are implemented as described in the verification specification.
-Formal checks remain deferred under D-291; synthesis/physical-implementation
-acceptance details remain open. Existing simulation evidence does not complete
+Formal checks remain deferred under D-291. ORFS mapped synthesis and preplacement
+measurements are implemented under D-306; physical-implementation acceptance
+remains open. Existing simulation evidence does not complete
 all milestone acceptance requirements.
 
 The baseline remains the first acceptance focus. Optional E/M/C, PMP, Zifencei,
@@ -279,7 +281,7 @@ shall not silently enable a deferred feature.
 | FPU adapter/configuration qualification, core debug integration, dynamic prediction, physical validation and remaining feature acceptance | [Architecture follow-ups](uqu_spec.arch.md#21-implementation-follow-ups-and-deferred-scope) |
 | External memory guarantees, optional IP/DM integration, reset conditioning and deferred XIF features | [Interface follow-ups](uqu_spec.interfaces.md#12-integration-follow-ups) |
 | Broader reference coverage, formal toolchain/binding/proofs, coverage targets and CI implementation | [Verification follow-ups](uqu_spec.verif.md#4-verification-follow-ups) |
-| Additional simulator backends, ORFS targets, tool/PDK pins and provisioned environments | [Build follow-ups](uqu_spec.build.md#8-build-follow-ups) |
+| Additional simulator backends, physical ORFS targets, tool/PDK pins and provisioned environments | [Build follow-ups](uqu_spec.build.md#8-build-follow-ups) |
 | Tool-compatible parsing of imported SystemVerilog and backend-specific latch timing | [RTL style guide](uqu_spec.style.md) |
 
 The proposed reproducibility/architectural-commitment principles and directory

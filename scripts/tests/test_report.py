@@ -175,6 +175,7 @@ class ReportTests(unittest.TestCase):
         value = {'schema_version': 1, 'kind': 'synthesis', 'status': 'passed',
                  'configuration': {'name': 'rv32i', 'parameters': self.parameters},
                  'component': 'uqu_core', 'target': 'orfs_sky130', 'selection': 'synth',
+                 'detail': 'Mapped netlist; timing remains a preplacement estimate.',
                  'finished_at': '2026-10-21T12:00:00+00:00',
                  'context': context or {}, 'metrics': [{'name': 'cell_area', 'value': value, 'unit': unit}],
                  'artifacts': ['area.txt']}
@@ -193,6 +194,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(data['records'][0]['time_basis'], 'producer timestamp')
         self.assertEqual(data['records'][0]['metrics'][0]['unit'], 'um2')
         self.assertEqual(data['records'][0]['inputs']['status'], 'unknown')
+        self.assertIn('Mapped netlist; timing remains a preplacement estimate.',data['records'][0]['notes'])
 
     def test_missing_context_does_not_create_performance_comparison(self):
         self.native()
@@ -204,6 +206,17 @@ class ReportTests(unittest.TestCase):
         raw['metrics'] = [{'name': 'area', 'value': 2}]
         (path / 'report.json').write_text(json.dumps(raw))
         self.assertTrue(report.collect(self.build, self.root)['issues'])
+
+    def test_negative_timing_measurements_remain_visible(self):
+        path=self.native(context={'platform':'sky130hd'},unit='ns',value=-5.3)
+        raw=report.read_json(path/'report.json')
+        raw['metrics'][0]['name']='setup_worst_slack'
+        (path/'report.json').write_text(json.dumps(raw))
+        charts=report.metric_charts(report.collect(self.build,self.root)['records'])
+        self.assertIn('setup_worst_slack',charts)
+        self.assertIn('-5.3 ns',charts)
+        self.assertIn('rv32i',charts)
+        self.assertIn('uqu_core',charts)
 
     def test_artifacts_must_stay_inside_the_run_directory(self):
         path = self.native()

@@ -282,6 +282,15 @@ address shall meet setup and hold timing at each edge on which it is sampled
 during reset. Any longer reset duration required by external memories,
 interconnects, or other system components shall be an integration requirement.
 
+Both reset assertion and release shall satisfy the applicable receiving-register
+timing requirements. Holding reset active for additional cycles does not relax
+the release edge: the existing core has no independent startup gate that holds
+all execution inactive while reset release propagates. A multicycle reset-release
+protocol or reset sequencer would require a separate architectural decision and
+verification. Build-specific reset arrival budgets and their effect on measured
+frequency are described in the
+[benchmarking specification](uqu_spec.bench.md#2-reset-assumptions-in-frequency-comparisons).
+
 Reset coverage shall include architectural, control, and pipeline state, using
 a minimal, explicitly documented set of reset registers:
 

@@ -11,7 +11,8 @@ frontend package manager or additional Python packages beyond the existing
 PyYAML dependency. `make test-report` checks its collector and generated output.
 
 `report.py` owns cross-flow collection/rendering; assets live in `report_assets/`.
-Simulation invocation helpers remain in `verif/sim/common/`.
+Simulation invocation helpers remain in `verif/sim/common/`; the
+[ORFS synthesis producer](../impl/asic/README.md) lives under `impl/asic/common/`.
 
 ## Collection and updates
 
@@ -30,7 +31,7 @@ build/report/
   test/index.html            # Native core and ELF runs
   lint/index.html
   software/index.html
-  synthesis/index.html       # Populated by future producers
+  synthesis/index.html       # ORFS mapped synthesis and preplacement measurements
   formal/index.html
   benchmark/index.html
   runs/<id>.html             # Results, cases, metrics, provenance, artifacts

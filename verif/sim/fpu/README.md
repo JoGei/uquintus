@@ -62,6 +62,7 @@ regressions do not depend on SoftFloat or any host floating-point library.
 To explore staging, copy a complete hardware YAML and change the explicit
 counts/placement. Simulation matrices should include `before`, `after`,
 `inside`, `distributed` and zero configured registers. Tested simulations do
-not imply every count combination, formal proof, ASIC frontend support or
-mapped timing/area qualification. Independent [Spike ELF ISA checks](../../reference/README.md#scalar-zfinx-isa-checks)
+not imply every count combination, formal proof or physical qualification.
+The [ASIC flow](../../../impl/asic/README.md) adds default core/FPU mapped
+synthesis and preplacement timing on SKY130 HD and IHP SG13G2. Independent [Spike ELF ISA checks](../../reference/README.md#scalar-zfinx-isa-checks)
 complement these arithmetic tests; standard formal FPU instruction checks remain open.

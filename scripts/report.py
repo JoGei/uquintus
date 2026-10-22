@@ -202,6 +202,8 @@ def normalize(path, build, root, hashes):
         'tools': {k: raw[k] for k in ('simulator', 'bender', 'compiler', 'compiler_info', 'upstream', 'packages', 'reference') if k in raw},
         'workload': raw.get('workload', raw.get('elf', {}).get('sha256')),
     }
+    if native and raw.get('detail'):
+        record['notes'].append(str(raw['detail']))
     for field in ('component', 'target', 'selection'):
         if not isinstance(record[field], str) or not record[field]:
             raise ValueError(f'{field} must be a nonempty string')
@@ -416,6 +418,14 @@ def metric_charts(records):
     charts = []
     for (context, name, unit), values in sorted(groups.items()):
         if any(value < 0 for _, value in values):
+            # Slack/TNS must remain visible when timing is missed. A table
+            # preserves signed values without implying a positive bar length.
+            rows = ''.join(f'<tr><td><a href="../runs/{r["id"]}.html">'
+                           f'{esc(r["configuration"]["name"])} · {esc(r["component"])}</a></td>'
+                           f'<td>{esc(value)} {esc(unit)}</td></tr>' for r,value in values)
+            charts.append(f'<section><h2>{esc(name)}</h2><p class="context">Comparison context: {esc(context)}</p>'
+                          f'<table><thead><tr><th>Configuration / component</th><th>Value</th></tr></thead>'
+                          f'<tbody>{rows}</tbody></table></section>')
             continue
         largest = max((v for _, v in values), default=0) or 1
         bars = ''.join(f'<div class="metric-row"><a href="../runs/{r["id"]}.html">{esc(r["configuration"]["name"])} · {esc(r["component"])}</a>'

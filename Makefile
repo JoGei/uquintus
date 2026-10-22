@@ -14,13 +14,24 @@ RISCV_TESTS ?= all
 RISCV_TESTS_ARCHIVE ?=
 REFERENCE ?= none
 SPIKE ?=
+TOP ?= core
+ASIC_FLOW ?= orfs
+PLATFORM ?= sky130hd
+CLOCK_PERIOD_NS ?= 20
+RESET_INPUT_DELAY_NS ?=
+JOBS ?= 4
 
-.PHONY: help test sim lint sw riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests report test-report test-runner clean
+.PHONY: help test sim lint synth sw riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests report test-report test-runner clean
 
 help:
 	@echo 'make test [CONFIG=rv32i] [COMPONENT=gpregfile] [SIM=verilator]'
 	@echo '          [SEED=1] [TEST=all|<test-name>] [WAVES=0|1]'
 	@echo 'make lint [CONFIG=rv32i]'
+	@echo 'make synth [ASIC_FLOW=orfs] [TOP=core|fpu] [CONFIG=rv32i]'
+	@echo '           [PLATFORM=sky130hd|ihp-sg13g2]'
+	@echo '           [CLOCK_PERIOD_NS=20] [JOBS=4] [ORFS_ROOT=<installation>]'
+	@echo '           [RESET_INPUT_DELAY_NS=1]  # Optional reset arrival window: 0 to this maximum, in ns'
+	@echo 'Supply YOSYS_EXE / OPENROAD_EXE or tools on PATH; enabled Zfinx requires Slang.'
 	@echo 'make sw [CONFIG=rv32i] [SW=smoke] [RISCV_CC=riscv32-unknown-elf-gcc|clang]'
 	@echo 'make test COMPONENT=core_elf ELF=<path> [CONFIG=rv32i] [MAX_CYCLES=100000]'
 	@echo 'make riscv-tests-fetch [RISCV_TESTS_ARCHIVE=<offline-tar.gz>]'
@@ -48,6 +59,16 @@ test sim lint:
 
 sw:
 	$(PYTHON) verif/sim/common/software_build.py --config "$(CONFIG)" --program "$(SW)" --cc "$(RISCV_CC)"
+
+synth:
+ifeq ($(ASIC_FLOW),orfs)
+	$(PYTHON) impl/asic/orfs/common/synth.py --config "$(CONFIG)" --top "$(TOP)" \
+		--platform "$(PLATFORM)" --clock-period "$(CLOCK_PERIOD_NS)" --jobs "$(JOBS)" \
+		$(if $(RESET_INPUT_DELAY_NS),--reset-input-delay "$(RESET_INPUT_DELAY_NS)") \
+		--bender "$(BENDER)" --orfs-root "$(ORFS_ROOT)" --yosys "$(YOSYS_EXE)" --openroad "$(OPENROAD_EXE)"
+else
+	$(error Unsupported ASIC_FLOW '$(ASIC_FLOW)'; supported: orfs)
+endif
 
 riscv-tests-fetch:
 	$(PYTHON) verif/sim/common/riscv_tests.py fetch $(if $(RISCV_TESTS_ARCHIVE),--archive "$(RISCV_TESTS_ARCHIVE)")

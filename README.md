@@ -335,8 +335,8 @@ Use `make test-runner` to
 check the shared tooling without running an HDL simulator.
 
 The native processor, scalar Zfinx FPU and initial XIF integration are implemented. Core debug
-integration, complete architectural verification, formal proofs and the ASIC
-implementation flow remain unfinished.
+integration, complete architectural verification, formal proofs and physical
+implementation remain unfinished. Mapped ASIC synthesis is available below.
 
 Optional [Spike differential checking](verif/reference/README.md) is available for
 ELF runs and riscv-tests through `REFERENCE=spike`. Supply the pinned external
@@ -344,3 +344,26 @@ binary through `SPIKE`, `$RISCV/bin` or `PATH`.
 
 Directed Zfinx ISA checks use `SW=zfinx CONFIG=rv32i_zfinx` with the ELF
 runner and `REFERENCE=spike`; see the [reference guide](verif/reference/README.md#scalar-zfinx-isa-checks).
+
+## ASIC synthesis
+
+The [ORFS synthesis flow](impl/asic/README.md) consumes the same hardware YAML
+and Bender sources as simulation. Supply `ORFS_ROOT`, `YOSYS_EXE` and
+`OPENROAD_EXE` externally; enabled Zfinx also needs the compatible Slang plugin.
+`ASIC_FLOW` defaults to `orfs`; its scripts and platform adapters live under
+`impl/asic/orfs/`, leaving room for other implementation flows alongside it.
+
+```sh
+make synth ASIC_FLOW=orfs CONFIG=rv32i TOP=core PLATFORM=sky130hd
+make synth CONFIG=rv32i_zfinx TOP=fpu PLATFORM=sky130hd
+make synth CONFIG=rv32i_zfinx TOP=core PLATFORM=ihp-sg13g2
+make report
+```
+
+`CLOCK_PERIOD_NS=20` is the default exploratory target. Results include mapped
+cell counts/area and preplacement timing, with structural and full-mapping
+checks. Passing synthesis does not establish timing closure. The
+[IHP placement comparison](impl/asic/orfs/investigations/ihp-placement.md) also provides
+two controlled placed results; CTS, routing and extracted power/timing remain open.
+The [benchmarking specification](doc/uqu_spec.bench.md) defines `T_min` and
+estimated maximum frequency with their measurement assumptions.

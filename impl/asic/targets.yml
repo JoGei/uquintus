@@ -1,0 +1,15 @@
+core:
+  module: uqu_core
+  bender_target: rtl
+  parameters: all
+fpu:
+  module: uqu_fpu
+  bender_target: fpu
+  parameters:
+    - ISA_ZFINX
+    - MUA_FPU_PIPE_REGS_FMA
+    - MUA_FPU_PIPE_REGS_DIVSQRT
+    - MUA_FPU_PIPE_REGS_NONCOMP
+    - MUA_FPU_PIPE_REGS_CONV
+    - MUA_FPU_PIPE_CONFIG
+    - MUA_FPU_DIVSQRT

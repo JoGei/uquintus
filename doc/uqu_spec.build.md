@@ -7,8 +7,9 @@ simulation/lint flow supports the register file, ALU, arithmetic datapath, nativ
 multiply/divide, native decoder, DE branch unit, DE/EX hazard unit, pipeline
 controller, IF, DE, EX,
 MEM/LSU, instruction-word fetch/buffer/aligner, WB, PMP checker, CSR register file, and shared-arithmetic/prefetch/parent-register
-fixtures, native full-core regression and ELF software execution; the ASIC flow
-remains to be implemented. See the
+fixtures, native full-core regression and ELF software execution. ORFS mapped
+synthesis and preplacement timing are implemented for core/FPU targets;
+physical implementation remains open. See the
 [shared simulation guide](../verif/sim/common/README.md).
 
 [Specification index](uqu_spec.md) · [Architecture](uqu_spec.arch.md) · [Interfaces](uqu_spec.interfaces.md) · [Verification](uqu_spec.verif.md) · [Build](uqu_spec.build.md) · [Style](uqu_spec.style.md)
@@ -19,8 +20,8 @@ does not imply that the documented hardware or build infrastructure exists.
 
 ## 1. Bender and GNU Make build structure
 
-**Status:** Bender/Make simulation, lint, software and reporting flows implemented;
-formal and ORFS integration open
+**Status:** Bender/Make simulation, lint, software, reporting and ORFS synthesis
+implemented; formal and physical implementation open
 
 The project shall use Bender for HDL source/dependency management and GNU Make
 as the build entry point. The responsibilities shall be:
@@ -44,10 +45,10 @@ The flow shall accommodate the agreed simulation/reference-model checks,
 `riscv-formal` verification, supported-configuration CI coverage, and ASIC
 implementation targets. Simulator selection is defined in [build, Section 3](uqu_spec.build.md#3-selectable-simulation-backend);
 ORFS integration is defined in [build, Section 4](uqu_spec.build.md#4-openroad-flow-scripts-asic-backbone), with detailed PDK-specific setup
-still to be defined.
+described in the [ASIC guide](../impl/asic/README.md).
 The current configuration schema, simulation/software commands, Python helpers
 and output layout are implemented below and in the shared simulation guide.
-Formal and ASIC target definitions, broader tool-version pins and
+Formal/physical target definitions, broader tool-version pins and additional
 technology-specific integration remain open.
 The shared core-configuration and separate build-target requirements are
 defined in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
@@ -194,7 +195,8 @@ and the [pinned CVFPU manifest](https://github.com/openhwgroup/cvfpu/blob/778116
 ## 2. Shared core configuration and separate build targets
 
 **Status:** Strict YAML validation, selector generation, presets and simulation
-target manifests implemented; formal/ASIC consumers remain open
+target manifests implemented; ORFS synthesis consumes the shared configuration;
+formal and physical consumers remain open
 
 Each supported core configuration shall be defined once in a shared
 YAML configuration file. Simulation, formal checking, synthesis, and CI shall
@@ -314,8 +316,10 @@ of the synthesis/implementation target rather than redefine the ISA.
 `make sim COMPONENT=core CONFIG=rv32i` selects the integrated core simulation;
 `make test` is its alias, with `COMPONENT` defaulting to `gpregfile`.
 `make lint COMPONENT=core CONFIG=rv32i` checks the corresponding source set.
-Formal and synthesis/implementation commands and platform selectors remain
-undefined; `make synth` is not an implemented target.
+`make synth TOP=core|fpu CONFIG=<hw> PLATFORM=sky130hd|ihp-sg13g2`
+selects the synthesizable top and ORFS technology independently. `TOP` defaults
+to `core`; `CLOCK_PERIOD_NS=20` and `JOBS=4` are flow settings. Formal and full
+physical implementation commands remain open.
 
 ## 3. Selectable simulation backend
 
@@ -347,7 +351,8 @@ simulator backends remain open.
 
 ## 4. OpenROAD-flow-scripts ASIC backbone
 
-**Status:** Agreed; detailed integration and versions TBD
+**Status:** Mapped synthesis and preplacement reporting implemented; full physical
+implementation and broader configuration qualification open
 
 OpenROAD-flow-scripts (ORFS) shall provide the default ASIC build backbone,
 including its Yosys synthesis stage and subsequent physical implementation
@@ -360,8 +365,8 @@ Bender shall supply the design's HDL source/dependency information. Project
 integration scripts shall combine that information with the shared hardware
 configuration, selected synthesizable top, constraints, and platform settings
 to produce ORFS inputs. These shall include the applicable `VERILOG_FILES`,
-`DESIGN_NAME`, `PLATFORM`, and `SDC_FILE` settings. The method for propagating
-core parameter values remains TBD and shall preserve the shared-configuration
+`DESIGN_NAME`, `PLATFORM`, and `SDC_FILE` settings. Propagate integer-encoded top
+parameters through `VERILOG_TOP_PARAMS`, preserving the shared-configuration
 contract in [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
 
 Design-specific ORFS configuration and constraints shall remain in the uquintus
@@ -371,8 +376,45 @@ documented configuration/hooks; the baseline shall not require a fork or copy
 of its implementation scripts. Simulation and formal checking shall continue
 to use their separate targets and tool integrations.
 
-The detailed ORFS invocation, any future flow-selection argument, ORFS/tool/PDK
-revisions, platform variants, and constraints remain TBD. Build-environment
+The [ASIC guide](../impl/asic/README.md) defines the executable Make interface,
+source/top selection, constraints, tools and artifacts. `impl/asic/common/synth.py`
+generates an external-design configuration and invokes ORFS `make synth`.
+The baseline uses ORFS's native Verilog frontend; enabled Zfinx uses its Slang
+frontend for imported SystemVerilog. Canonicalization checks reject structural
+errors and unintended latches. A thin synthesis wrapper retains ORFS mapping
+and saves mapped statistics/JSON; a post-synthesis hook runs ORFS's own timing
+report in OpenROAD. Every final cell shall be a Liberty cell and counts shall
+agree before success is recorded.
+
+Use a single-clock SDC: non-clock input/output delays of 20% of the period,
+0.1 ns input transition, 0.01 pF output load and 0.1 ns clock uncertainty.
+Constrain synchronous reset as data. Pass ABC's target explicitly in ps.
+An optional `RESET_INPUT_DELAY_NS` override shall set reset's maximum input
+delay independently, with a 0 ns minimum; when omitted, preserve the original
+20%-of-period data-input budget. Record both resolved reset delays with the run.
+The [reset timing trial](../impl/asic/investigations/ihp-reset-timing.md) documents
+the 1 ns experiment and the required integration assumption.
+Report cell count, summed cell area, buffer count/area, setup slack/TNS and estimated maximum
+frequency. Negative slack means the target was missed, not that mapping failed.
+The [benchmarking measurement definition](uqu_spec.bench.md#1-minimum-clock-period-and-maximum-frequency)
+defines `T_min`, its relationship to setup slack and estimated maximum frequency,
+and the timing context required for comparisons.
+These are preplacement estimates with ideal interconnect, not physical timing
+closure or extracted area/power. Default-activity power is not a qualified metric.
+The installed ORFS ABC script determines mapping's wire-load and delay-target
+policy; supplying `-D` alone does not establish that the script consumes it.
+
+Record tool/ABC/plugin binary hashes, ORFS revision, full configuration,
+sources/includes, Bender lock, flow/platform/library hashes, constraints and
+raw outputs per run. Publish them through the shared `report.json` schema.
+The initial qualification covers standalone FPU and complete RV32I cores with
+Zfinx disabled/enabled on SKY130 HD and IHP SG13G2. A controlled
+[IHP placement comparison](../impl/asic/investigations/ihp-placement.md) also reuses
+two mapped Zfinx core netlists through identical floorplanning, placement and
+timing repair, with separate `placed_pre_cts` report records. It does not establish
+a general physical Make target or post-CTS/routed closure. Full physical implementation,
+broader parameter matrices and default tool/PDK lock policies remain open.
+Build-environment
 provisioning and discovery shall follow [build, Section 5](uqu_spec.build.md#5-externally-provisioned-build-environment). Additional implementation
 flows may be added later;
 no alternative flow is required initially. Target platform availability shall
@@ -384,14 +426,18 @@ and [flow stage definitions](https://github.com/The-OpenROAD-Project/OpenROAD-fl
 
 ## 5. Externally provisioned build environment
 
-**Status:** Agreed; container details and launcher interface TBD
+**Status:** External ORFS/tool discovery implemented; container provisioning open
 
 The project Makefile shall expect an already provisioned build environment.
 It shall locate ORFS through an explicit `ORFS_ROOT` environment variable or an
 `orfs` launcher available on `PATH`. `ORFS_ROOT` shall identify the installation
 or checkout containing `flow/Makefile` and take precedence when supplied. The
-`PATH` launcher shall be supplied by the environment and adapt invocation to
-the installed ORFS flow; its exact command-line contract remains TBD.
+`PATH` launcher shall be supplied by the environment: `orfs --flow-dir` shall
+print the absolute directory containing the flow Makefile. The helper then
+invokes that Makefile directly. Select executables through `YOSYS_EXE` and
+`OPENROAD_EXE`, `PATH`, or conventional ORFS installation paths, in that order.
+Enabled Zfinx requires a compatible installed Slang plugin, optionally found
+through `YOSYS_PLUGIN_PATH`. No project target builds or installs it.
 
 Other required executables and platform resources shall likewise be available
 through documented environment settings or tool search paths. A missing or
@@ -413,7 +459,7 @@ platform environment used to build the design.
 
 ## 6. Build output naming
 
-**Status:** Simulation, software and reporting layouts implemented; physical and
+**Status:** Simulation, software, synthesis and reporting layouts implemented; physical and
 formal target layouts open
 
 Generated build artifacts shall live under
@@ -432,12 +478,12 @@ Illustrative output paths are:
 
 ```text
 build/uquintus-rv32i_zifence/verilator/
-build/uquintus-rv32i_zifence/orfs_sky130/
+build/uquintus-rv32i_zifence/orfs_sky130hd/
 build/uquintus-rv32i-fast/verilator/
 ```
 
-The ORFS target name is illustrative; physical and formal target names remain
-open. Netlists, reports, waveforms, software binaries and translated build inputs
+Mapped synthesis uses `orfs_<platform>/synth-<top>-<timestamp>-<id>/`.
+Full physical and formal target names remain open. Netlists, reports, waveforms, software binaries and translated build inputs
 shall be kept within the applicable output directory. Current simulation runs use
 `build/uquintus-<hw>/verilator/<component>/<run>/`; `<run>` includes action,
 test selection, seed and a unique run suffix. Runs retain metadata, logs,
@@ -502,6 +548,8 @@ and tools; benchmark context shall identify workload/input, compiler/flags and
 measurement conditions. Missing context shall prevent automatic comparison
 plots. Test wall time and incidental ELF cycle counts shall not become benchmark
 claims. Formal results shall retain the property/assumption/tool/bound scope.
+Frequency and minimum-period terminology shall follow the
+[benchmarking and PPA measurement specification](uqu_spec.bench.md).
 
 Only generated report directories shall be replaced, after successful rendering;
 concurrent report writers shall serialize. Selected small logs/metadata/results
@@ -621,7 +669,7 @@ externally provisioned platforms, rather than copies of ORFS or the PDKs.
 
 Generated artifacts shall use `build/uquintus-<hw>/<target>/` as defined in
 [build, Section 6](uqu_spec.build.md#6-build-output-naming), which records the implemented
-simulation/software/report layouts and ignore rules. Physical/formal artifact
+simulation/software/synthesis/report layouts and ignore rules. Physical/formal artifact
 layouts remain to be defined with those flows.
 `make clean` shall remove the generated `build/` directory.
 Directories could be added as their contents are implemented.
@@ -630,15 +678,15 @@ Directories could be added as their contents are implemented.
 
 Strict hardware YAML validation, canonical selector encodings/header generation,
 complete presets, Bender source groups and Make simulation/lint/software/report
-targets are implemented. Extend those shared definitions when adding features;
-implement formal and ORFS consumers without creating separate hardware schemas.
-Resolve source frontends for selected imported SystemVerilog IP without changing
-project-owned RTL rules.
+targets are implemented. Extend those shared definitions when adding features.
+The ORFS synthesis consumer reuses the shared schema and uses Slang for imported
+SystemVerilog while preserving owned Verilog RTL. Implement formal and full
+physical consumers without creating separate hardware schemas.
 
-Pin tool/IP/PDK revisions, platform/library variants, operating corners,
-constraints, and supported backends. Document the externally supplied ORFS
-launcher contract, environment variables, Docker images and optional Compose
-services, physical/formal target names and artifacts, and CI wiring. Additional
+Extend the recorded per-run tool/platform provenance into default tool/PDK
+lock policies and broader supported-configuration matrices. ORFS discovery and
+synthesis constraints are defined above; Docker images/Compose services,
+physical/formal target names and artifacts, and CI wiring remain open. Additional
 simulator backends still require integration; Verilator is the current backend.
 No container build or dependency installation shall become implicit in Make.
 
@@ -655,11 +703,11 @@ later decisions determine the active contract.
 
 | ID | Decision | Rationale | Status |
 | --- | --- | --- | --- |
-| D-121 | Use Bender for HDL source/dependency management and GNU Make as the build entry point, with tool-specific scripts for integration. | Centralize HDL sources and dependency revisions while keeping verification and ASIC tool invocation explicit. | Implemented Bender/Make simulation, lint, software and report flows; formal/ORFS integration remains open |
-| D-122 | Define each supported core configuration once in a shared file, consumed across flows; distinguish simulation, formal, and synthesis/implementation targets from the selected hardware configuration. | Reuse consistent hardware parameters while allowing flow-specific sources, top levels, tests, constraints, and tool settings. | Implemented strict shared YAML, complete presets and separate simulation manifests; formal/ASIC consumers remain open |
+| D-121 | Use Bender for HDL source/dependency management and GNU Make as the build entry point, with tool-specific scripts for integration. | Centralize HDL sources and dependency revisions while keeping verification and ASIC tool invocation explicit. | Implemented Bender/Make simulation, lint, software, reporting and ORFS synthesis; formal/physical integration remains open |
+| D-122 | Define each supported core configuration once in a shared file, consumed across flows; distinguish simulation, formal, and synthesis/implementation targets from the selected hardware configuration. | Reuse consistent hardware parameters while allowing flow-specific sources, top levels, tests, constraints, and tool settings. | Implemented strict shared YAML, complete presets and simulation/synthesis consumers; formal/physical consumers remain open |
 | D-123 | Select the simulation backend through the GNU Make argument `SIM`, defaulting to `verilator`, independently of core configuration and simulation target. | Support alternative simulator integrations while retaining a defined default and consistent hardware configuration. | Agreed; additional supported backends and integration details TBD |
-| D-124 | Use OpenROAD-flow-scripts as the default ASIC build backbone, including its Yosys synthesis stage; invoke its stages through the project GNU Make interface with Bender-supplied sources. | Reuse a coordinated synthesis-to-layout flow and its platform configurations while keeping uquintus-specific setup in this repository. | Agreed; detailed integration, environment, and revisions TBD |
-| D-125 | Keep the project Makefile independent of container execution and toolchain/PDK provisioning; discover externally provisioned ORFS through `ORFS_ROOT` or an environment-supplied `orfs` launcher on `PATH`, with dependency provisioning handled separately in containers. | Give the design build a consistent environment contract across container and compatible local environments. | Agreed; exact launcher interface, container setup, and full environment contract TBD |
+| D-124 | Use OpenROAD-flow-scripts as the default ASIC build backbone, including its Yosys synthesis stage; invoke its stages through the project GNU Make interface with Bender-supplied sources. | Reuse a coordinated synthesis-to-layout flow and its platform configurations while keeping uquintus-specific setup in this repository. | Mapped synthesis implemented under D-306; full physical flow and broader qualification open |
+| D-125 | Keep the project Makefile independent of container execution and toolchain/PDK provisioning; discover externally provisioned ORFS through `ORFS_ROOT` or an environment-supplied `orfs` launcher on `PATH`, with dependency provisioning handled separately in containers. | Give the design build a consistent environment contract across container and compatible local environments. | External discovery implemented; Section 5; container setup and physical provisioning remain open |
 | D-126 | Use YAML for the shared core hardware configuration files, validated and translated into tool inputs by project helpers. | Keep configurations readable and reusable across simulation, formal, synthesis, and CI, separately from Bender source/dependency metadata. | Implemented validation/translation in verif/sim/common/hw_config.py and root config/ layout |
 | D-127 | Place ASIC implementation setup under `impl/asic/`, allowing a future `impl/fpga/` sibling. | Group implementation targets under a shared directory while retaining separate technology-specific flows. | Agreed; FPGA implementation remains a future option |
 | D-128 | Use `verif/` for verification collateral and place bare-metal verification programs and software execution tests under `verif/sw/`. | Group hardware verification and its software workloads in one project area. | Implemented simulation/common/software layout; formal subdivision remains proposed |
@@ -667,10 +715,11 @@ later decisions determine the active contract.
 | D-130 | Keep shared core and simulation-target configuration under the repository-root `config/` directory. | Retain a central configuration location across build flows while keeping verification sources under `verif/`. | Implemented config/<hw>.yml, config/sim/<component>.yml and config/selectors.json |
 | D-131 | Use `src/uquintus/core/` for common processor RTL, `src/uquintus/wrap/` for processor wrappers, and `src/uquintus/adapt/` for reusable protocol adapters. | Group uquintus source code under a project namespace with short functional subdirectory names. | Superseded by D-258 |
 | D-132 | Place generated artifacts under `build/uquintus-<hw>-<target>/`, using the shared hardware-configuration name and concrete simulator or implementation target. | Keep build outputs separate with a simple two-field directory name. | Superseded by D-133 |
-| D-133 | Use `build/uquintus-<hw>/<target>/`, grouping concrete target output directories under the selected hardware configuration. | Keep related hardware builds together while isolating target artifacts. | Implemented simulation/software/report layouts in Section 6; formal/ASIC target layout open |
+| D-133 | Use `build/uquintus-<hw>/<target>/`, grouping concrete target output directories under the selected hardware configuration. | Keep related hardware builds together while isolating target artifacts. | Implemented simulation/software/synthesis/report layouts in Section 6; full physical/formal layout open |
 | D-134 | Derive `<hw>` from the YAML filename stem; require complete explicit hardware parameter values and provide predefined configurations for users to adapt. | Support descriptive and purpose-oriented profile names without hidden parameter inheritance or dependence on RTL defaults. | Implemented explicit schema, complete presets and filename-stem selection; extend catalog with supported features |
 | D-137 | Use readable YAML labels for enumerated hardware selectors and translate validated labels into integer RTL parameter values; initially use predictor labels `none`/`static_not_taken` and register-file labels `ff`/`latch`. | Keep hardware configurations readable while providing consistent numeric tool inputs across build flows. | Implemented canonical encodings in config/selectors.json and shared configuration translator; Section 2 |
 | D-138 | Generate guarded Verilog-2005 `.vh` macro headers for shared selector encodings from one canonical definition also used by YAML configuration translation. | Keep synthesis-compatible RTL constants and build-tool mappings consistent without SystemVerilog packages in the synthesizable design. | Implemented canonical JSON catalog and guarded-header generator in verif/sim/common/hw_config.py; Section 2 |
 | D-258 | Place common processor RTL directly in `src/uquintus/`, with `src/wrap/` for protocol-specific top levels and `src/adapt/` for reusable protocol adapters as sibling directories. | Keep common core files together without an extra directory level. | Agreed; replaces D-131 |
-| D-295 | Generate a shared static report under build/report with an HTML landing page, category/run pages, configuration comparison, Markdown summary and versioned JSON data; collect existing flow artifacts and accept a common per-run record for future flows. | Visualize evidence across configurations without losing failures, provenance or comparison conditions, and produce a portable artifact suitable for later website publication. | Initial aggregation implemented; Section 6.1; synthesis/formal/benchmark producers, CI retention and deployment remain follow-ups |
+| D-295 | Generate a shared static report under build/report with an HTML landing page, category/run pages, configuration comparison, Markdown summary and versioned JSON data; collect existing flow artifacts and accept a common per-run record for future flows. | Visualize evidence across configurations without losing failures, provenance or comparison conditions, and produce a portable artifact suitable for later website publication. | Initial aggregation implemented; Section 6.1; synthesis producer implemented under D-306; formal/benchmark producers, CI retention and deployment remain follow-ups |
 | D-303 | Fetch commit-pinned CVFPU/FPnew through Bender with exact transitive revisions in Bender.lock, disable upstream Git submodule checkout in project configuration, and opt imported HDL into component builds through a manifest flag. | Reuse upstream source/dependency metadata without adding repository submodules or compiling unused IP into native tests. | Implemented dependency/configuration preparation; Section 1.3; real execution adapter under architecture D-304; physical qualification remains open |
+| D-306 | Implement external ORFS mapped synthesis for core/FPU targets using shared hardware YAML and Bender, Slang for imported SV, latch/mapping checks, preplacement STA and provenance-rich report records. | Qualify open-source ASIC frontend/mapping compatibility and expose measured cell area/timing without conflating mapped synthesis with physical closure. | Implemented; Section 4 and impl/asic/README.md; six default core/FPU runs on SKY130 HD and IHP SG13G2; full physical flow and broader parameter matrices open |
