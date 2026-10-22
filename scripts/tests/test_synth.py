@@ -15,6 +15,48 @@ SPEC.loader.exec_module(synth)
 
 
 class SynthesisTests(unittest.TestCase):
+    def test_wire_load_policy_rejects_disabled_missing_or_duplicate_commands(self):
+        commands=['buffer -c','topo','stime -c','upsize -c','dnsize -c']
+        with tempfile.TemporaryDirectory() as tmp:
+            script=Path(tmp)/'abc_speed.script'
+            script.write_text('# Upstream script\n'+'\n'.join(commands)+'\n')
+            policy=synth.abc_wire_load_policy(script)
+            self.assertTrue(policy['abc_wire_loads'])
+            self.assertEqual(policy['abc_script_sha256'],synth.digest(script))
+            for command in ('buffer -c','stime -c','upsize -c','dnsize -c'):
+                for changed in (command.removesuffix(' -c'),'# '+command,command+'\n'+command):
+                    script.write_text('\n'.join(changed if line==command else line for line in commands))
+                    with self.subTest(command=command,changed=changed),self.assertRaises(ValueError):
+                        synth.abc_wire_load_policy(script)
+
+    def test_orfs_overrides_cannot_silently_change_buffering_policy(self):
+        good='LIB_FILES: /pdk/cells.lib\nABC_AREA: 0\nREMOVE_ABC_BUFFERS: 1\nGPL_TIMING_DRIVEN: 1\n'
+        self.assertEqual(synth.resolved_buffering_settings(good),synth.BUFFERING_SETTINGS)
+        for changed in (good.replace('ABC_AREA: 0','ABC_AREA: 1'),
+                        good.replace('REMOVE_ABC_BUFFERS: 1','REMOVE_ABC_BUFFERS: 0'),
+                        good.replace('GPL_TIMING_DRIVEN: 1','GPL_TIMING_DRIVEN: 0'),
+                        good.replace('REMOVE_ABC_BUFFERS: 1\n',''),
+                        good+'ABC_AREA: 0\n'):
+            with self.subTest(changed=changed),self.assertRaises(ValueError):
+                synth.resolved_buffering_settings(changed)
+
+    def test_executed_abc_script_and_retained_hash_must_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script=Path(tmp)/'abc_speed.script';script.write_text('buffer -c\n')
+            log=Path(tmp)/'yosys.log'
+            expected=synth.digest(script)
+            log.write_text(f'abc -script {script} -liberty cells.lib\nTook 1 second: abc -script {script}\n')
+            synth.check_abc_execution(log,script,expected)
+            for command in ('no mapping evidence',f'abc -script {script}.other',
+                            'abc_new -liberty cells.lib'):
+                log.write_text(command+'\n')
+                with self.subTest(command=command),self.assertRaises(ValueError):
+                    synth.check_abc_execution(log,script,expected)
+            log.write_text(f'abc -script {script}\n')
+            script.write_text('buffer\n')
+            with self.assertRaisesRegex(ValueError,'changed during synthesis'):
+                synth.check_abc_execution(log,script,expected)
+
     def test_buffer_metrics_use_library_function_instead_of_cell_names(self):
         def module(input_bits,output_bits,area):
             return dict(attributes=dict(area=area),ports={

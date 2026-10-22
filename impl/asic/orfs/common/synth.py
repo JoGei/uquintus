@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -18,6 +19,9 @@ ROOT = Path(__file__).resolve().parents[4]
 COMMON = Path(__file__).resolve().parent
 ORFS = COMMON.parent
 TARGETS = ORFS.parent/'targets.yml'
+# Flow policy, independent of hardware parameters. Physical settings take effect
+# when the generated external-design configuration is used for placement.
+BUFFERING_SETTINGS = dict(ABC_AREA='0', REMOVE_ABC_BUFFERS='1', GPL_TIMING_DRIVEN='1')
 sys.path.insert(0, str(ROOT/'verif/sim/common'))
 from hw_config import load_configuration, parameters_for_component, write_header
 from component_runner import bender_include_dirs
@@ -79,6 +83,37 @@ def executable(explicit, name, fallback):
     if not found:
         raise ValueError(f'{name} executable not found; supply {name.upper()}_EXE or PATH')
     return Path(found).resolve()
+
+
+def abc_wire_load_policy(script):
+    """Qualify the installed speed script rather than copy or patch ORFS."""
+    commands=[shlex.split(line,comments=True) for line in script.read_text().splitlines()]
+    for name in ('buffer','stime','upsize','dnsize'):
+        matches=[tokens for tokens in commands if tokens and tokens[0]==name]
+        if matches!=[[name,'-c']]:
+            raise ValueError(f'Baseline requires exactly one "{name} -c" in {script}; '
+                             'qualify this ORFS script before changing the wire-load policy')
+    return dict(abc_script=key(script),abc_script_sha256=digest(script),abc_wire_loads=True)
+
+
+def resolved_buffering_settings(text):
+    settings={}
+    for name,expected in BUFFERING_SETTINGS.items():
+        values=[line.partition(': ')[2].strip() for line in text.splitlines()
+                if line.startswith(name+': ')]
+        if values!=[expected]:
+            raise ValueError(f'ORFS buffering policy requires {name}={expected}; resolved {values}')
+        settings[name]=values[0]
+    return settings
+
+
+def check_abc_execution(log,script,expected_hash):
+    commands=[shlex.split(line) for line in log.read_text().splitlines()
+              if line.startswith(('abc ','abc_new '))]
+    if not commands or any(tokens[:3]!=['abc','-script',str(script)] for tokens in commands):
+        raise ValueError('Yosys did not execute the qualified ORFS ABC speed script; see '+str(log))
+    if digest(script)!=expected_hash:
+        raise ValueError('ABC speed script changed during synthesis: '+str(script))
 
 
 def reset_input_constraints(delay):
@@ -203,7 +238,9 @@ def main():
                              reset_input_max_delay_ns=args.reset_input_delay if args.reset_input_delay is not None else args.clock_period*0.2,
                              reset_input_min_delay_ns=0 if args.reset_input_delay is not None else args.clock_period*0.2,
                              input_transition_ns=0.1,output_load_pf=0.01,clock_uncertainty_ns=0.1,
-                             sta_interconnect='ideal_preplacement',abc_script='installed ORFS default'),
+                             sta_interconnect='ideal_preplacement',abc_wire_loads=True,
+                             remove_abc_buffers=True,placement_timing_driven=True,
+                             placement_parasitics='placement_estimated'),
                 input_sha256={},metrics=[],artifacts=[])
     metadata=directory/'report.json'
     metadata.write_text(json.dumps(record,indent=2)+'\n')
@@ -213,6 +250,9 @@ def main():
         if args.top=='fpu' and not config['ISA_ZFINX']:
             raise ValueError('FPU synthesis requires ISA_ZFINX=1; disabled FPU is intentionally empty')
         flow=flow_directory(args.orfs_root)
+        abc_script=flow/'scripts/abc_speed.script'
+        record['context'].update(abc_wire_load_policy(abc_script))
+        shutil.copyfile(abc_script,directory/'abc_speed.script')
         yosys=executable(args.yosys,'yosys',flow.parent/'tools/install/yosys/bin/yosys')
         openroad=executable(args.openroad,'openroad',flow.parent/'tools/install/OpenROAD/bin/openroad')
         tools=dict(yosys=output([str(yosys),'-V']),yosys_sha256=digest(yosys),
@@ -258,6 +298,7 @@ def main():
                       VERILOG_TOP_PARAMS=' '.join(f'{k} {v}' for k,v in parameters.items()),
                       SDC_FILE=make_path(directory/'constraints.sdc'),CLOCK_PERIOD=f'{args.clock_period:g}',
                       ABC_CLOCK_PERIOD_IN_PS=f'{args.clock_period*1000:g}',
+                      **BUFFERING_SETTINGS,
                       SYNTH_HDL_FRONTEND=frontend,SYNTH_HIERARCHICAL='0',
                       SYNTH_CANONICALIZE_TCL=make_path(COMMON/'canonicalize.tcl'),
                       SYNTH_SCRIPT=make_path(COMMON/'synth.tcl'),
@@ -281,7 +322,9 @@ def main():
         command=['make','--no-print-directory','-C',str(flow),f'DESIGN_CONFIG={directory}/config.mk',
                  f'WORK_HOME={directory}',f'YOSYS_EXE={yosys}',f'OPENROAD_EXE={openroad}',
                  f'PYTHON_EXE={sys.executable}',f'NUM_CORES={args.jobs}','synth']
-        libraries=output([*command[:-1],'print-LIB_FILES'])
+        libraries=output([*command[:-1],'print-LIB_FILES',
+                          *(f'print-{name}' for name in BUFFERING_SETTINGS)])
+        record['context']['orfs_buffering_settings']=resolved_buffering_settings(libraries)
         resolved=next((line.partition(': ')[2] for line in libraries.splitlines() if line.startswith('LIB_FILES: ')),None)
         if not resolved: raise ValueError('ORFS did not resolve its synthesis libraries')
         record['context']['mapping_libraries']={str(Path(p).resolve()):digest(Path(p)) for p in resolved.split()}
@@ -293,6 +336,8 @@ def main():
             raise RuntimeError(f'ORFS failed ({process.returncode}); see {directory}/synthesis.log')
         reports=directory/'reports'/args.platform/manifest['module']/'base'
         results=directory/'results'/args.platform/manifest['module']/'base'
+        check_abc_execution(directory/'logs'/args.platform/manifest['module']/'base/1_2_yosys.log',
+                            abc_script,record['context']['abc_script_sha256'])
         if not (results/'1_synth.odb').is_file(): raise ValueError('ORFS synthesis database missing')
         metrics,counts=mapped_metrics(reports/'uqu_stat.json',results/'uqu_mapped.json',manifest['module'])
         metrics += timing_metrics(directory/'logs'/args.platform/manifest['module']/'base/1_synth.json')
@@ -306,7 +351,7 @@ def main():
         record['finished_at']=now()
         record['artifacts']=[str(p.relative_to(directory)) for p in directory.rglob('*')
                              if p.is_file() and p!=metadata and p.suffix in
-                             ('.json','.log','.tcl','.mk','.sdc','.v','.txt','.rpt','.f','.yml','.lock')]
+                             ('.json','.log','.tcl','.mk','.sdc','.v','.txt','.rpt','.f','.yml','.lock','.script')]
         metadata.write_text(json.dumps(record,indent=2)+'\n')
     print('PASS: mapped synthesis '+config_path.stem+' '+args.top+' '+args.platform)
 

@@ -365,7 +365,9 @@ make report
 `CLOCK_PERIOD_NS=20` is the default exploratory target. Results include mapped
 cell counts/area and preplacement timing, with structural and full-mapping
 checks. Passing synthesis does not establish timing closure. The
-[IHP placement comparison](impl/asic/orfs/investigations/ihp-placement.md) also provides
+baseline enables ABC wire-load estimates and configures synthesis-buffer removal
+before timing-driven placement; each run retains the policy and ABC script hash.
+The [IHP placement comparison](impl/asic/orfs/investigations/ihp-placement.md) also provides
 two controlled placed results; CTS, routing and extracted power/timing remain open.
 The [benchmarking specification](doc/uqu_spec.bench.md) defines `T_min` and
 estimated maximum frequency with their measurement assumptions.

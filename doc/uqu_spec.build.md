@@ -407,8 +407,21 @@ defines `T_min`, its relationship to setup slack and estimated maximum frequency
 and the timing context required for comparisons.
 These are preplacement estimates with ideal interconnect, not physical timing
 closure or extracted area/power. Default-activity power is not a qualified metric.
-The installed ORFS ABC script determines mapping's wire-load and delay-target
-policy; supplying `-D` alone does not establish that the script consumes it.
+The baseline shall explicitly select the installed ORFS speed script
+(`ABC_AREA=0`) with wire-load estimates enabled in its `buffer`, `stime`,
+`upsize` and `dnsize` commands. Qualify those commands and verify that synthesis
+executed the qualified script; fail on incompatible scripts or conflicting
+resolved settings. Retain the script snapshot, SHA-256 and wire-load policy with
+the result. Supplying `-D` alone does not establish that the script consumes it.
+
+The generated design configuration shall set `REMOVE_ABC_BUFFERS=1` for
+floorplanning and `GPL_TIMING_DRIVEN=1` for placement. OpenROAD shall rebuild
+buffering with placement-estimated parasitics. These are flow settings,
+independent of hardware YAML and RTL `MUA_` parameters. The synthesis target
+stops before these physical stages; its reported mapped area includes ABC
+buffers. Record the resolved settings and intended placement policy separately
+from the stage actually executed. Disabling wire-load estimates remains an
+explicit investigation case rather than a baseline option.
 
 Record tool/ABC/plugin binary hashes, ORFS revision, full configuration,
 sources/includes, Bender lock, flow/platform/library hashes, constraints and
@@ -739,3 +752,4 @@ later decisions determine the active contract.
 | D-303 | Fetch commit-pinned CVFPU/FPnew through Bender with exact transitive revisions in Bender.lock, disable upstream Git submodule checkout in project configuration, and opt imported HDL into component builds through a manifest flag. | Reuse upstream source/dependency metadata without adding repository submodules or compiling unused IP into native tests. | Implemented dependency/configuration preparation; Section 1.3; real execution adapter under architecture D-304; physical qualification remains open |
 | D-306 | Implement external ORFS mapped synthesis for core/FPU targets using shared hardware YAML and Bender, Slang for imported SV, latch/mapping checks, preplacement STA and provenance-rich report records. | Qualify open-source ASIC frontend/mapping compatibility and expose measured cell area/timing without conflating mapped synthesis with physical closure. | Implemented; Section 4 and impl/asic/README.md; six default core/FPU runs on SKY130 HD and IHP SG13G2; full physical flow and broader parameter matrices open |
 | D-309 | Organize ASIC integrations under impl/asic/<flow>/ with flow-owned scripts, platform adapters and investigations; keep targets.yml shared at the ASIC root and select the backend through ASIC_FLOW, defaulting to orfs. | Allow future ASIC flows without treating ORFS-specific files as technology-independent collateral. | Implemented; Sections 2, 4 and 7; unsupported flow selections fail explicitly |
+| D-310 | Keep ABC wire-load estimates enabled in the qualified ORFS speed script, remove synthesis buffers before placement, and use timing-driven physical buffering. Record the resolved policy and script hash; retain estimates disabled for explicit experiments. | Preserve the measured baseline's setup advantage while allowing OpenROAD to replace synthesis buffering using placement parasitics. | Implemented policy and provenance; Section 4 and ASIC guide; full physical flow remains open |

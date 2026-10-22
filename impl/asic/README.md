@@ -82,7 +82,7 @@ or Make metacharacters.
    `RESET_INPUT_DELAY_NS`. Supply ABC's target explicitly in picoseconds.
    Whether mapping consumes that target depends on the installed ABC script;
    the initially measured ORFS speed script does not use it (see below).
-4. Run ORFS `make synth`. A canonicalization hook lowers processes, checks
+4. Run ORFS `make synth` with the buffering policy below. A canonicalization hook lowers processes, checks
    structural consistency and rejects inferred latches unless the configured
    core explicitly uses a latch register file. ORFS performs optimization,
    memory lowering, sequential-cell mapping, ABC mapping and its mapped checks.
@@ -106,6 +106,37 @@ It requires ORFS support for Slang, top parameters, canonicalization hooks and
 the standard synthesis stage layout. Actual tool/flow revisions are recorded
 per run rather than assumed interchangeable.
 
+## Buffering policy
+
+The baseline explicitly uses these flow settings for both supported platforms:
+
+| Setting | Value | Purpose |
+|---|---|---|
+| `ABC_AREA` | `0` | Select the installed ORFS speed script, with wire-load estimates enabled. |
+| `REMOVE_ABC_BUFFERS` | `1` | Remove synthesis buffers in floorplanning before physical buffering. |
+| `GPL_TIMING_DRIVEN` | `1` | Enable timing-driven placement and buffering with placement parasitics. |
+
+The runner checks that `abc_speed.script` contains exactly one each of
+`buffer -c`, `stime -c`, `upsize -c` and `dnsize -c`. It uses the upstream script
+unchanged, checks the resolved ORFS settings, and verifies the executed ABC
+command against that script. An incompatible script or conflicting effective
+setting fails the run rather than silently changing policy. A new ORFS script
+format requires qualification before relaxing these checks.
+
+Retain `abc_speed.script` with every run and record its SHA-256, source path,
+`abc_wire_loads`, resolved `orfs_buffering_settings`, buffer-removal setting and
+placement policy in `report.json`. These are implementation-flow settings;
+hardware YAML and RTL `MUA_` parameters remain independent.
+
+`make synth` stops before floorplanning, so its mapped area still includes ABC's
+buffers. The removal and placement settings apply when continuing the generated
+external-design configuration into physical implementation. The declared
+placement policy in a synthesis record does not mean placement was executed.
+The placement comparison helper uses the same physical settings. Wire-load
+estimates disabled remains an explicit investigation case, outside the baseline.
+The [IHP comparison](orfs/investigations/ihp-placement.md) motivates this policy;
+the result covers one configuration and corner before CTS and routing.
+
 ## Artifacts and interpretation
 
 Each run has a fresh directory:
@@ -114,6 +145,7 @@ Each run has a fresh directory:
 build/uquintus-<hw>/orfs_<platform>/synth-<top>-<timestamp>-<id>/
   config.yml, parameters.json, config.mk, constraints.sdc, sources.f
   include/uqu_config.vh, Bender.lock, bender_sources.json
+  abc_speed.script                            # Exact qualified upstream ABC script
   synthesis.log, frontend.log                 # Frontend log when using Slang
   report.json, cells.json
   logs/<platform>/<module>/base/1_synth.json
@@ -141,7 +173,8 @@ report are different models. Buffer metrics count non-inverting one-input,
 one-output identity cells from the Liberty-derived module ports, including clock
 buffers and delay cells, without relying on foundry-specific names. Historical
 runs produced before these metrics were added retain their original records.
-At the initially measured ORFS revision, the speed script is sourced as a file
+The baseline qualifies the installed speed script as described above. At the
+initially measured ORFS revision, that script is sourced as a file
 and does not consume Yosys's `-D` delay-target argument. The requested clock
 period still constrains OpenROAD's reported slack; it does not guarantee that
 this ABC script maps specifically toward that period. Preserve the script
@@ -160,6 +193,6 @@ an installed plugin or external plugin directory for subsequent sessions.
 
 The [IHP buffer investigation](orfs/investigations/ihp-buffering.md) isolates a large
 mapping-area difference caused by these wire-load estimates. The experiment
-does not change the production flow's default ABC policy. Its
+supports keeping wire-load estimates enabled in the baseline. Its
 [placement follow-up](orfs/investigations/ihp-placement.md) shows how removing synthesis
 buffers and repairing against placement-based RC eliminates most of that gap.

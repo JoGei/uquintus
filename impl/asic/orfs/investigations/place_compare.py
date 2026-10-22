@@ -59,12 +59,14 @@ def execute(case,source,directory,flow,openroad,jobs,modules,source_summary,resu
         shutil.copyfile(source/case/'results'/REL/name,results/name)
     shutil.copyfile(source/case/'mapped.v',run/'mapped.v')
     shutil.copyfile(source/case/'constraints.sdc',run/'constraints.sdc')
+    abc_script=source/f'{case}.script'
     config=yaml.safe_load((source/case/'config.yml').read_text())
     (run/'config.yml').write_text(yaml.safe_dump(config,sort_keys=False))
     settings=dict(DESIGN_NAME='uqu_core',VERILOG_FILES=str(run/'mapped.v'),
                   SYNTH_NETLIST_FILES=str(run/'mapped.v'),SDC_FILE=str(run/'constraints.sdc'),
                   CLOCK_PERIOD='20',DIE_AREA='0 0 1240 1240',CORE_AREA='20 20 1220 1220',
-                  PLACE_DENSITY='0.65',REMOVE_ABC_BUFFERS='1',GPL_TIMING_DRIVEN='1',
+                  PLACE_DENSITY='0.65',REMOVE_ABC_BUFFERS=synth.BUFFERING_SETTINGS['REMOVE_ABC_BUFFERS'],
+                  GPL_TIMING_DRIVEN=synth.BUFFERING_SETTINGS['GPL_TIMING_DRIVEN'],
                   GPL_ROUTABILITY_DRIVEN='1',TNS_END_PERCENT='100',
                   SKIP_REPORT_METRICS='0',REPORT_CLOCK_SKEW='0',IO_CONSTRAINTS=str(HERE/'fixed_pins.tcl'))
     hooks={'floorplan':'FLOORPLAN','io':'IO_PLACEMENT','global_place':'GLOBAL_PLACE',
@@ -86,7 +88,7 @@ def execute(case,source,directory,flow,openroad,jobs,modules,source_summary,resu
         command[-2:-2]=['-o',str(results/'3_4_place_resized.odb'),
                         '-o',str(results/'2_floorplan.sdc')]
     inputs=[run/'mapped.v',run/'constraints.sdc',run/'config.mk',results/'1_synth.odb',results/'1_synth.sdc',
-            source/'summary.json',platform,HERE/'place_compare.py',HERE/'place_audit.tcl',HERE/'fixed_pins.tcl',
+            source/'summary.json',abc_script,platform,HERE/'place_compare.py',HERE/'place_audit.tcl',HERE/'fixed_pins.tcl',
             HERE.parent/'common/synth.py',flow/'Makefile',*run.glob('*.tcl')]
     if resume:
         inputs += [results/'3_4_place_resized.odb',results/'2_floorplan.sdc',resume/case/'report.json']
@@ -98,7 +100,9 @@ def execute(case,source,directory,flow,openroad,jobs,modules,source_summary,resu
         command=command,metrics=[],artifacts=[],
         context=dict(stage='placed_pre_cts',experiment='ihp_abc_wireloads',mapping=case,
             clock_period_ns=20,die_area_um=[0,0,1240,1240],core_area_um=[20,20,1220,1220],
-            place_density=0.65,remove_abc_buffers=True,parasitics='placement_estimated',
+            place_density=0.65,remove_abc_buffers=True,placement_timing_driven=True,
+            abc_wire_loads=(case=='original'),abc_script=synth.key(abc_script),
+            abc_script_sha256=synth.digest(abc_script),parasitics='placement_estimated',
             resumed_after_resize_from=str(resume) if resume else None,
             source_directory=str(source),source_mapping_metrics=source_summary[case],
             openroad=synth.output([str(openroad),'-version']),openroad_sha256=synth.digest(openroad),
