@@ -55,6 +55,14 @@ preserves the original data-input delay budget for reset. The integration must
 provide the selected arrival window; reset timing is not waived. The
 [IHP reset timing trial](orfs/investigations/ihp-reset-timing.md) records the measured effect.
 
+The generated SDC is a **standalone evaluation profile**, using generic port
+delays, slew and load assumptions. It does not model a particular SRAM or
+coprocessor. The SoC owns final integrated timing; see the
+[interface timing policy](../../doc/uqu_spec.build.md#41-interface-timing-scope).
+Integration-supplied SDC selection and separate internal/interface critical-path
+summaries are agreed follow-ups, not current Make options. Detailed SRAM/XIF
+budgets remain deferred until their integrations are selected.
+
 `ORFS_ROOT` must contain `flow/Makefile`. If unset, an environment-provided
 `orfs --flow-dir` launcher must print the absolute directory containing the
 ORFS Makefile. An explicit root takes precedence. Tool selection uses explicit

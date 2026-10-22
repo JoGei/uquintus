@@ -52,6 +52,12 @@ Both interfaces shall support variable latency through request/response
 handshakes. The core shall accommodate memory wait states so that the surrounding
 system can provide different memory hierarchies, including external caches.
 
+Wait states shall not relax setup and hold requirements at the clock edge that
+accepts a request or response. Concrete SRAM and bus integration shall provide
+its own physical timing constraints under the
+[interface timing scope](uqu_spec.build.md#41-interface-timing-scope). The generic
+standalone core SDC shall not define an SRAM access-time guarantee.
+
 The baseline native memory ports shall use the following declarations. All
 directions are relative to the core; handshake and completion behavior shall
 follow the rules in this section.
@@ -852,6 +858,20 @@ The DE-only eviction rule shall use the same
 [CV-X-IF commit/kill contract](https://docs.openhwgroup.org/projects/openhw-group-core-v-xif/en/v1.0.0/x_ext.html#commit-interface);
 kill notifications shall be observed before interrupt entry, and killed
 offloads shall never wait for or generate a result-interface completion.
+
+### 5.3. Integration timing budgets
+
+CV-X-IF protocol compliance and physical timing closure shall be evaluated
+separately. The v1.0.0
+[timing recommendations](https://docs.openhwgroup.org/projects/openhw-group-core-v-xif/en/v1.0.0/x_ext.html#timing-recommendations)
+are processor dependent. The referenced CV32E40X budgets and example SDC shall
+serve as integration guidance, rather than fixed uquintus delay requirements;
+signal groupings shall match the selected v1.0.0 interface.
+
+A concrete integration shall budget the complete same-cycle paths across the
+core, interconnect and coprocessor, while respecting the standard's signal
+dependency rules. Derive detailed constraints when selecting the coprocessor,
+following the [build timing policy](uqu_spec.build.md#41-interface-timing-scope).
 
 ## 6. Optional hardware debug and external debug module
 

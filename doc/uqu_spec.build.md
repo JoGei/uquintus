@@ -443,6 +443,39 @@ See the [ORFS overview and external-design instructions](https://github.com/The-
 [design configuration guide](https://openroad-flow-scripts.readthedocs.io/en/latest/user/AddingNewDesign.html),
 and [flow stage definitions](https://github.com/The-OpenROAD-Project/OpenROAD-flow-scripts/blob/master/flow/Makefile).
 
+### 4.1. Interface timing scope
+
+**Status:** Agreed; generic standalone profile implemented; integration-supplied
+SDC selection and separate internal/interface path summaries remain open
+
+The generated SDC shall be treated as a standalone evaluation profile. Its
+20%-of-period port delays, slew, load and clock assumptions describe an
+exploratory environment; they shall not promise compatibility with a particular
+SRAM, bus fabric or coprocessor. Defer detailed per-signal budgets until a
+concrete integration is selected.
+
+The build shall support an integration-supplied SDC for a concrete subsystem.
+Retain the selected profile, full constraints and hashes with its measurements.
+For flat SoC implementation, the SoC shall own the final constraints and timing
+analysis across the core, interconnect, memories and coprocessors. Standalone
+core port delays shall not be reapplied at internal connections and count the
+external delay twice. Use actual SRAM Liberty timing arcs, wrapper logic and
+physical interconnect. Separately implemented blocks or macros shall instead
+have explicit interface timing contracts that both sides meet.
+
+Integration budgets shall cover request and response paths, input minimum and
+maximum arrivals, output requirements, slew, load and clock relationships.
+Same-cycle request/response paths through an external coprocessor shall fit
+the combined core/interconnect/coprocessor budget. Variable operation or bus
+latency shall not by itself authorize false-path or multicycle exceptions.
+
+Report internal and interface critical paths separately, identifying their
+endpoints and scope, while retaining the full-interface result defined in the
+[benchmarking specification](uqu_spec.bench.md#12-required-scope-and-qualification).
+Detailed SRAM/coprocessor evaluation harnesses and constraints shall follow
+their selected integrations. These are implementation-flow settings and shall
+not become RTL `MUA_` parameters.
+
 ## 5. Externally provisioned build environment
 
 **Status:** External ORFS/tool discovery implemented; container provisioning open
@@ -716,6 +749,8 @@ lock policies and broader supported-configuration matrices. ORFS discovery and
 synthesis constraints are defined above; Docker images/Compose services,
 physical/formal target names and artifacts, and CI wiring remain open. Additional
 simulator backends still require integration; Verilator is the current backend.
+Implement integration-supplied SDC selection and separate internal/interface
+critical-path summaries under Section 4.1 before claiming those capabilities.
 No container build or dependency installation shall become implicit in Make.
 
 The directory tree retains its explicit proposed subdivisions. Add directories
@@ -753,3 +788,4 @@ later decisions determine the active contract.
 | D-306 | Implement external ORFS mapped synthesis for core/FPU targets using shared hardware YAML and Bender, Slang for imported SV, latch/mapping checks, preplacement STA and provenance-rich report records. | Qualify open-source ASIC frontend/mapping compatibility and expose measured cell area/timing without conflating mapped synthesis with physical closure. | Implemented; Section 4 and impl/asic/README.md; six default core/FPU runs on SKY130 HD and IHP SG13G2; full physical flow and broader parameter matrices open |
 | D-309 | Organize ASIC integrations under impl/asic/<flow>/ with flow-owned scripts, platform adapters and investigations; keep targets.yml shared at the ASIC root and select the backend through ASIC_FLOW, defaulting to orfs. | Allow future ASIC flows without treating ORFS-specific files as technology-independent collateral. | Implemented; Sections 2, 4 and 7; unsupported flow selections fail explicitly |
 | D-310 | Keep ABC wire-load estimates enabled in the qualified ORFS speed script, remove synthesis buffers before placement, and use timing-driven physical buffering. Record the resolved policy and script hash; retain estimates disabled for explicit experiments. | Preserve the measured baseline's setup advantage while allowing OpenROAD to replace synthesis buffering using placement parasitics. | Implemented policy and provenance; Section 4 and ASIC guide; full physical flow remains open |
+| D-311 | Keep the generic core SDC as a standalone evaluation profile; let concrete integrations supply constraints and the SoC own final timing. Defer detailed SRAM/XIF budgets until integration and report internal/interface paths separately. | Preserve useful standalone PPA evidence without assuming an unknown memory or coprocessor environment or counting external delay twice during SoC timing. | Agreed; Section 4.1; custom SDC selection and separate path summaries remain open |

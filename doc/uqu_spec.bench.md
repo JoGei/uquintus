@@ -93,6 +93,14 @@ achievable implementation period, sweep clock targets through a flow that
 actually consumes those targets, optimize each implementation, and report the
 conditions of each point.
 
+Each result shall identify whether its interface environment is the generic
+standalone profile or a concrete integration, as defined in the
+[build timing policy](uqu_spec.build.md#41-interface-timing-scope). Retain the
+selected constraints and hashes. Internal and interface critical-path summaries
+shall keep explicit endpoints and path selection; an internal-only diagnostic
+shall not replace the full-interface result or imply an integrated SoC limit.
+Separate path summaries remain a reporting follow-up.
+
 ## 2. Reset assumptions in frequency comparisons
 
 The authoritative reset behavior remains the
