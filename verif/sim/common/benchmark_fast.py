@@ -19,6 +19,7 @@ from component_runner import (HDL_LANGUAGE_ARGS, bender_include_dirs, bender_sou
                               command_output, load_component, order_control_files, simulator_build_key)
 from elf_image import load_elf, expected_traps
 from hw_config import parameters_for_component, write_header
+from bpu_stats import SCOPE as BPU_SCOPE, statistics as bpu_statistics, metrics as bpu_metrics
 from interrupts import interrupt_plan
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -95,6 +96,7 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
     # The RTL target excludes all cocotb/RVFI/trace wrappers. Retain Bender's
     # existing optional imported-IP selection for enabled Zfinx configurations.
     component = dict(load_component('core_elf'), bender_target='rtl')
+    component['bender_targets'] = [*component.get('bender_targets', []), 'benchmark_stats']
     parameters = parameters_for_component(config, component['parameters'], catalog)
     options = bender_source_options(component, simulator, parameters)
     source_text = command_output([bender, 'script', 'flist', *options])
@@ -116,6 +118,7 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
                    ROOT / 'config/sim/core_elf.yml', Path(__file__), ROOT / 'verif/sim/common/benchmark_measure.py',
                    ROOT / 'verif/sim/common/elf_image.py']:
         inputs[str(source.relative_to(ROOT)) if source.is_relative_to(ROOT) else str(source)] = sha(source)
+    inputs['verif/sim/common/bpu_stats.py'] = sha(ROOT / 'verif/sim/common/bpu_stats.py')
     if config['ISA_ZFINX']:
         inputs['Bender.lock'] = sha(ROOT / 'Bender.lock')
         shutil.copyfile(ROOT / 'Bender.lock', directory / 'Bender.lock')
@@ -125,7 +128,7 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
         family=software['compiler_info']['family'], version=software['compiler_info']['version'],
         march=software['compiler_info']['march'], abi=software['compiler_info']['abi'],
         suite_revision=software['upstream']['revision'],
-        measurement='retirement edges (start, stop]; timer call overhead included')
+        measurement='retirement edges (start, stop]; timer call overhead included', bpu_statistics=BPU_SCOPE)
     record = dict(schema_version=1, kind='benchmark', status='running', configuration_scope='core',
         component='core_elf', target=simulator, selection=benchmark['name']+'-'+benchmark['profile'], seed=seed,
         configuration=dict(name=config_path.stem, parameters=config), context=context,
@@ -134,7 +137,7 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
         source_sha256=inputs, input_scope='RTL, headers, software/runtime, native harness and measurement adapter',
         workload=sha(program), metrics=[], results_file='results.xml', required_tests=['workload_crc'],
         started_at=datetime.now(timezone.utc).isoformat(),
-        artifacts=['benchmark.json', 'benchmark.log', 'native.json', 'native.log', 'execution.json',
+        artifacts=['benchmark.json', 'benchmark.log', 'bpu-stats.json', 'native.json', 'native.log', 'execution.json',
                    'build.log', 'sources.f', 'bender_sources.json', 'software-build.json', 'config.yml',
                    'program-image.bin', 'final-memory.bin'])
     report_path = directory / 'report.json'
@@ -184,17 +187,20 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
         window = BenchmarkWindow(image)
         window.start, window.stop = native['start'], native['stop']
         measured = window.finish()
+        bpu = bpu_statistics(native['bpu_start'], native['bpu_stop'], config, measured['retired'])
+        (directory / 'bpu-stats.json').write_text(json.dumps(bpu, indent=2)+'\n')
         log = read_log(image, read_memory(directory / 'final-memory.bin'))
         (directory / 'benchmark.log').write_text(log)
         validated = coremark_result(log, benchmark['profile'], benchmark['iterations'], measured['cycles'])
         evidence.update(status='passed', window=measured, result=validated, memory=memory,
-                        validation_scope=context['validation_scope'])
+                        validation_scope=context['validation_scope'], bpu_statistics=bpu)
         record['metrics'] = [dict(name=name, value=value, unit=unit) for name, value, unit in (
             ('benchmark_cycles', measured['cycles'], 'cycles'), ('benchmark_retired', measured['retired'], 'instructions'),
             ('benchmark_cpi', measured['cpi'], 'cycles/instruction'),
             ('cycles_per_iteration', validated['cycles_per_iteration'], 'cycles/iteration'),
             ('elf_load_bytes', sum(s.size for s in image.segments), 'bytes'),
             ('executable_segment_bytes', sum(len(s.data) for s in image.segments if s.flags & 1), 'bytes'))]
+        record['metrics'] += bpu_metrics(bpu)
         record['status'] = 'passed'
     except BaseException as error:
         record.update(status='failed', detail=str(error))

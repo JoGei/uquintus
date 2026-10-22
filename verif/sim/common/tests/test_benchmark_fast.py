@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import benchmark
 from benchmark_fast import read_memory, write_memory
 from elf_image import ELFImage, Segment
+from bpu_stats import statistics as bpu_statistics
 
 
 class FastBenchmarkTests(unittest.TestCase):
@@ -52,6 +53,11 @@ class FastBenchmarkTests(unittest.TestCase):
                 self.assertEqual(read_memory(directory / 'final-memory.bin')[0x80000100], 42)
                 self.assertEqual(record['stop']['cycle']-record['start']['cycle'],
                                  record['stop']['mcycle_low']-record['start']['mcycle_low'])
+                stats = bpu_statistics(record['bpu_start'], record['bpu_stop'],
+                    dict(MUA_BRANCH_PREDICTOR='none', MUA_BTB='none'),
+                    record['stop']['retired']-record['start']['retired'])
+                self.assertEqual(stats['counts']['retired_instructions'], 7)
+                self.assertEqual(stats['counts']['control_flow_instructions'], 0)
                 durations.append(record['cycles'])
             self.assertEqual(durations[0], durations[1])
             self.assertGreater(durations[2], durations[0])

@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 static void require(bool condition, const std::string &message) {
     if (!condition) throw std::runtime_error(message);
@@ -108,10 +109,27 @@ struct Point {
 struct Pending { bool valid = false; uint32_t delay = 0, data = 0; };
 struct Request { bool valid = false, we = false; uint32_t addr = 0, data = 0, be = 0, pc = 0; };
 
+struct BpuSnapshot {
+    std::vector<uint64_t> values;
+    void sample(const Vuqu_benchmark_tb &dut) {
+        require(dut.bpu_counter_count_o > 0 && dut.bpu_counter_count_o <= 32, "invalid BPU counter count");
+        for (unsigned i = 0; i < dut.bpu_counter_count_o; ++i)
+            values.push_back(uint64_t(dut.bpu_counters_o[2*i]) | uint64_t(dut.bpu_counters_o[2*i+1]) << 32);
+    }
+    std::string json() const {
+        if (values.empty()) return "null";
+        std::string result = "[";
+        for (unsigned i = 0; i < values.size(); ++i)
+            result += (i ? "," : "") + std::to_string(values[i]);
+        return result + "]";
+    }
+};
+
 int main(int argc, char **argv) {
     Memory memory;
     uint64_t cycles = 0, retired = 0;
     Point start, stop;
+    BpuSnapshot bpu_start, bpu_stop;
     std::string detail;
     int64_t exit_code = -1;
     auto context = std::make_unique<VerilatedContext>();
@@ -134,6 +152,7 @@ int main(int argc, char **argv) {
         dut->boot_addr_i = boot;
         for (; cycles < limit+2 && exit_code < 0; ++cycles) {
             bool reset = cycles < 2;
+            bool start_edge = false, stop_edge = false;
             dut->clk_i = 0; dut->rst_ni = !reset;
             dut->imem_gnt_i = dut->dmem_gnt_i = 0;
             dut->imem_rvalid_i = dut->dmem_rvalid_i = 0;
@@ -184,8 +203,10 @@ int main(int argc, char **argv) {
                         Point point = {true, cycles, retired, dut->retire_data_o};
                         if (pc == start_pc) {
                             require(!start.valid && !stop.valid, "repeated benchmark start"); start = point;
+                            start_edge = true;
                         } else {
                             require(start.valid && !stop.valid, "out-of-order/repeated benchmark stop"); stop = point;
+                            stop_edge = true;
                         }
                     }
                     if (completion_pending && pc == completion_pc) {
@@ -198,7 +219,12 @@ int main(int argc, char **argv) {
                     }
                 }
             }
-            dut->clk_i = 1; eval(); dut->clk_i = 0; eval();
+            dut->clk_i = 1; eval();
+            // Post-edge counters include the retiring marker. Subtracting
+            // these snapshots implements the same (start, stop] boundary.
+            if (start_edge) bpu_start.sample(*dut);
+            if (stop_edge) bpu_stop.sample(*dut);
+            dut->clk_i = 0; eval();
             require(!context->gotFinish(), "RTL finished before benchmark completion");
         }
         require(exit_code >= 0, "benchmark watchdog expired");
@@ -215,7 +241,8 @@ int main(int argc, char **argv) {
         << ",\"detail\":" << (detail.empty() ? "null" : json_string(detail))
         << ",\"cycles\":" << cycles << ",\"retired\":" << retired
         << ",\"exit_code\":" << exit_code << ",\"start\":" << start.json()
-        << ",\"stop\":" << stop.json() << "}\n";
+        << ",\"stop\":" << stop.json() << ",\"bpu_start\":" << bpu_start.json()
+        << ",\"bpu_stop\":" << bpu_stop.json() << "}\n";
     if (!detail.empty()) std::cerr << detail << '\n';
     return detail.empty() ? 0 : 1;
 }

@@ -103,6 +103,52 @@ class ReportTests(unittest.TestCase):
         (path / 'results.xml').write_text('<testsuites><testsuite><testcase name="wrong"/></testsuite></testsuites>')
         self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
 
+    def test_bpu_evidence_and_readable_denominators(self):
+        from bpu_stats import COUNTERS, SCOPE, statistics, metrics
+        parameters = dict(self.parameters, MUA_BRANCH_PREDICTOR='none', MUA_BTB='none')
+        path = self.run_record(component='core_elf', parameters=parameters)
+        counts = dict.fromkeys(COUNTERS, 0)
+        counts.update(retired_instructions=40, conditional_branches=5,
+                      taken_conditional_branches=2, taken_control_flow=2, de_redirects=2)
+        stats = statistics([0]*len(COUNTERS), [counts[k] for k in COUNTERS], parameters, 40)
+        evidence = dict(status='passed', window=dict(cycles=120, retired=40),
+                        result=dict(validation='passed', official_score=False, cycles_per_iteration=120),
+                        bpu_statistics=stats)
+        raw = dict(schema_version=1, kind='benchmark', configuration_scope='core',
+            status='passed', component='core_elf', target='verilator', selection='fixture',
+            configuration=dict(name='rv32i', parameters=parameters),
+            context=dict(bpu_statistics=SCOPE), results_file='results.xml',
+            metrics=[dict(name='benchmark_cycles', value=120, unit='cycles'),
+                     dict(name='benchmark_retired', value=40, unit='instructions'),
+                     dict(name='benchmark_cpi', value=3, unit='cycles/instruction'),
+                     dict(name='cycles_per_iteration', value=120, unit='cycles/iteration')]+metrics(stats))
+        (path / 'report.json').write_text(json.dumps(raw))
+        (path / 'benchmark.json').write_text(json.dumps(evidence))
+        (path / 'bpu-stats.json').write_text(json.dumps(stats))
+        record = report.collect(self.build, self.root)['records'][0]
+        self.assertEqual(record['status'], 'passed')
+        self.assertEqual(record['bpu_statistics'], stats)
+        section = report.bpu_section(record['bpu_statistics'])
+        self.assertIn('Not applicable', section)
+        self.assertIn('conditional branches', section)
+        self.assertIn('do not measure lost cycles', section)
+        raw['metrics'][-1]['value'] += 1
+        (path / 'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        raw['metrics'][-1]['value'] -= 1
+        (path / 'report.json').write_text(json.dumps(raw))
+        stats['counts']['de_redirects'] += 1
+        (path / 'bpu-stats.json').write_text(json.dumps(stats))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        (path / 'bpu-stats.json').unlink()
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        raw['context']['bpu_statistics'] = 'fetch-attempts'
+        (path / 'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        del raw['context']['bpu_statistics']
+        (path / 'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'passed')
+
     def test_benchmark_requires_validated_window_and_junit_and_keeps_memory_context(self):
         path = self.run_record(component='core_elf')
         raw = json.loads((path / 'run.json').read_text())

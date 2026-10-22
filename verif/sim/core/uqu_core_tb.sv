@@ -96,6 +96,8 @@ module uqu_core_tb #(
     input wire [32*(1+XIF_DUALWRITE)-1:0] xif_result_data_i,
     input wire [4:0] xif_result_rd_i,
     input wire [XIF_DUALWRITE:0] xif_result_we_i,
+    output wire [64*uqu_bpu_stats_pkg::COUNT-1:0] bpu_counters_o,
+    output wire [31:0] bpu_counter_count_o,
     output reg rvfi_valid,
     output reg [63:0] rvfi_order,
     output reg [31:0] rvfi_insn,
@@ -535,6 +537,7 @@ module uqu_core_tb #(
         `include "uqu_rvfi_csr_list.vh"
         `undef UQU_RVFI_CSR
     );
+    `include "uqu_bpu_monitor_connect.vh"
 endmodule
 
 `default_nettype wire

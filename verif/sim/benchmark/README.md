@@ -3,7 +3,8 @@
 `uqu_benchmark_tb.sv` instantiates the actual core, supplies inactive interrupts/
 XIF and immediate fence acknowledgements, and exposes only the memory ports and
 small passive retirement/counter/trap observations needed by the driver.
-It includes no RVFI, CSR observer or trace modules. Core ports are unchanged.
+It includes a passive BPU observer, without RVFI, CSR observers or trace
+modules. Core ports are unchanged.
 
 `main.cpp` drives the single clock directly through Verilator's C++ API. It
 loads the image prepared by the shared ELF loader, runs two reset edges and
@@ -15,6 +16,12 @@ the checked Python agents' ordering. Missing RAM bytes read as zero.
 
 The executable writes final RAM and a small `native.json` containing total
 cycles/instructions, timer boundaries and completion/failure diagnostics.
+It also snapshots the shared BPU monitor after both timer retirement edges.
+The Python adapter derives `bpu-stats.json` over the same `(start, stop]`
+window, validates the instruction-count delta and publishes the statistics in
+benchmark JSON and HTML reports. Counts exclude squashed/faulting instructions;
+redirect events do not estimate a branch penalty. Rate denominators and scope
+are defined in the [benchmark specification](../../../doc/uqu_spec.bench.md#31-passive-branch-prediction-statistics).
 The Python adapter validates the timer delta and CoreMark CRCs after execution,
 then produces the common benchmark/report/JUnit artifacts. No per-cycle Python,
 VPI, cocotb, pyuvm, waveform or instruction-trace activity occurs in fast mode.

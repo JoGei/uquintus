@@ -320,8 +320,10 @@ def main(argv=None, shared_build=None):
         metadata.setdefault('context', {})['memory'] = dict(memory,
             grants='immediate', fence_ack='immediate', ports='independent', response_errors='none')
     if benchmark:
+        from bpu_stats import SCOPE as BPU_SCOPE
         metadata['benchmark'] = benchmark
         metadata.setdefault('context', {}).update(benchmark=benchmark,
+            bpu_statistics=BPU_SCOPE,
             execution_mode='checked', validation_scope='instruction_oracle_rvfi_counters_and_crc',
             measurement='retirement edges (start, stop]; timer call overhead included')
         # Python monitors/agents are measurement inputs too.
@@ -394,8 +396,12 @@ def main(argv=None, shared_build=None):
             if reference_info:
                 metadata['differential'] = check_reference(run_dir, config, reference_info)
             metadata['tests_passed'] = native_passed
-        if benchmark and json.loads((run_dir / 'benchmark.json').read_text()).get('status') != 'passed':
-            raise RuntimeError('benchmark has no passing measurement evidence')
+        if benchmark:
+            evidence = json.loads((run_dir / 'benchmark.json').read_text())
+            if evidence.get('status') != 'passed':
+                raise RuntimeError('benchmark has no passing measurement evidence')
+            from bpu_stats import validate as validate_bpu
+            validate_bpu(evidence.get('bpu_statistics'), config, evidence['window']['retired'])
         metadata["status"] = "passed"
     except BaseException as error:
         metadata["status"] = "failed"
@@ -409,6 +415,8 @@ def main(argv=None, shared_build=None):
             evidence = json.loads(evidence_path.read_text()) if evidence_path.is_file() else {}
             metrics = []
             if metadata['status'] == 'passed':
+                from bpu_stats import validate as validate_bpu, metrics as bpu_metrics
+                bpu = validate_bpu(evidence['bpu_statistics'], config, evidence['window']['retired'])
                 for name, value, unit in (
                     ('benchmark_cycles', evidence['window']['cycles'], 'cycles'),
                     ('benchmark_retired', evidence['window']['retired'], 'instructions'),
@@ -417,12 +425,13 @@ def main(argv=None, shared_build=None):
                     ('elf_load_bytes', sum(s.size for s in image.segments), 'bytes'),
                     ('executable_segment_bytes', sum(len(s.data) for s in image.segments if s.flags & 1), 'bytes')):
                     metrics.append(dict(name=name, value=value, unit=unit))
+                metrics += bpu_metrics(bpu)
             report = dict(metadata, schema_version=1, kind='benchmark', configuration_scope='core',
                           configuration=dict(name=config_path.stem, parameters=config),
                           selection=args.label or benchmark['name'] + '-' + benchmark['profile'],
                           workload=metadata['elf']['sha256'], metrics=metrics,
                           results_file='results.xml',
-                          artifacts=['benchmark.json', 'benchmark.log', 'run.json'])
+                          artifacts=['benchmark.json', 'benchmark.log', 'bpu-stats.json', 'run.json'])
             (run_dir / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
     print(f"PASS: {args.action} {config_path.stem} {args.test} seed={args.seed}")
     return run_dir

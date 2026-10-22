@@ -1,0 +1,8 @@
+top_module: uqu_bpu_monitor
+bender_target: bpu_monitor
+test_module: test_uqu_bpu_monitor
+parameters:
+  - MUA_BRANCH_PREDICTOR
+  - MUA_BTB
+tests:
+  - retirement_and_lifecycle

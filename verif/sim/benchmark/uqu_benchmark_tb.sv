@@ -62,6 +62,8 @@ module uqu_benchmark_tb #(
     input wire dmem_rvalid_i,
     input wire [31:0] dmem_rdata_i,
     input wire dmem_err_i,
+    output wire [64*uqu_bpu_stats_pkg::COUNT-1:0] bpu_counters_o,
+    output wire [31:0] bpu_counter_count_o,
     output wire retire_o,
     output wire [31:0] retire_pc_o,
     output wire [31:0] retire_data_o,
@@ -169,6 +171,7 @@ module uqu_benchmark_tb #(
     assign trap_pc_o = u_core.trap_valid ? u_core.trap_pc : u_core.wb_pc_q;
     assign trap_cause_o = u_core.trap_valid ? {1'b1, 26'd0, u_core.trap_cause} : {27'd0, u_core.wb_cause};
     assign mcountinhibit_o = u_core.u_wb.u_csregfile.mcountinhibit;
+    `include "uqu_bpu_monitor_connect.vh"
 endmodule
 
 `default_nettype wire

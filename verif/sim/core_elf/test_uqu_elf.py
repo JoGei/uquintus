@@ -13,6 +13,7 @@ from core.core_env import CoreTest, MASK
 from elf_image import completion_code, expected_traps, load_elf, validate_trap_sequence
 from interrupts import interrupt_plan, InterruptStimulus
 from benchmark_measure import BenchmarkWindow, coremark_result, read_log
+from bpu_stats import unpack_snapshot, statistics as bpu_statistics
 
 
 class ELFTest(CoreTest):
@@ -35,6 +36,7 @@ class ELFTest(CoreTest):
         self.max_cycles = int(os.environ['UQU_MAX_CYCLES'])
         self.benchmark = json.loads(os.environ.get('UQU_BENCHMARK', 'null'))
         self.window = BenchmarkWindow(self.image) if self.benchmark else None
+        self.bpu_start = self.bpu_stop = None
         self.benchmark_evidence = dict(schema_version=1, status='running', mode='checked')
 
     async def cycle(self, **kwargs):
@@ -66,6 +68,12 @@ class ELFTest(CoreTest):
         if self.window:
             self.window.retire(pc, self.cycles, len(self.retired), data_actual,
                                self.csr_observer.model.words[0x320] & 5)
+            if pc in (self.window.start_pc, self.window.stop_pc):
+                values = unpack_snapshot(self.signal('bpu_counters_o'))
+                if pc == self.window.start_pc:
+                    self.bpu_start = values
+                else:
+                    self.bpu_stop = values
         self.last_retired = pc
         value = self.word(self.model_memory, self.tohost, 8)
         if value != before:
@@ -98,12 +106,14 @@ class ELFTest(CoreTest):
             assert self.memory == self.model_memory, 'unretired store modified shared RAM'
             if self.window:
                 window = self.window.finish()
+                bpu = bpu_statistics(self.bpu_start, self.bpu_stop, self.params, window['retired'])
+                Path('bpu-stats.json').write_text(json.dumps(bpu, indent=2)+'\n')
                 log = read_log(self.image, self.model_memory)
                 Path('benchmark.log').write_text(log)
                 assert self.benchmark['validator'] == 'coremark', 'unsupported benchmark validator'
                 result = coremark_result(log, self.benchmark['profile'],
                                         self.benchmark['iterations'], window['cycles'])
-                self.benchmark_evidence.update(window=window, result=result,
+                self.benchmark_evidence.update(window=window, result=result, bpu_statistics=bpu,
                                                memory=self.memory_timing)
             status = 'passed'
         except BaseException as error:

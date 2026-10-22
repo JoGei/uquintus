@@ -780,8 +780,20 @@ wrong-path instructions shall not acquire architectural effects.
 CoreMark cycle comparisons shall reuse the same executable and memory context,
 validate the workload output and retain mode/validation scope. They shall not
 replace instruction-level regression or establish Pareto optimality. Broader
-workload coverage, prediction-event statistics and predictor PPA evaluation
-remain follow-ups.
+workload coverage and predictor PPA evaluation remain follow-ups.
+
+The passive retirement-scoped statistics contract is defined in
+[benchmark statistics](uqu_spec.bench.md#31-passive-branch-prediction-statistics).
+`COMPONENT=bpu_monitor` shall check first-presentation retention during IF
+stalls, independent boundary stalls, DE squash, faulting WB exclusion, held
+lookup invalidation and reset. Core prediction programs shall independently
+check retired branch/JALR and compressed-control-flow counts against their
+architectural execution. Counter snapshots, measurement windows, undefined
+rates and report evidence consistency shall have shared Python regression.
+Both harnesses shall use the same passive observer and counter ordering.
+The core `bpu_statistics` case shall exercise real timer markers around a
+branch/JAL loop; optional `UQU_BPU_NATIVE` qualification shall compare both
+marker points and complete statistics against a matching native driver.
 
 ## 3. Supported-configuration CI coverage
 

@@ -12,12 +12,15 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import sys
 from urllib.parse import quote
 import xml.etree.ElementTree as ET
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'verif/sim/common'))
+from bpu_stats import SCOPE as BPU_SCOPE, validate as validate_bpu, metrics as bpu_metrics
 KINDS = {
     'regression': 'Component regressions', 'test': 'Core / software tests',
     'lint': 'RTL lint', 'software': 'Software builds',
@@ -44,7 +47,7 @@ FILES = ('run.json', 'build.json', 'report.json', 'results.xml', 'execution.json
          'simulation.log', 'build.log', 'program.map', 'software-build.json',
          'spike.json', 'spike.log', 'spike-process.log', 'spike-debug.cmd',
          'interrupts.json', 'timing.json', 'spike-inputs.txt', 'spike-irq-build.json', 'spike-irq-build.log',
-         'benchmark.json', 'benchmark.log',
+         'benchmark.json', 'benchmark.log', 'bpu-stats.json',
          'xif.jsonl', 'xif-agent.json', 'fpu.jsonl', 'zfinx-coverage.json')
 
 
@@ -91,6 +94,28 @@ def aggregate(records):
     if not records:
         return 'not_reported'
     return next(state for state in STATES if any(r['status'] == state for r in records))
+
+
+def bpu_section(stats):
+    if not stats:
+        return ''
+    labels = dict(btb_hit_rate='BTB hits / all retired instructions',
+        btb_control_flow_hit_rate='BTB hits / retired control-flow instructions',
+        direction_accuracy='Raw direction accuracy / conditional branches',
+        effective_direction_accuracy='Effective taken steering accuracy / conditional branches',
+        target_accuracy='Target accuracy / actually taken, predicted-taken control flow',
+        control_flow_next_pc_accuracy='Next-PC accuracy / control-flow instructions')
+    rows = ''.join(f'<tr><td>{esc(labels[name])}</td><td>' +
+                   ('Not applicable' if value is None else f'{value:.2f}%') + '</td></tr>'
+                   for name, value in stats['rates_percent'].items())
+    return f'''<h2>Branch prediction</h2><p>{esc(stats['definition'])}.</p>
+<p>Direction predictor: {esc(stats['direction_predictor'])}; effective BTB: {esc(stats['btb'])}.
+Undefined rates are shown as Not applicable. Raw direction can predict taken even when a BTB miss prevents taken steering.</p>
+<table><thead><tr><th>Measurement and denominator</th><th>Rate</th></tr></thead><tbody>{rows}</tbody></table>
+<p>DE redirects: {stats['counts']['de_redirects']:,}
+({stats['redirects_per_1000_instructions']:.2f} per 1,000 retired instructions).
+These are correction events attached to retired instructions; they do not measure lost cycles or a fixed branch penalty.
+Wrong targets count only actually taken, predicted-taken control flow; direction errors are counted separately.</p>'''
 
 
 def junit(path):
@@ -292,6 +317,22 @@ def normalize(path, build, root, hashes):
         if state == 'passed' and not consistent:
             record['status'] = 'error'
             record['notes'].append('Passed benchmark conflicts with workload validation or measurement evidence.')
+        if state == 'passed' and context.get('bpu_statistics') is not None:
+            try:
+                if context['bpu_statistics'] != BPU_SCOPE:
+                    raise ValueError('unsupported measurement scope')
+                stats = validate_bpu(read_json(path.parent / 'bpu-stats.json'),
+                                     config['parameters'], window['retired'])
+                if evidence.get('bpu_statistics') != stats:
+                    raise ValueError('benchmark and BPU artifacts disagree')
+                expected = bpu_metrics(stats)
+                actual = [m for m in metrics if m['name'].startswith('bpu_')]
+                if sorted(actual, key=lambda m: m['name']) != sorted(expected, key=lambda m: m['name']):
+                    raise ValueError('BPU metrics disagree with snapshots')
+                record['bpu_statistics'] = stats
+            except (ValueError, KeyError, TypeError, OSError) as error:
+                record['status'] = 'error'
+                record['notes'].append('Invalid BPU measurement evidence: ' + str(error))
         record['notes'].append('Cycle-only RTL benchmark; no official benchmark score or silicon execution time is claimed.')
         if context.get('execution_mode') == 'fast':
             record['notes'].append('Fast native execution: workload CRC, completion, trap/watchdog and timer-window checks; no per-instruction ISA/RVFI checking.')
@@ -560,6 +601,7 @@ Component-only experiments remain available on the component regression and run-
 Internal paths are a diagnostic; the full-interface result remains the frequency reference.</p>
 <div class="table-scroll"><table><thead><tr><th>Scope</th><th>Check</th><th>Startpoint</th><th>Endpoint</th><th>Slack (ns)</th></tr></thead>
 <tbody>'''+''.join(timing_rows)+'</tbody></table></div>') if timing_rows else ''
+        bpu = bpu_section(r.get('bpu_statistics'))
         artifacts = ''.join(f'<li>{esc(a["path"])} · {a["bytes"]:,} bytes · ' +
                             (f'<a href="../{a["href"]}">open artifact</a>' if 'href' in a else esc(a.get('omitted', 'not bundled'))) + '</li>' for a in r['artifacts'])
         body = f'''<p>{badge(r['status'])} {esc(r['component'])} · {esc(r['target'])} · {esc(r['selection'])} · seed {esc(r['seed'])}</p>
@@ -573,6 +615,7 @@ Internal paths are a diagnostic; the full-interface result remains the frequency
 <h2>Test cases</h2><div class="table-scroll"><table><thead><tr><th>Case</th><th>Status</th><th>Wall seconds</th><th>Diagnostics</th></tr></thead><tbody>{cases}</tbody></table></div>
 <h2>Metrics</h2><table><thead><tr><th>Metric</th><th>Value</th><th>Unit</th></tr></thead><tbody>{metrics}</tbody></table>
 {timing}
+{bpu}
 <details><summary>Parameters, provenance, tools and comparison context</summary><pre>{esc(json.dumps({k:r[k] for k in ('configuration','inputs','tools','context')},indent=2))}</pre></details>'''
         (directory / f'{r["id"]}.html').write_text(page(f'{config["name"]} / {r["component"]}', body, 1))
     summary = ['# uquintus build report', '', f'Generated {data["generated_at"]}.', '',

@@ -1,4 +1,10 @@
 """Native full-core programs, checked at retirement rather than by cycle counts."""
+import json
+import os
+from pathlib import Path
+import struct
+import subprocess
+
 import cocotb
 from pyuvm import uvm_root
 
@@ -6,6 +12,10 @@ from core_env import (CoreTest, BOOT, HANDLER, MASK, ins_i, ins_r, ins_s, ins_b,
                       ins_j, csr)
 from rvfi_csrs import CSR_CATALOG
 from compressed_model import compressed
+from bpu_stats import COUNTERS, statistics as make_bpu_statistics, unpack_snapshot
+from benchmark_measure import BenchmarkWindow
+from benchmark_fast import write_memory
+from elf_image import ELFImage, Segment
 
 
 def custom_word(rd=6, a=1, b=2, op=0):
@@ -55,6 +65,12 @@ class PredictionTest(CoreTest):
         await self.finish(finish_pc)
         assert self.regs[2] == 8 and self.regs[6] == 123 and self.regs[7] == 77
         assert not self.faults and not self.accesses
+        observed = make_bpu_statistics([0]*len(COUNTERS),
+            unpack_snapshot(self.signal('bpu_counters_o')), self.params, len(self.retired))
+        assert observed['counts']['conditional_branches'] == 8*(1+bool(self.params['ISA_C']))
+        assert observed['counts']['taken_conditional_branches'] == 7*(1+bool(self.params['ISA_C']))
+        assert observed['counts']['indirect_jumps'] == 2+bool(self.params['ISA_ZIFENCEI'])
+        assert observed['counts']['compressed_control_flow'] == 8*bool(self.params['ISA_C'])
         if self.params['MUA_BRANCH_PREDICTOR'] == 2 and self.params['MUA_BTB'] != 0:
             loop = [row for row in self.resolutions if row['pc'] == branch_pc]
             assert len(loop) == 8, loop
@@ -77,6 +93,62 @@ class PredictionTest(CoreTest):
 @cocotb.test(timeout_time=1000,timeout_unit='us')
 async def prediction(dut):
     await uvm_root().run_test('PredictionTest')
+
+
+class BpuStatisticsTest(CoreTest):
+    def retire(self, pc, original, write, rd_actual, data_actual):
+        super().retire(pc, original, write, rd_actual, data_actual)
+        self.window.retire(pc, self.cycles, len(self.retired), data_actual,
+                           self.csr_observer.model.words[0x320] & 5)
+        if pc in (self.window.start_pc, self.window.stop_pc):
+            self.snapshots[pc] = unpack_snapshot(self.signal('bpu_counters_o'))
+
+    async def run_phase(self):
+        self.raise_objection()
+        # Marker reads surround a loop, a taken JAL and a skipped illegal word.
+        words = [csr(0xb00, rd=5, f=2), ins_i(1,0,8), ins_i(2,0,0),
+                 ins_i(2,2,1), ins_i(1,1,-1), ins_b(1,0,-8,1),
+                 ins_j(3,8), 0, ins_i(4,0,1), csr(0xb00,rd=6,f=2),
+                 0x000023b7, ins_s(7,4), ins_j(0,0)]
+        image = ELFImage(BOOT, 0, (Segment(BOOT, struct.pack('<13I', *words), 52, 5),
+                                   Segment(0x2000, b'', 8, 6)),
+                         dict(uqu_bench_start=BOOT, uqu_bench_stop=BOOT+36))
+        self.window = BenchmarkWindow(image)
+        self.snapshots = {}
+        self.memory_timing = dict(imem_latency=1, dmem_latency=1)
+        self.random_wait = False
+        self.put(BOOT, words)
+        await self.reset()
+        await self.finish(BOOT+44)
+        window = self.window.finish()
+        stats = make_bpu_statistics(self.snapshots[self.window.start_pc],
+                               self.snapshots[self.window.stop_pc], self.params, window['retired'])
+        assert stats['counts']['conditional_branches'] == 8
+        assert stats['counts']['taken_conditional_branches'] == 7
+        assert stats['counts']['direct_jumps'] == 1
+        assert stats['counts']['indirect_jumps'] == 0
+        assert not self.faults and not self.accesses
+        Path('bpu-window.json').write_text(json.dumps(dict(window=window, statistics=stats), indent=2))
+        # Optional qualification against a native driver built for this exact config.
+        native = os.environ.get('UQU_BPU_NATIVE')
+        if native:
+            write_memory(image, Path('bpu-image.bin'))
+            result = subprocess.run([native, 'bpu-image.bin', '10000', str(BOOT), '1', '1',
+                                     str(0x2000), str(BOOT), str(BOOT+36)],
+                                    text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            assert result.returncode == 0, result.stdout
+            evidence = json.loads(Path('native.json').read_text())
+            assert evidence['start'] == window['start'], evidence
+            assert evidence['stop'] == window['stop'], evidence
+            native_stats = make_bpu_statistics(evidence['bpu_start'], evidence['bpu_stop'],
+                                          self.params, window['retired'])
+            assert native_stats == stats, (native_stats, stats)
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=1000, timeout_unit='us')
+async def bpu_statistics(dut):
+    await uvm_root().run_test('BpuStatisticsTest')
 
 
 class HartIdTest(CoreTest):

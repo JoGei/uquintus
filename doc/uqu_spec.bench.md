@@ -196,7 +196,46 @@ This combines an RTL measurement with an implementation estimate, rather than
 a measured silicon result. Predictor comparisons should first hold the ISA,
 compiler, executable and memory model constant, then assess cycle savings
 alongside implementation area and `T_min`. A broader suite such as Embench and
-dynamic-predictor event metrics remain follow-ups.
+predictor PPA evaluation remain follow-ups.
+
+### 3.1. Passive branch-prediction statistics
+
+Both fast and checked benchmark harnesses shall use the same verification-only
+`uqu_bpu_monitor`. It shall observe existing core signals, without adding
+synthesizable counters or changing processor ports. Carry shadow prediction
+metadata through the core-owned pipeline boundaries. Sample lookup metadata
+on the first valid IF presentation and retain it through backpressure; attach
+actual control-flow outcomes on accepted DE transfer. Count only successful WB
+retirement, excluding squashed and faulting instructions. Speculative training
+may still affect the tables; these statistics describe retired instructions,
+not total physical table accesses or speculative activity.
+
+Snapshot cumulative 64-bit counters after the retirement edges of both timer
+markers and subtract them to cover exactly `(start, stop]`. The retired counter
+delta shall equal the independently measured instruction window. Keep the
+counter catalog shared between the SystemVerilog observer and Python reader.
+Retain snapshots, counts, denominators and derived rates in `bpu-stats.json`,
+embed matching evidence in `benchmark.json`, and publish flat `bpu_*` metrics
+and a labeled branch-prediction section in the HTML run report. The report
+collector shall reject inconsistent snapshots, derived metrics or duplicate
+artifact evidence. Older artifacts without the statistics scope remain usable
+without inventing missing measurements.
+
+| Measurement | Denominator / meaning |
+| --- | --- |
+| Control-flow mix | Retired conditional branches, JAL and JALR; taken conditional branches and compressed control flow are counted separately. |
+| BTB hit rate | All retired instructions with the BTB active. Also report hits among actual retired control-flow instructions, misses and hits on ordinary instructions. |
+| Raw direction accuracy | Conditional branches with prediction enabled; compare the direction policy before BTB availability gates steering. |
+| Effective direction accuracy | The same conditional branches; compare actual taken state against effective predicted-taken steering. |
+| Target accuracy | Actually taken, predicted-taken control-flow instructions; a wrong target is separate from a direction error. |
+| Next-PC accuracy | All retired control-flow instructions with prediction enabled; compare carried prediction against actual next PC. |
+| DE redirects | Actual DE correction events attached to retired instructions, including a count per 1,000 retired instructions. These do not measure lost cycles or assume a fixed branch penalty. |
+
+Prediction mode `none` has no direction-accuracy denominator. An inactive BTB
+has no hit-rate denominator. Undefined rates shall be JSON `null` and rendered
+as “Not applicable”; omit their flat numeric metrics. Static-not-taken is an
+enabled prediction policy and shall have a direction denominator. Always
+retain predictor/BTB configuration and measurement scope with comparisons.
 
 ## 4. Pareto-optimal configuration profiles
 
