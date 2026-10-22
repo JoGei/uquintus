@@ -8,6 +8,9 @@ module uqu_stage_if #(
     parameter MUA_C_IMPL = `UQU_C_IMPL_DECOMPRESS,
     parameter MUA_C_DECOMPRESS_STAGE = `UQU_C_DECOMPRESS_IF,
     parameter MUA_BRANCH_PREDICTOR = `UQU_BP_NONE,
+    parameter MUA_BP_ENTRIES = 16,
+    parameter MUA_BTB = `UQU_BTB_NONE,
+    parameter MUA_BTB_ENTRIES = 16,
     parameter MUA_IF_BUFFER_WORDS = 2
 ) (
     input  wire        clk_i,
@@ -19,6 +22,13 @@ module uqu_stage_if #(
     input  wire        fetch_enable_i,
     input  wire        request_permit_i,
     input  wire        branch_pending_i,
+    input  wire        predictor_invalidate_i,
+    input  wire        predictor_update_valid_i,
+    input  wire [31:0] predictor_update_pc_i,
+    input  wire        predictor_update_control_flow_i,
+    input  wire        predictor_update_conditional_i,
+    input  wire        predictor_update_taken_i,
+    input  wire [31:0] predictor_update_target_i,
     input  wire        permit_i,
     output wire        valid_o,
     input  wire        ready_i,
@@ -27,6 +37,7 @@ module uqu_stage_if #(
     output wire [31:0] original_instr_o,
     output wire        compressed_o,
     output wire [31:0] next_pc_o,
+    output wire [31:0] predicted_next_pc_o,
     output wire        exception_valid_o,
     output wire [4:0]  exception_cause_o,
     output wire [31:0] exception_tval_o,
@@ -50,6 +61,8 @@ module uqu_stage_if #(
     reg [31:0] fetch_addr_q;
     reg running_q;
     reg fault_hold_q;
+    reg prediction_held_q;
+    reg [31:0] prediction_pc_q;
     wire invalidate = flush_i || redirect_valid_i;
     wire active = rst_ni && !invalidate && running_q && !fault_hold_q;
     wire branch_hold = (MUA_BRANCH_PREDICTOR == `UQU_BP_NONE) && branch_pending_i;
@@ -74,7 +87,12 @@ module uqu_stage_if #(
     wire [31:0] normalized_instr;
     wire expansion_fault;
     wire candidate_fault = access_fault || expansion_fault;
+    wire prediction_taken;
+    wire [31:0] prediction_target;
+    wire [31:0] predicted_pc = prediction_held_q ? prediction_pc_q :
+                              prediction_taken ? prediction_target : selected_next_pc;
     wire transfer = valid_o && ready_i;
+    wire prediction_redirect = transfer && !candidate_fault && (predicted_pc != selected_next_pc);
     wire pop_word = transfer && !candidate_fault && drop_word;
 
     assign valid_o = active && permit_i && selected_valid;
@@ -83,6 +101,7 @@ module uqu_stage_if #(
     assign original_instr_o = valid_o ? selected_instr : 32'd0;
     assign compressed_o = valid_o && selected_compressed;
     assign next_pc_o = valid_o && !candidate_fault ? selected_next_pc : pc_q;
+    assign predicted_next_pc_o = valid_o && !candidate_fault ? predicted_pc : pc_q;
     assign exception_valid_o = valid_o && candidate_fault;
     assign exception_cause_o = !exception_valid_o ? 5'd0 : access_fault ? access_cause : CAUSE_ILLEGAL;
     assign exception_tval_o = !exception_valid_o ? 32'd0 : access_fault ? access_tval : selected_instr;
@@ -95,7 +114,7 @@ module uqu_stage_if #(
     assign pmp_priv_m_o = pmp_valid_o && priv_m_i;
 
     uqu_ifetch u_ifetch (
-        .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(invalidate),
+        .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(invalidate || prediction_redirect),
         .req_valid_i(fetch_valid), .req_ready_o(fetch_ready), .req_addr_i(fetch_addr_q),
         .req_access_fault_i(!pmp_allow_i), .request_permit_i(start_permit),
         .busy_o(fetch_busy_o), .res_valid_o(result_valid), .res_ready_i(push_ready),
@@ -105,11 +124,24 @@ module uqu_stage_if #(
     );
     uqu_if_buffer #(.MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)) u_buffer (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(invalidate),
+        .clear_i(prediction_redirect),
         .push_valid_i(result_valid), .push_ready_o(push_ready),
         .push_addr_i(result_addr), .push_data_i(result_data), .push_error_i(result_error),
         .pop_i(pop_word),
         .word0_valid_o(word0_valid), .word0_addr_o(), .word0_data_o(word0_data), .word0_error_o(word0_error),
         .word1_valid_o(word1_valid), .word1_addr_o(), .word1_data_o(word1_data), .word1_error_o(word1_error)
+    );
+    uqu_bpu #(
+        .ISA_C(ISA_C), .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES)
+    ) u_bpu (
+        .clk_i(clk_i), .rst_ni(rst_ni), .invalidate_i(predictor_invalidate_i),
+        .lookup_valid_i(active && selected_valid && !candidate_fault), .lookup_pc_i(pc_q),
+        .hit_o(), .taken_o(prediction_taken), .target_o(prediction_target),
+        .update_valid_i(predictor_update_valid_i), .update_pc_i(predictor_update_pc_i),
+        .update_control_flow_i(predictor_update_control_flow_i),
+        .update_conditional_i(predictor_update_conditional_i),
+        .update_taken_i(predictor_update_taken_i), .update_target_i(predictor_update_target_i)
     );
     uqu_if_aligner #(.ISA_C(ISA_C)) u_aligner (
         .valid_i(active), .pc_i(pc_q),
@@ -138,7 +170,8 @@ module uqu_stage_if #(
             ((MUA_C_DECOMPRESS_STAGE != `UQU_C_DECOMPRESS_IF) &&
              (MUA_C_DECOMPRESS_STAGE != `UQU_C_DECOMPRESS_DE)) ||
             ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) &&
-             (MUA_BRANCH_PREDICTOR != `UQU_BP_STATIC_NOT_TAKEN))) begin : gen_invalid
+             (MUA_BRANCH_PREDICTOR != `UQU_BP_STATIC_NOT_TAKEN) &&
+             (MUA_BRANCH_PREDICTOR != `UQU_BP_BIMODAL))) begin : gen_invalid
             uqu_stage_if_invalid_configuration invalid_configuration ();
         end
     endgenerate
@@ -149,23 +182,34 @@ module uqu_stage_if #(
             fetch_addr_q <= {boot_addr_i[31:2],2'b00};
             running_q <= 1'b1;
             fault_hold_q <= 1'b0;
+            prediction_held_q <= 1'b0;
         end else if (redirect_valid_i) begin
             pc_q <= redirect_addr_i;
             fetch_addr_q <= {redirect_addr_i[31:2],2'b00};
             running_q <= 1'b1;
             fault_hold_q <= 1'b0;
+            prediction_held_q <= 1'b0;
         end else if (flush_i) begin
             running_q <= 1'b0;
             fault_hold_q <= 1'b0;
+            prediction_held_q <= 1'b0;
         end else begin
-            if (fetch_fire) begin
+            if (prediction_redirect) begin
+                fetch_addr_q <= {predicted_pc[31:2],2'b00};
+            end else if (fetch_fire) begin
                 fetch_addr_q <= fetch_addr_q + 32'd4;
             end
+            if (valid_o && !ready_i && !prediction_held_q &&
+                ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) && (MUA_BTB != `UQU_BTB_NONE))) begin
+                prediction_held_q <= 1'b1;
+                prediction_pc_q <= predicted_pc;
+            end
             if (transfer) begin
+                prediction_held_q <= 1'b0;
                 if (candidate_fault) begin
                     fault_hold_q <= 1'b1;
                 end else begin
-                    pc_q <= selected_next_pc;
+                    pc_q <= predicted_pc;
                 end
             end
         end

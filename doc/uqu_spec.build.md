@@ -220,12 +220,20 @@ and dependency manifest. Its parser shall be provided by the externally
 provisioned build environment, consistent with [build, Section 5](uqu_spec.build.md#5-externally-provisioned-build-environment).
 
 Enumerated hardware selectors shall use readable YAML labels. In particular,
-`MUA_BRANCH_PREDICTOR` shall use `none` or `static_not_taken` for the currently
+`MUA_BRANCH_PREDICTOR` shall use `none`, `static_not_taken` or `bimodal` for the currently
 defined choices, and `MUA_REGFILE_IMPL` shall use `ff` or `latch`. Their default
 YAML selections shall be `none` and `ff`, respectively. `MUA_MUL` shall use
 `parallel`, `parallel+stages+2`, or `iterative` as defined in [architecture, Section 3](uqu_spec.arch.md#3-classical-five-stage-pipeline).
 `MUA_DIV` shall use `iterative`. Both default YAML selections shall be
-`iterative`, sharing the iterative arithmetic chain. The separate integer setting
+`iterative`, sharing the iterative arithmetic chain. All hardware presets shall
+also explicitly set `MUA_BP_ENTRIES`, a power of two from 2 through 1024,
+defaulting to 16 and inactive outside bimodal mode. Independently select target
+storage with `MUA_BTB: none | direct_mapped` (default `none`) and explicit
+`MUA_BTB_ENTRIES` (power of two from 2 through 1024, default 16). Direction and
+target capacities may differ. Prediction mode `none` disables target steering
+and makes BTB settings inactive. The `rv32i_bimodal` preset explicitly enables
+the direct-mapped BTB. These selectors use the same canonical catalog and
+generated constants. The separate integer setting
 `MUA_MULDIV_ITERUNROLL` shall use `1`, `2`, `4`, `8`, `16`, or `32`, defaulting
 to `8`, and shall govern every selected iterative operation. Selector labels
 containing the former `+unroll+<factor>` suffix shall fail configuration
@@ -246,7 +254,8 @@ using a consistent mapping across simulation, formal, and synthesis flows.
 Unknown or unsupported labels shall produce a clear configuration error.
 The register-file encodings are `ff = 0` and `latch = 1`. Multiplier encodings
 are `parallel = 0`, `parallel+stages+2 = 1`, and `iterative = 2`; divider
-`iterative = 0`. Predictor encodings are `none = 0` and `static_not_taken = 1`.
+`iterative = 0`. Predictor encodings are `none = 0`, `static_not_taken = 1` and
+`bimodal = 2`.
 A single canonical selector
 definition shall supply both the YAML-label translation and the RTL encoding constants.
 The build shall generate guarded Verilog `.vh` macro headers from this
@@ -284,6 +293,22 @@ Configuration names shall identify their profiles uniquely. Names may describe
 ISA features or a preset's intended use; hardware settings shall be read from
 the file rather than inferred from its name.
 
+Selected Pareto-optimal configurations shall eventually use Greek-letter codes
+as profile names with stable selection goals, with complete presets such as
+`config/uquintus-alpha.yml`, `config/uquintus-beta.yml` and
+`config/uquintus-gamma.yml`. Their initial selection goals shall be lowest
+normalized suite cycle cost (geometric mean of candidate/reference cycle ratios),
+lowest area and highest estimated maximum frequency, respectively, as defined
+in the [Pareto-profile policy](uqu_spec.bench.md#4-pareto-optimal-configuration-profiles).
+These names shall supplement the generated hardware label and complete
+parameter fingerprint; they shall not encode or determine parameter values.
+Their parameter sets may be revised as the benchmark suite, eligible features
+and measurement flows evolve. Retain each selection's suite/reference context,
+parameter snapshot and evidence so earlier results remain identifiable after
+the same preset name is updated.
+Parameter search and selection of the actual profile contents are deferred.
+No placeholder YAML shall imply that an optimum has already been established.
+
 Each hardware configuration file shall explicitly set every supported,
 externally configurable core hardware parameter, including parameters that
 are inactive under the selected parent feature. Derived `localparam` values
@@ -297,7 +322,7 @@ values explicitly when selecting them.
 The project shall provide complete predefined configuration files as starting
 points for users to copy and adapt. Existing presets include `rv32i`, `rv32im`,
 the three compressed strategies, `rv32i_pmp`, `rv32i_zifencei`,
-`rv32i_retained` and `rv32i_xif`. The `rv32i_xif_debug` profile exercises
+`rv32i_retained`, `rv32i_bimodal` and `rv32i_xif`. The `rv32i_xif_debug` profile exercises
 component-level debug support; it is not an enabled-debug core configuration.
 Adapted configurations shall satisfy the same
 completeness and supported-combination checks as supplied presets. Adding a
@@ -336,7 +361,7 @@ constraints in either target. Formal and post-placement commands remain open.
 
 ### 2.1. Generated hardware configuration label
 
-**Status:** Label convention agreed; generation and report integration pending
+**Status:** Shared label generator and CLI implemented; report integration pending
 
 In addition to the YAML preset name, the build shall derive a descriptive
 hardware configuration label from the validated parameter values. The YAML
@@ -344,6 +369,21 @@ shall remain the source of truth; the label shall not be parsed as configuration
 input. Preset names and the `build/uquintus-<hw>/<target>/` layout shall retain
 their existing meanings. Reports and artifact metadata shall expose the label
 alongside the preset name and complete parameter fingerprint.
+
+`make config-label CONFIG=<hw>` shall print just the generated label. It shall
+also accept `CONFIG=<path/to/hardware.yml>`. The implementation shall reuse the
+shared hardware YAML validation and selector catalog, requiring no HDL tools
+or simulator. Its direct command is:
+
+```sh
+python3 verif/sim/common/hw_config.py --config rv32i
+python3 verif/sim/common/hw_config.py --config config/rv32ic.yml
+```
+
+The reusable `configuration_label(config)` function in that module shall accept
+the validated, label-valued mapping returned by `load_configuration`, before
+encoding selectors into RTL integers. Invalid YAML, missing parameters and
+unsupported choices shall fail the command without printing a label.
 
 Labels shall use lowercase tokens and the following fixed field order. Square
 brackets denote optional fields; braces denote alternatives. An optional
@@ -365,7 +405,8 @@ joining combined selections and `_` separating fields. The optional enabled-only
 | Forwarding | `_mua-fw:none` or `_mua-fw:[ex2de+][mem2de+][mem2ex+][wb2ex+]wb2de` | Master `MUA_FORWARDING`, followed by enabled individual forwarding paths in the displayed order and the fixed WB-to-DE path. |
 | DE operand retention | `[_mua-opret]` | `MUA_DE_OPERAND_RETENTION`; this describes operand retention rather than an instruction buffer. |
 | Compressed handling | `[_mua-c:{decompr-if,decompr-de,decode}]` | Present only for `ISA_C=1`; `MUA_C_IMPL` and, for decompression, `MUA_C_DECOMPRESS_STAGE`. |
-| Branch prediction | `_mua-bp:{none,stnt}` | `MUA_BRANCH_PREDICTOR`: `none` or `static_not_taken`. |
+| Branch prediction | `_mua-bp:{none,stnt,bimodal+entries<N>}` | `MUA_BRANCH_PREDICTOR`: `none`, `static_not_taken` or `bimodal`. Include `MUA_BP_ENTRIES` only for bimodal mode. |
+| Branch target storage | `_mua-btb:{none,direct+entries<N>}` | `MUA_BTB` and independent `MUA_BTB_ENTRIES`. Use `none` when disabled or when prediction mode is `none`; omit inactive capacity. |
 | Instruction buffer | `_mua-ifbuf:<words>` | `MUA_IF_BUFFER_WORDS`. |
 | Multiplier | `[_mua-mul:{iter,para,para+stages2}]` | Present only for `ISA_M=1`; `MUA_MUL`: `iterative`, `parallel`, or `parallel+stages+2`. |
 | Divider | `[_mua-div:iter]` | Present only for `ISA_M=1`; the currently supported `MUA_DIV` choice is `iterative`. |
@@ -389,7 +430,7 @@ shall not make that feature selectable or qualify it for reporting as enabled.
 For the current `config/rv32i.yml`, the label shall be:
 
 ```text
-uqu_rv32i_zicsr_umode_mua-gpr:ff_mua-fw:ex2de+mem2de+mem2ex+wb2ex+wb2de_mua-bp:none_mua-ifbuf:2
+uqu_rv32i_zicsr_umode_mua-gpr:ff_mua-fw:ex2de+mem2de+mem2ex+wb2ex+wb2de_mua-bp:none_mua-btb:none_mua-ifbuf:2
 ```
 
 Enabling C with decompression in DE shall insert `c` in the ISA token and

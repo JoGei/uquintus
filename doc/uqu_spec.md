@@ -77,7 +77,7 @@ deferred pending selection of an open-source formal toolchain.
 | [Interfaces](uqu_spec.interfaces.md) | Clock/reset, native OBI ports, interrupts, CV-X-IF, debug, fence handshakes, hart identity, and the baseline port index. |
 | [Verification](uqu_spec.verif.md) | Pipeline visibility, trace/RVFI, Spike comparison, formal checking, randomized memory tests, and CI coverage. |
 | [Build](uqu_spec.build.md) | Bender/Make, configurations, simulation backends, ORFS, environment provisioning, and project/file layout. |
-| [Benchmarking and PPA measurement](uqu_spec.bench.md) | Measurement definitions, `T_min`/estimated maximum frequency, timing scope and qualification; initial CoreMark cycle-only RTL integration. |
+| [Benchmarking and PPA measurement](uqu_spec.bench.md) | Measurement definitions, `T_min`/estimated maximum frequency, timing scope and qualification; initial CoreMark cycle-only RTL integration; planned Pareto profiles and selection goals. |
 | [RTL style](uqu_spec.style.md) | Language rules, imported-IP exception, names, coding conventions, and common handshakes. |
 
 Each detailed requirement has one topic home; other documents link to it.

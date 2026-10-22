@@ -66,7 +66,7 @@ class PipelineTest(uvm_test):
         names = ('if_transfer','if_pc','if_instr','if_original','if_compressed','if_exception',
                  'slot_valid','slot_instr','slot_original','slot_compressed','valid','pc',
                  'original_instr','compressed','link','branch_resolve','branch_taken',
-                 'branch_target','exception_valid','exception_cause','exception_tval',
+                 'branch_target','correction','exception_valid','exception_cause','exception_tval',
                  'pmp_valid','pmp_addr')
         o = {name:int(getattr(d,name+'_o').value) for name in names}
         external = not i['rst_n'] or i['flush'] or i['redirect_valid']
@@ -83,7 +83,9 @@ class PipelineTest(uvm_test):
             assert fire and not o['exception_valid']
             self.branches.append((o['pc'],o['branch_taken'],o['branch_target']))
         if o['branch_taken']:
-            assert o['branch_resolve'] and not o['if_transfer']
+            assert o['branch_resolve']
+        if o['correction']:
+            assert fire and not o['if_transfer']
         incoming = None
         if o['if_transfer']:
             original = o['if_original']
@@ -91,7 +93,7 @@ class PipelineTest(uvm_test):
             if not o['if_exception']:
                 assert o['if_instr']==(expansion[1] if expansion else original)
             incoming = (o['if_instr'],original,o['if_compressed'],o['if_pc'])
-        if external or o['branch_taken']:
+        if external or o['correction']:
             self.slot = None
         elif fire or self.slot is None:
             self.slot = incoming

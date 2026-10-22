@@ -8,6 +8,7 @@ from cocotb.triggers import Timer
 from pyuvm import uvm_test
 
 from compressed_model import compressed
+from bpu_model import BpuModel
 
 MASK = (1 << 32)-1
 
@@ -40,6 +41,8 @@ class IfStageTest(uvm_test):
         self.granted = []
         self.delivered = []
         self.faults = []
+        self.predictor = BpuModel(self.params)
+        self.held_prediction = None
 
     def memory(self,address):
         return self.words.get(address,0x00010001 if self.c else 0x00000013)
@@ -76,7 +79,10 @@ class IfStageTest(uvm_test):
 
     async def cycle(self, grant=None, respond=None, **changes):
         i = dict(rst_n=1,boot_addr=0x1000,flush=0,redirect_valid=0,redirect_addr=0,
-                 fetch_enable=1,request_permit=1,branch_pending=0,permit=1,ready=0,priv_m=1)
+                 fetch_enable=1,request_permit=1,branch_pending=0,permit=1,ready=0,priv_m=1,
+                 predictor_invalidate=0,predictor_update_valid=0,predictor_update_pc=0,
+                 predictor_update_control_flow=0,predictor_update_conditional=0,
+                 predictor_update_taken=0,predictor_update_target=0)
         i.update(changes)
         d = self.dut
         d.clk_i.value = 0
@@ -104,7 +110,7 @@ class IfStageTest(uvm_test):
             d.imem_rdata_i.value = data
             d.imem_err_i.value = error
         await Timer(1,units='ns')
-        names = ('valid','pc','instr','original_instr','compressed','next_pc',
+        names = ('valid','pc','instr','original_instr','compressed','next_pc','predicted_next_pc',
                  'exception_valid','exception_cause','exception_tval','misaligned',
                  'fetch_busy','pmp_valid','pmp_addr','pmp_size','pmp_priv_m')
         o = {name:int(getattr(d,name+'_o').value) for name in names}
@@ -125,7 +131,14 @@ class IfStageTest(uvm_test):
             for name in ('instr','original_instr','compressed','exception_valid','exception_cause','exception_tval'):
                 assert o[name]==0,(name,o)
         assert o['next_pc']==(expected['next_pc'] if o['valid'] else o['pc'])
+        prediction = self.predictor.lookup(self.pc, invalidate=i['predictor_invalidate'])
+        predicted_pc = o['pc']
+        if o['valid'] and not o['exception_valid']:
+            predicted_pc = self.held_prediction if self.held_prediction is not None else (
+                prediction['target'] if prediction['taken'] else expected['next_pc'])
+        assert o['predicted_next_pc']==predicted_pc, (o,predicted_pc,prediction)
         transfer = bool(o['valid'] and i['ready'])
+        prediction_redirect = transfer and not o['exception_valid'] and predicted_pc != o['next_pc']
         pop = transfer and not o['exception_valid'] and (self.pc&~3)!=(o['next_pc']&~3)
         if o['pmp_valid']:
             assert active and not misaligned and i['fetch_enable']
@@ -156,7 +169,15 @@ class IfStageTest(uvm_test):
             else:
                 self.running = False
         else:
-            if pop:
+            if prediction_redirect:
+                self.epoch += 1
+                self.live.clear()
+                self.complete.clear()
+                self.credits = 0
+                if not req:
+                    self.bus_owners.clear()
+                self.fetch_addr = predicted_pc&~3
+            elif pop:
                 del self.live[self.pc&~3]
                 self.complete.remove(self.pc&~3)
                 self.credits -= 1
@@ -166,7 +187,7 @@ class IfStageTest(uvm_test):
                     self.fault_hold = True
                 else:
                     self.delivered.append((self.pc,o['original_instr'],o['compressed'],o['instr']))
-                    self.pc = o['next_pc']
+                    self.pc = predicted_pc
             if o['pmp_valid']:
                 address = o['pmp_addr']
                 self.accepted.append(address)
@@ -196,6 +217,14 @@ class IfStageTest(uvm_test):
                 self.granted.append(addr)
                 self.response = self.rng.randrange(8),epoch,address,data,error
         self.previous_bus = addr if req and not gnt and i['rst_n'] else None
+        if not i['rst_n'] or invalidate or transfer:
+            self.held_prediction = None
+        elif o['valid'] and not i['ready'] and self.held_prediction is None and self.predictor.enabled:
+            self.held_prediction = predicted_pc
+        self.predictor.step(reset=not i['rst_n'], invalidate=i['predictor_invalidate'],
+            valid=i['predictor_update_valid'],pc=i['predictor_update_pc'],
+            control_flow=i['predictor_update_control_flow'],conditional=i['predictor_update_conditional'],
+            taken=i['predictor_update_taken'],target=i['predictor_update_target'])
         d.clk_i.value = 1
         await Timer(1,units='ns')
         return o

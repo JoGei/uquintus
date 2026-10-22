@@ -21,7 +21,7 @@ class ControlTest(uvm_test):
 
     async def cycle(self, **changes):
         i = dict(rst_n=1,if_valid=0,de_admit=1,commit_enable=1,wb_effect_safe=0,
-            de_branch_taken=0,de_branch_target=0x1234,wb_redirect_valid=0,
+            de_redirect=0,de_redirect_addr=0x1234,wb_redirect_valid=0,
             wb_redirect_addr=0x8000,wb_next_pc=0x4004,de_pc=0x1002,resume_pc=0x2002,
             priv_m=1,mstatus=0,mie=0,mip=0,mtvec=0,irq_mask=0,
             drain_req=0,drain_target=0x9000,drain_ready=1,data_idle=1,fence_ack=0,fencei_ack=0)
@@ -66,7 +66,7 @@ class MovementTest(ControlTest):
             r = await self.cycle(de_valid=1,**{stage+'_valid':1,stage+'_serialize':1})
             assert not r['de_permit'] and r[stage+'_fire']
         # Taken DE branch consumes itself and never captures a wrong-path IF token.
-        r = await self.cycle(if_valid=1,de_valid=1,de_branch_taken=1,mem_valid=1)
+        r = await self.cycle(if_valid=1,de_valid=1,de_redirect=1,mem_valid=1)
         assert r['de_fire'] and r['mem_fire'] and not r['if_fire'] and not r['de_flush']
         assert r['redirect_addr']==0x1234
         self.drop_objection()
@@ -95,7 +95,7 @@ class FaultsTest(ControlTest):
         assert not r['mem_request_permit'] and r['mem_flush']
         # Accepted WB recovery never cancels its own commitment permission.
         r = await self.cycle(wb_valid=1,wb_exception=1,wb_redirect_valid=1,
-                             mem_valid=1,ex_valid=1,de_valid=1,de_branch_taken=1)
+                             mem_valid=1,ex_valid=1,de_valid=1,de_redirect=1)
         assert r['wb_fire'] and not r['mem_fire'] and r['redirect_addr']==0x8000
         self.drop_objection()
 
@@ -176,7 +176,7 @@ class RandomizedTest(ControlTest):
             await self.cycle()
             i = dict(if_valid=self.rng.randrange(2),de_admit=self.rng.randrange(2),
                 commit_enable=self.rng.randrange(2),wb_effect_safe=self.rng.randrange(2),
-                de_branch_taken=self.rng.randrange(2),de_branch_target=self.rng.getrandbits(32),
+                de_redirect=self.rng.randrange(2),de_redirect_addr=self.rng.getrandbits(32),
                 wb_redirect_valid=self.rng.randrange(2),wb_redirect_addr=self.rng.getrandbits(32),
                 wb_next_pc=self.rng.getrandbits(32),de_pc=self.rng.getrandbits(32),
                 resume_pc=self.rng.getrandbits(32),priv_m=self.rng.randrange(2),

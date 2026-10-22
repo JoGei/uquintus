@@ -9,7 +9,7 @@ owns the LSU. Instruction and data memories remain external.
 The native core supports RV32I+Zicsr, configurable M/U privilege, and the
 implemented E, M, C, PMP and Zifencei options. Forwarding paths, DE operand
 retention, FF/latch GPR storage, compressed strategy/placement, iterative
-arithmetic configuration, frontend depth and the two existing branch policies
+arithmetic configuration, frontend depth and none/static-not-taken/bimodal branch policies
 are passed to their owning components. The source list is Bender target `rtl`.
 
 The [core-owned XIF controller](../xif_ctrl/README.md) connects issue/ID/cleanup
@@ -66,7 +66,10 @@ These internal signals are available to verification; the core adds no trace
 output pins. The simulation top is now `uqu_core_tb`, which instantiates the
 core and the [passive RVFI collector](../../common/README.md).
 
-DE branches redirect only on accepted transfer. EX operands select the resolved
+DE corrections redirect only on accepted transfer; BTB-backed predictions travel
+through the parent-owned IF/DE payload, and correct predictions do not flush
+the frontend. The [predictor guide](../bpu/README.md) describes
+training and recovery. EX operands select the resolved
 register, PC, immediate or zero as decoded. Store data is resolved in EX.
 An operand admitted under a next-cycle bypass guarantee is captured once it
 becomes ready if EX is held; it cannot disappear when its producer drains.
@@ -121,6 +124,7 @@ Registers must be initialized by software before the interpreter reads them.
 | `csrs` | Six CSR instruction forms, suppressed reads/writes, WARL/read-only behavior, 64-bit counter halves and aliases, inhibition/increments, PMP locking, constant HPM/identity state and illegal-write traps. |
 | `hart_id` | Configured 32-bit `mhartid` reads, read-only write rejection, value preserved after trapping, and absence of the removed top-level port. |
 | `integer` | Seeded RV32I register/immediate arithmetic, shifts and comparisons; x0; dependent/overwritten destinations; branches, loops, JAL/JALR and skipped poison stores. |
+| `prediction` | Bimodal loop learning and exit recovery, changing JALR targets, compressed branch loops, skipped wrong-path instructions and cold lookup after configured FENCE.I. Baseline modes run the same architectural program. |
 | `memory` | Signed/unsigned byte/halfword/word loads, byte-lane stores, load consumers, store-data dependencies, branch operands, FENCE and configured FENCE.I. |
 | `traps` | Misaligned data/branch targets, illegal instruction/CSR, disabled M and RV32E register restrictions, ECALL, EBREAK with zero `mtval`, and explicit load/store error responses. |
 | `precise` | A WB CSR fault prevents a younger store from issuing before recovery; instruction bus errors preserve fault PC/value and resume through MRET. |

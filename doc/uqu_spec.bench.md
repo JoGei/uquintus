@@ -2,7 +2,8 @@
 
 **Status:** Minimum-period definition agreed; CoreMark cycle-only RTL integration
 implemented with native fast and fully checked modes. Wider workload coverage
-remains open.
+remains open. Pareto-profile naming and initial objectives are agreed;
+configuration search and selection are deferred.
 
 [Specification index](uqu_spec.md) · [Build](uqu_spec.build.md) · [Interfaces](uqu_spec.interfaces.md)
 
@@ -197,7 +198,140 @@ compiler, executable and memory model constant, then assess cycle savings
 alongside implementation area and `T_min`. A broader suite such as Embench and
 dynamic-predictor event metrics remain follow-ups.
 
-## 4. Measurement decision record
+## 4. Pareto-optimal configuration profiles
+
+**Status:** Naming and initial selection goals agreed; search and profile
+parameter values deferred
+
+The configuration-exploration goal shall be to identify Pareto-optimal hardware
+configurations across normalized suite cycle cost, implementation area and
+estimated maximum frequency. Within a declared comparison context, a
+configuration is dominated if another eligible configuration has no higher
+suite cycle cost, no greater area and no lower maximum frequency, with a strict
+improvement in at least one objective. The Pareto set consists of the
+configurations that are not dominated.
+
+Selected points shall receive Greek-letter codes, written out in lowercase
+ASCII in preset filenames. Reserve the following initial profiles:
+
+| Code | Planned preset | Selection goal |
+| --- | --- | --- |
+| `alpha` | `config/uquintus-alpha.yml` | Lowest normalized suite cycle cost among eligible configurations. |
+| `beta` | `config/uquintus-beta.yml` | Lowest implementation area among eligible configurations. |
+| `gamma` | `config/uquintus-gamma.yml` | Highest estimated maximum frequency, equivalently lowest `T_min`, among eligible configurations. |
+
+These are objective assignments, not measured rankings of existing presets.
+Actual parameter values shall remain unspecified until selection is supported
+by the completed flows and evidence. If several configurations tie for a
+primary objective, the selected representative shall remain nondominated.
+Different objectives may select the same parameter set; the codes shall not
+force three distinct hardware implementations.
+
+Hyperparameter search, candidate generation and automated selection shall be
+deferred until the necessary implementation flows, benchmark coverage and
+metrics are finalized. Before searching, define the eligible ISA/software
+capabilities, versioned workload set and weights, reference measurements,
+area metric and implementation stage, platforms/corners, memory timing and
+constraints. Compare candidates
+within consistent declared contexts; do not mix technology or timing scopes
+into one unlabeled frontier. The search method, tie-breaking policy and
+numerical target values remain open.
+
+The `alpha` goal shall minimize cycles rather than estimated execution time;
+it shall not imply the shortest execution time once frequency is considered.
+The `gamma` goal shall use the qualified
+estimated maximum-frequency definition in Section 1, rather than the requested
+clock target. Area and frequency claims shall retain their implementation
+context and raw evidence.
+
+Each selected profile shall eventually be a complete explicit hardware YAML
+under top-level `config/`, following the
+[shared configuration contract](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets).
+Retain its generated descriptive label, complete parameter fingerprint,
+selection context and supporting run artifacts. A profile name shall identify
+its selection goal without making a context-independent claim of optimality.
+
+### 4.1. Normalized suite cycle cost and diagnostic CPI
+
+For each declared workload `i`, measure the candidate's and reference's cycle
+counts using the same workload-window contract from Section 3. Define:
+
+```text
+ratio_i = candidate_cycles_i / reference_cycles_i
+
+suite_cycle_ratio = geometric_mean(ratio_1, ..., ratio_N)
+                  = exp(sum(log(ratio_i)) / N)
+```
+
+`suite_cycle_ratio` shall be the initial `alpha` selection metric; lower is
+better. A value of `1.0` matches the reference's aggregate cycle cost. Each
+workload shall receive equal weight by default. A declared weighted suite may
+instead use `exp(sum(weight_i * log(ratio_i)))`, with positive weights summing
+to one. Freeze the workload membership and weights before comparing candidates;
+changing a workload's run length or adding extra profiles shall not implicitly
+redefine its weight. This aggregation approach follows the use of geometric
+means for normalized performance ratios in the
+[SPEC CPU methodology](https://www.spec.org/cpu2017/Docs/overview.html);
+uquintus measurements do not constitute SPEC scores.
+
+The suite definition shall identify workload revisions, inputs, iteration
+counts, measurement windows and weights. Freeze the reference hardware
+parameter snapshot, executable/compiler identities and reference cycle counts
+for each selection context. All candidates shall perform the same work and
+pass the required correctness checks under consistent memory timing and
+software-build policies. Microarchitecture-only comparisons shall reuse the
+same workload executables. Comparisons across ISA choices may rebuild with
+the corresponding ISA/ABI flags, retaining compiler/options and executable
+identity for each candidate. Ratios shall use finite, positive measured cycle
+counts. A missing, unsupported or failing required workload shall make the
+candidate ineligible for that suite, rather than disappear from its aggregate.
+
+Integer and floating-point workload aggregates shall be reported separately.
+A combined selection suite shall declare their workloads and weights explicitly.
+The reference must be capable of completing every required workload under the
+declared execution policy; changing that policy or reference defines a new
+comparison context.
+
+CPI shall remain a diagnostic metric:
+
+```text
+CPI_i = workload_cycles_i / retired_instructions_i
+suite_CPI = sum(weight_i * CPI_i)
+```
+
+Use equal weights `1/N` by default. This is a workload-weighted mean, distinct
+from dividing total suite cycles by total retired instructions, which weights
+workloads by instruction count. CPI comparisons shall identify ISA/executable
+differences; a lower CPI may accompany more cycles if an operation is expanded
+into many software instructions. Retain per-workload cycles, instruction
+counts, CPI and normalized ratios alongside both aggregates. CPI shall not
+replace the normalized cycle-cost objective for selecting `alpha`.
+
+### 4.2. Revisable Greek-letter profiles
+
+Greek-letter codes shall retain their selection goals while their hardware
+parameter sets may change. Adding benchmarks, changing workload weights,
+qualifying new implementation flows or supporting new core features may produce
+a different Pareto set and new `alpha`, `beta` or `gamma` representatives.
+Reselection shall be an explicit reviewed update to the complete preset and its
+supporting evidence, not an implicit change during a build.
+
+For example, a CoreMark-only suite exercises integer workloads and does not
+reward enabling the Zfinx FPU. A nondominated representative can therefore omit
+the FPU. Adding required floating-point workloads can change eligibility and
+the selected parameters, so a later profile may enable Zfinx. These outcomes
+shall depend on the declared suite and eligible capabilities rather than a
+permanent feature assignment to a Greek letter.
+
+Each selection shall retain the suite definition/version or fingerprint,
+reference measurements, eligible feature set, implementation context and
+selected hardware parameter fingerprint with its run artifacts. Preserve prior
+parameter snapshots and evidence so historical results remain attributable
+after a preset changes. Reports shall compare matching contexts and distinguish
+revisions with the same profile name; a Greek-letter name alone shall not
+identify an immutable hardware implementation.
+
+## 5. Measurement decision record
 
 | ID | Decision | Rationale | Status |
 | --- | --- | --- | --- |

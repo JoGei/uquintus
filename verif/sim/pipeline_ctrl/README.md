@@ -106,10 +106,14 @@ selects it ahead of younger redirects. Do not echo an accepted synchronous
 WB exception through WB's external `trap_i` input. FENCE.I success is selected
 internally from the WB system tag and `wb_next_pc_i`.
 
-DE supplies its accepted branch-taken report and target. The controller
-qualifies it with DE transfer, suppresses IF capture/new fetching that cycle,
+The core supplies DE correction intent and the resolved next PC through
+`de_redirect_i` / `de_redirect_addr_i`. Baseline modes use the accepted taken
+branch report; bimodal mode compares the carried prediction with the actual
+next PC, including taken-to-not-taken corrections. The controller qualifies
+correction with DE transfer, suppresses IF capture/new fetching that cycle,
 and redirects without flushing that same DE instruction. Older faults and
-accepted WB events prevent the DE transfer/redirect.
+accepted WB events prevent the DE transfer/redirect. Correct predictions do
+not request a redirect.
 
 Machine eligibility uses live `mie_i`, `mip_i`, `mstatus_i`, `priv_m_i` and
 `irq_mask_i`. Only causes 11, 3 and 7 participate, in external/software/timer

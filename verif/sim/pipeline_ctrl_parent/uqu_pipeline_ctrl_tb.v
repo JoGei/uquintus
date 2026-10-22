@@ -125,7 +125,7 @@ module uqu_pipeline_ctrl_tb #(
         .ex_serialize_i(serial_q[1]), .mem_serialize_i(serial_q[2]), .wb_serialize_i(serial_q[3]),
         .de_system_i(system_q[0]), .ex_system_i(system_q[1]), .mem_system_i(system_q[2]), .wb_system_i(system_q[3]),
         .de_admit_i(de_admit_i), .commit_enable_i(commit_enable_i), .wb_effect_safe_i(wb_effect_safe_i),
-        .de_branch_taken_i(branch_q[0]), .de_branch_target_i(next_pc_q[0]),
+        .de_redirect_i(branch_q[0]), .de_redirect_addr_i(next_pc_q[0]),
         .wb_redirect_valid_i(exception_fire_o || wb_mret), .wb_redirect_addr_i(wb_target),
         .wb_next_pc_i(next_pc_q[3]), .de_pc_i(pc_q[0]), .resume_pc_i(resume_pc_q),
         .priv_m_i(priv_m_q), .mstatus_i(mstatus_o), .mie_i(mie_o), .mip_i(mip),

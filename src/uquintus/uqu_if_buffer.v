@@ -8,6 +8,9 @@ module uqu_if_buffer #(
     input  wire        clk_i,
     input  wire        rst_ni,
     input  wire        flush_i,
+    // Synchronous discard after accepting the current head (e.g. prediction).
+    // Unlike flush_i, this must not mask the head used to decide that transfer.
+    input  wire        clear_i,
     input  wire        push_valid_i,
     output wire        push_ready_o,
     input  wire [31:0] push_addr_i,
@@ -56,7 +59,7 @@ module uqu_if_buffer #(
             head_q <= {PTR_WIDTH{1'b0}};
             tail_q <= {PTR_WIDTH{1'b0}};
             count_q <= {COUNT_WIDTH{1'b0}};
-        end else if (flush_i) begin
+        end else if (flush_i || clear_i) begin
             head_q <= {PTR_WIDTH{1'b0}};
             tail_q <= {PTR_WIDTH{1'b0}};
             count_q <= {COUNT_WIDTH{1'b0}};

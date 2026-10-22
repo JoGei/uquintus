@@ -1,7 +1,12 @@
 {
   "MUA_BRANCH_PREDICTOR": {
     "none": {"value": 0, "macro": "UQU_BP_NONE"},
-    "static_not_taken": {"value": 1, "macro": "UQU_BP_STATIC_NOT_TAKEN"}
+    "static_not_taken": {"value": 1, "macro": "UQU_BP_STATIC_NOT_TAKEN"},
+    "bimodal": {"value": 2, "macro": "UQU_BP_BIMODAL"}
+  },
+  "MUA_BTB": {
+    "none": {"value": 0, "macro": "UQU_BTB_NONE"},
+    "direct_mapped": {"value": 1, "macro": "UQU_BTB_DIRECT_MAPPED"}
   },
   "MUA_C_IMPL": {
     "decompress": {"value": 0, "macro": "UQU_C_IMPL_DECOMPRESS"},

@@ -1,0 +1,14 @@
+top_module: uqu_bpu
+bender_target: bpu
+test_module: test_uqu_bpu
+parameters:
+  - ISA_C
+  - MUA_BRANCH_PREDICTOR
+  - MUA_BP_ENTRIES
+  - MUA_BTB
+  - MUA_BTB_ENTRIES
+tests:
+  - training
+  - aliasing
+  - lifecycle
+  - randomized

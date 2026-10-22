@@ -1,6 +1,7 @@
 `default_nettype none
 `include "uqu_config.vh"
 `include "uqu_ctrl.vh"
+`include "uqu_isa.vh"
 
 // Native core region. All four pipeline boundaries, GPRs, shared hazards/PMP,
 // privilege and architectural resume tracking live here. Memories are external.
@@ -24,6 +25,9 @@ module uqu_core #(
     parameter MUA_C_IMPL = `UQU_C_IMPL_DECOMPRESS,
     parameter MUA_C_DECOMPRESS_STAGE = `UQU_C_DECOMPRESS_IF,
     parameter MUA_BRANCH_PREDICTOR = `UQU_BP_NONE,
+    parameter MUA_BP_ENTRIES = 16,
+    parameter MUA_BTB = `UQU_BTB_NONE,
+    parameter MUA_BTB_ENTRIES = 16,
     parameter MUA_REGFILE_IMPL = `UQU_RF_FF,
     parameter MUA_IF_BUFFER_WORDS = 2,
     parameter MUA_HARDENED = 0,
@@ -97,6 +101,7 @@ module uqu_core #(
     reg [31:0] resume_pc_q;
     reg de_valid_q, ex_valid_q, mem_valid_q, wb_valid_q;
     reg [31:0] de_pc_q, de_instr_q, de_original_q, de_tval_q;
+    reg [31:0] de_predicted_next_pc_q;
     reg de_compressed_q, de_priv_m_q, de_exception_q;
     reg [4:0] de_cause_q;
 
@@ -137,6 +142,7 @@ module uqu_core #(
 
     wire if_valid, if_permit, if_ready, fetch_enable, if_flush;
     wire [31:0] if_pc, if_instr, if_original, if_tval;
+    wire [31:0] if_predicted_next_pc;
     wire if_compressed, if_exception;
     wire [4:0] if_cause;
     wire de_complete, ex_complete, mem_complete, wb_complete;
@@ -175,6 +181,11 @@ module uqu_core #(
     wire [2:0] de_kind, de_system, de_mem_op, de_csr_op, de_rm;
     wire de_rd_we, de_lsu, de_mem_we, de_csr_zero, de_serialize, de_control_flow, de_branch_taken;
     wire de_exception;
+    wire de_conditional = de_compressed_q ?
+        ((de_original_q[15:13] == `UQU_C_Q1_BEQZ) || (de_original_q[15:13] == `UQU_C_Q1_BNEZ)) :
+        (de_original_q[6:0] == `UQU_OPCODE_BRANCH);
+    wire de_redirect = ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) && (MUA_BTB != `UQU_BTB_NONE)) ?
+                       (de_next_pc != de_predicted_next_pc_q) : de_branch_taken;
     wire [4:0] de_cause;
     wire [31:0] de_tval;
     wire ex_exception, ex_fflags_valid;
@@ -192,6 +203,7 @@ module uqu_core #(
     wire [4:0] wb_cause;
     wire [31:0] wb_tval, wb_result;
     wire wb_result_valid, wb_we0, wb_we1;
+    wire predictor_invalidate = wb_retire && (wb_system_q == `UQU_SYS_FENCEI);
     wire xif_id_valid, xif_issued, xif_accepted, xif_cleanup_valid, xif_cleanup_ready;
     wire xif_de_cancel, xif_kill_valid, xif_kill_ready, xif_drain_ready, draining;
     wire [2:0] xif_de_id, xif_cleanup_id, xif_kill_id;
@@ -213,7 +225,7 @@ module uqu_core #(
         .ex_serialize_i(ex_serialize_q), .mem_serialize_i(mem_serialize_q), .wb_serialize_i(wb_serialize_q),
         .de_system_i(de_system), .ex_system_i(ex_system_q), .mem_system_i(mem_system_q), .wb_system_i(wb_system_q),
         .de_admit_i(1'b1), .commit_enable_i(1'b1), .wb_effect_safe_i(!wb_exception),
-        .de_branch_taken_i(de_branch_taken), .de_branch_target_i(de_target),
+        .de_redirect_i(de_redirect), .de_redirect_addr_i(de_next_pc),
         .wb_redirect_valid_i(wb_redirect), .wb_redirect_addr_i(wb_target), .wb_next_pc_i(wb_next_pc_q),
         .de_pc_i(de_pc_q), .resume_pc_i(resume_pc_q), .priv_m_i(priv_m_q),
         .mstatus_i(mstatus), .mie_i(mie), .mip_i(mip), .mtvec_i(mtvec), .irq_mask_i(1'b0),
@@ -243,13 +255,19 @@ module uqu_core #(
     );
     uqu_stage_if #(
         .ISA_C(ISA_C), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
-        .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
+        .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
     ) u_if (
         .clk_i(clk_i), .rst_ni(rst_ni), .boot_addr_i(boot_addr_i), .flush_i(if_flush),
         .redirect_valid_i(redirect_valid), .redirect_addr_i(redirect_addr), .fetch_enable_i(fetch_enable),
         .request_permit_i(1'b1), .branch_pending_i(de_control_flow), .permit_i(if_permit),
+        .predictor_invalidate_i(predictor_invalidate),
+        .predictor_update_valid_i(de_fire && !de_exception), .predictor_update_pc_i(de_pc_q),
+        .predictor_update_control_flow_i(de_control_flow), .predictor_update_conditional_i(de_conditional),
+        .predictor_update_taken_i(de_branch_taken), .predictor_update_target_i(de_target),
         .valid_o(if_valid), .ready_i(if_ready), .pc_o(if_pc), .instr_o(if_instr), .original_instr_o(if_original),
-        .compressed_o(if_compressed), .next_pc_o(), .exception_valid_o(if_exception), .exception_cause_o(if_cause),
+        .compressed_o(if_compressed), .next_pc_o(), .predicted_next_pc_o(if_predicted_next_pc),
+        .exception_valid_o(if_exception), .exception_cause_o(if_cause),
         .exception_tval_o(if_tval), .misaligned_o(), .fetch_busy_o(), .priv_m_i(priv_m_q),
         .pmp_valid_o(if_pmp_valid), .pmp_addr_o(if_pmp_addr), .pmp_size_o(if_pmp_size), .pmp_priv_m_o(if_pmp_priv_m), .pmp_allow_i(if_pmp_allow),
         .imem_req_o(imem_req_o), .imem_addr_o(imem_addr_o), .imem_gnt_i(imem_gnt_i),
@@ -398,6 +416,8 @@ module uqu_core #(
     always @(posedge clk_i) begin
         if (rst_ni && de_enable && de_next_valid) begin
             de_pc_q <= if_pc;
+            if ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) && (MUA_BTB != `UQU_BTB_NONE))
+                de_predicted_next_pc_q <= if_predicted_next_pc;
             de_instr_q <= if_instr;
             de_original_q <= if_original;
             de_compressed_q <= if_compressed;

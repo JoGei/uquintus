@@ -7,7 +7,14 @@ metadata, and pass/fail checking. It collects selected include directories from
 Bender's structured source tree, passes them to both lint and simulation, and
 records the source tree/include paths and Verilog-header hashes with run
 metadata. The generated configuration-header directory is also included. `hw_config.py` provides shared hardware YAML
-validation, parameter selection/encoding, and Verilog selector generation.
+validation, parameter selection/encoding, Verilog selector generation, and the
+shared `configuration_label(config)` function for a validated configuration.
+Print the descriptive hardware label with `make config-label CONFIG=rv32i` or
+`python3 verif/sim/common/hw_config.py --config path/to/hardware.yml`.
+This command requires only Python/PyYAML, without HDL tools or cocotb/pyuvm.
+The [label convention](../../../doc/uqu_spec.build.md#21-generated-hardware-configuration-label)
+defines field ordering and inactive settings. Labels supplement the YAML preset
+name and complete parameter fingerprint; build directory names stay unchanged.
 The runner keeps `.v` files in Verilog-2005 mode and permits SystemVerilog-2017
 for `.sv` verification/imported-IP files, recording these language options in run metadata.
 `rvfi_trace.py` reads the full-core JSONL stream and checks its schema, reset
@@ -45,6 +52,10 @@ every asserted channel against the independent model on each edge; the
 individual RVFI ports and JSONL trace are unchanged. The model advances cycle
 and retirement counters on every edge, taking CSR snapshots only for CSR,
 trap/return or floating-point CSR events.
+
+`bpu_model.py` supplies the abstract independent target/direction oracle shared
+by the standalone predictor and IF regressions. It tracks target replacement
+and signed direction confidence independently of RTL bit slicing.
 
 `rv32_arithmetic.py` supplies mathematical ALU and M-extension models to the
 standalone and shared-parent scoreboards. `decode_model.py` supplies the shared

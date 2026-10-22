@@ -18,7 +18,7 @@ class BufferTest(uvm_test):
         self.coverage = Counter()
 
     async def cycle(self, **changes):
-        i = dict(rst_n=1,flush=0,push_valid=0,push_addr=0,push_data=0,
+        i = dict(rst_n=1,flush=0,clear=0,push_valid=0,push_addr=0,push_data=0,
                  push_error=0,pop=0)
         i.update(changes)
         d = self.dut
@@ -39,7 +39,7 @@ class BufferTest(uvm_test):
             assert actual==value,(name,actual,value,i,list(self.queue),self.depth)
         inserting = bool(i['push_valid'] and expected['push_ready'])
         self.coverage[(len(self.queue),inserting,removing)] += 1
-        if not active:
+        if not active or i['clear']:
             self.queue.clear()
         else:
             if removing:
@@ -103,7 +103,7 @@ class RandomizedTest(BufferTest):
             await self.cycle(push_valid=int(self.rng.random()<0.7),
                 push_addr=self.rng.getrandbits(32),push_data=self.rng.getrandbits(32),
                 push_error=self.rng.randrange(2),pop=int(self.rng.random()<0.6),
-                flush=int(index%257==256),rst_n=int(index%1021!=1020))
+                clear=int(index%127==126),flush=int(index%257==256),rst_n=int(index%1021!=1020))
         while self.queue:
             await self.cycle(pop=1)
         await self.cycle()

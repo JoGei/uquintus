@@ -1,5 +1,6 @@
 `default_nettype none
 `include "uqu_config.vh"
+`include "uqu_isa.vh"
 
 // Verification-only core parent. IF/DE lives here, outside both real stages.
 // DE sources are ready zeros; EX, GPRs, PMP and the global trap controller are
@@ -10,6 +11,9 @@ module uqu_if_pipeline_tb #(
     parameter MUA_C_IMPL = `UQU_C_IMPL_DECOMPRESS,
     parameter MUA_C_DECOMPRESS_STAGE = `UQU_C_DECOMPRESS_IF,
     parameter MUA_BRANCH_PREDICTOR = `UQU_BP_NONE,
+    parameter MUA_BP_ENTRIES = 16,
+    parameter MUA_BTB = `UQU_BTB_NONE,
+    parameter MUA_BTB_ENTRIES = 16,
     parameter MUA_IF_BUFFER_WORDS = 2
 ) (
     input wire clk_i,
@@ -43,6 +47,7 @@ module uqu_if_pipeline_tb #(
     output wire branch_resolve_o,
     output wire branch_taken_o,
     output wire [31:0] branch_target_o,
+    output wire correction_o,
     output wire exception_valid_o,
     output wire [4:0] exception_cause_o,
     output wire [31:0] exception_tval_o,
@@ -55,16 +60,25 @@ module uqu_if_pipeline_tb #(
 );
     reg slot_valid_q;
     reg [31:0] pc_q, instr_q, original_q, tval_q;
+    reg [31:0] predicted_next_pc_q;
     reg compressed_q, exception_q;
     reg [4:0] cause_q;
     wire if_valid, if_ready;
     wire if_exception;
     wire [4:0] if_cause;
     wire [31:0] if_tval;
+    wire [31:0] if_predicted_next_pc, de_next_pc;
     wire control_flow;
     wire external_flush = flush_i || redirect_valid_i;
-    wire redirect = redirect_valid_i || branch_taken_o;
-    wire [31:0] target = redirect_valid_i ? redirect_addr_i : branch_target_o;
+    wire correction = valid_o && ready_i && !exception_valid_o &&
+        (((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) && (MUA_BTB != `UQU_BTB_NONE)) ?
+         (de_next_pc != predicted_next_pc_q) : branch_taken_o);
+    wire redirect = redirect_valid_i || correction;
+    wire [31:0] target = redirect_valid_i ? redirect_addr_i : de_next_pc;
+    wire conditional = compressed_q ?
+        ((original_q[15:13] == `UQU_C_Q1_BEQZ) || (original_q[15:13] == `UQU_C_Q1_BNEZ)) :
+        (original_q[6:0] == `UQU_OPCODE_BRANCH);
+    assign correction_o = correction;
 
     assign if_transfer_o = if_valid && if_ready;
     assign if_exception_o = if_exception;
@@ -78,13 +92,19 @@ module uqu_if_pipeline_tb #(
 
     uqu_stage_if #(
         .ISA_C(ISA_C), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
-        .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
+        .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
     ) u_if (
         .clk_i(clk_i), .rst_ni(rst_ni), .boot_addr_i(boot_addr_i), .flush_i(flush_i),
         .redirect_valid_i(redirect), .redirect_addr_i(target), .fetch_enable_i(fetch_enable_i),
         .request_permit_i(1'b1), .branch_pending_i(control_flow), .permit_i(if_permit_i),
+        .predictor_invalidate_i(1'b0), .predictor_update_valid_i(valid_o && ready_i && !exception_valid_o),
+        .predictor_update_pc_i(pc_q), .predictor_update_control_flow_i(control_flow),
+        .predictor_update_conditional_i(conditional), .predictor_update_taken_i(branch_taken_o),
+        .predictor_update_target_i(branch_target_o),
         .valid_o(if_valid), .ready_i(if_ready), .pc_o(if_pc_o), .instr_o(if_instr_o),
         .original_instr_o(if_original_o), .compressed_o(if_compressed_o), .next_pc_o(),
+        .predicted_next_pc_o(if_predicted_next_pc),
         .exception_valid_o(if_exception), .exception_cause_o(if_cause), .exception_tval_o(if_tval),
         .misaligned_o(), .fetch_busy_o(), .priv_m_i(1'b1), .pmp_valid_o(pmp_valid_o),
         .pmp_addr_o(pmp_addr_o), .pmp_size_o(), .pmp_priv_m_o(), .pmp_allow_i(pmp_allow_i),
@@ -107,7 +127,7 @@ module uqu_if_pipeline_tb #(
         .rd_we_o(), .rd_o(), .rd1_o(), .rd_pending_o(), .lsu_o(), .mem_we_o(), .mem_op_o(),
         .wb_kind_o(), .system_o(), .serialize_o(), .csr_addr_o(), .csr_op_o(), .csr_src_o(),
         .csr_src_zero_o(), .control_flow_o(control_flow), .branch_resolve_o(branch_resolve_o),
-        .branch_taken_o(branch_taken_o), .branch_target_o(branch_target_o), .next_pc_o(),
+        .branch_taken_o(branch_taken_o), .branch_target_o(branch_target_o), .next_pc_o(de_next_pc),
         .exception_valid_o(exception_valid_o), .exception_cause_o(exception_cause_o),
         .exception_tval_o(exception_tval_o), .xif_force_i(1'b0), .xif_id_valid_i(1'b0),
         .xif_id_i(3'd0), .hart_id_i(32'd0), .xif_issued_o(), .xif_accepted_o(),
@@ -118,12 +138,13 @@ module uqu_if_pipeline_tb #(
         .xif_register_hartid_o(), .xif_register_id_o(), .xif_register_rs_o(), .xif_register_rs_valid_o()
     );
     always @(posedge clk_i) begin
-        if (!rst_ni || external_flush || branch_taken_o) begin
+        if (!rst_ni || external_flush || correction) begin
             slot_valid_q <= 1'b0;
         end else if (if_ready) begin
             slot_valid_q <= if_valid;
             if (if_valid) begin
                 pc_q <= if_pc_o;
+                predicted_next_pc_q <= if_predicted_next_pc;
                 instr_q <= if_instr_o;
                 original_q <= if_original_o;
                 compressed_q <= if_compressed_o;

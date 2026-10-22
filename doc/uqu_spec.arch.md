@@ -204,7 +204,10 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_DE_OPERAND_RETENTION` | `uqu_hazard` option: `0`: continuously resolve DE sources; `1`: retain correctly resolved DE operands while their instruction waits. | `0` |
 | `MUA_C_IMPL` | `decompress`: expand into base instructions, then use the main decoder; `decode_compressed`: directly decode compressed instructions in parallel with the main decoder. Inactive when `ISA_C = 0`. | `decompress` |
 | `MUA_C_DECOMPRESS_STAGE` | `if`: expansion before IF/DE; `de`: expansion after IF/DE and before the main decoder. Inactive when `ISA_C = 0` or `MUA_C_IMPL = decode_compressed`. | `if` |
-| `MUA_BRANCH_PREDICTOR` | `none`, `static_not_taken`; additional implementations TBD. | `none` |
+| `MUA_BRANCH_PREDICTOR` | `none`, `static_not_taken`, `bimodal` (tagged target table and two-bit direction counters). | `none` |
+| `MUA_BP_ENTRIES` | Power-of-two direction-counter capacity from `2` through `1024`; inactive unless `MUA_BRANCH_PREDICTOR = bimodal`. | `16` |
+| `MUA_BTB` | `none` or `direct_mapped`, independently selected target storage; inactive with prediction mode `none`. | `none` |
+| `MUA_BTB_ENTRIES` | Power-of-two target-table capacity from `2` through `1024`, independent of direction capacity; inactive when the BTB is disabled. | `16` |
 | `MUA_REGFILE_IMPL` | `ff`: flip-flop storage; `latch`: latch storage. | `ff` |
 | `MUA_IF_BUFFER_WORDS` | Integer capacity of at least `2` in 32-bit fetch words; non-power-of-two capacities supported. | `2` |
 | `MUA_HARDENED` | `0`: no OBI parity/checksum generation/checking requirement; `1`: planned hardened implementation including OBI parity/checksum generation and checking on both ports; enabled setting unsupported until implemented. | `0` |
@@ -1933,7 +1936,7 @@ Section 3.13 and D-301.
 
 ## 5. Configurable branch prediction
 
-**Status:** Agreed
+**Status:** None/static-not-taken and tagged bimodal prediction implemented
 
 Branch prediction shall be optional. The RTL parameter `MUA_BRANCH_PREDICTOR`
 shall select whether prediction is enabled and which predictor implementation
@@ -1959,8 +1962,8 @@ Misprediction recovery shall redirect instruction fetch and prevent discarded
 instructions from changing architectural state. With prediction disabled, the
 pipeline shall still handle control hazards correctly.
 
-The two baseline modes are implemented in Section 15.5. Additional predictor
-implementations, interfaces and encodings remain TBD. Branch and jump resolution
+The two baseline modes and the bimodal frontend described below are implemented
+in Section 15.5. Branch and jump resolution
 in decode is defined in [architecture, Section 6](uqu_spec.arch.md#6-resolve-branches-and-jumps-in-decode).
 
 Prediction and resolution are distinct: a BTB-based implementation can predict
@@ -1968,6 +1971,62 @@ a target in the fetch frontend and verify it later when the branch resolves.
 Early resolution is therefore not a prerequisite for early target prediction.
 See [CVA6 PC generation](https://docs.openhwfoundation.org/projects/cva6-user-manual/03_cva6_design/pcgen_stage.html)
 for an example of frontend prediction and later correction.
+
+### 5.1. Independent direction prediction and target storage
+
+`uqu_bpu` shall compose two separately configured IF-owned
+components. `MUA_BRANCH_PREDICTOR: bimodal` shall select `uqu_bp_bimodal`, a tagged
+table of two-bit saturating direction counters with capacity `MUA_BP_ENTRIES`.
+`MUA_BTB: direct_mapped` shall independently select `uqu_btb`, a tagged target
+table with capacity `MUA_BTB_ENTRIES`. Its entries shall contain target and
+conditional/unconditional classification, without direction counters. Both
+capacities shall default to 16 and may differ. All four parameters shall remain
+explicit in every hardware YAML. Canonical selector encodings are
+`bimodal = 2` / `UQU_BP_BIMODAL` and BTB `none = 0` / `UQU_BTB_NONE`,
+`direct_mapped = 1` / `UQU_BTB_DIRECT_MAPPED`. The
+[component guide](../verif/sim/bpu/README.md) defines ports and tests.
+
+| Direction mode | BTB | Frontend behavior |
+| --- | --- | --- |
+| `none` | Either selection (inactive) | Preserve the no-prediction branch hold; no target steering. |
+| `static_not_taken` | `none` | Continue sequentially until DE resolves control flow. |
+| `static_not_taken` | `direct_mapped` | Conditional branches predict not taken; cached unconditional jumps predict taken. |
+| `bimodal` | `none` | No target source is available to this PC-only frontend; follow sequential fetch and correct in DE. Unobservable direction state may be removed by synthesis. |
+| `bimodal` | `direct_mapped` | A conditional target hit requires a matching taken direction prediction to steer; unconditional target hits always steer. |
+
+Index by word PC with C disabled and halfword PC with C enabled, checking every
+remaining PC tag bit separately in each table. A missing target or conditional
+direction entry shall follow sequential flow.
+An allocated conditional entry shall start weakly toward the first observed
+outcome; subsequent outcomes saturating-increment/decrement its counter.
+An unconditional control transfer shall invalidate its direction-table slot
+without allocating a counter. JAL/JALR target entries shall predict taken to
+the last observed target. Reset and
+retired FENCE.I shall clear validity; payload arrays shall not require reset.
+Ordinary redirects shall preserve learned state. No return-address stack or
+global history is part of this initial implementation.
+
+Train once for an accepted nonfaulting DE instruction, never while it is held
+or flushed. A matching entry on a non-control instruction shall be invalidated.
+Lookup/update collisions shall use the pre-edge table. Training in DE does not
+imply retirement: a subsequently discovered older fault may discard an already
+trained instruction without architectural effect from its prediction state.
+
+IF shall look up the aligned instruction and carry its predicted next PC into
+the core-owned IF/DE payload. A stalled token shall retain that prediction
+despite table updates. A taken prediction shall steer IF only on the token's
+accepted transfer, synchronously discarding sequential buffered words and
+canceling/draining old fetch work under the existing OBI contract. Target
+fetches shall use ordinary alignment and core-owned PMP checking. External
+redirects and flushes shall retain priority over predicted steering.
+
+On successful DE transfer, compare the resolved next PC to the carried
+prediction. Correct only mismatches, including predicted-taken/actually-untaken
+branches, changed indirect targets and stale hits on ordinary instructions.
+Correct predictions shall not flush IF. The pipeline controller shall consume
+DE correction intent/address through `de_redirect_i`/`de_redirect_addr_i`,
+retaining transfer qualification and older-event priority. Modes without an
+active BTB shall retain their accepted-taken-branch redirect behavior.
 
 ## 6. Resolve branches and jumps in decode
 
@@ -3022,12 +3081,13 @@ PMP remains the one core-owned checker.
 
 `src/uquintus/uqu_stage_if.v` shall own the frontend instruction PC, sequential
 word-fetch pointer, run state, fault-delivery containment and instances of
-`uqu_ifetch`, `uqu_if_buffer`, `uqu_if_aligner` and, when selected, the IF
+`uqu_ifetch`, `uqu_if_buffer`, `uqu_if_aligner`, `uqu_bpu` and, when selected, the IF
 decompressor. It shall not own the IF/DE register, current privilege, PMP state
 or checker, global event arbitration, architectural trap entry or DE branch
 execution. The [stage guide](../verif/sim/if/README.md) defines exact ports and
 tests. Its parameters shall be `ISA_C`, both compressed strategy selectors,
-`MUA_BRANCH_PREDICTOR` and `MUA_IF_BUFFER_WORDS`.
+`MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES` and
+`MUA_IF_BUFFER_WORDS`.
 
 Each active reset edge shall establish a running frontend at the aligned
 `boot_addr_i` under the core boot contract. Later boot-input changes shall not
@@ -3047,13 +3107,17 @@ private bus-presentation permission, without preventing native PMP denial.
 Neither shall retract a presented request. In `none` mode, `branch_pending_i`
 shall likewise stop new requests/private presentation for a recognized unresolved
 DE branch/jump. `static_not_taken` shall ignore that branch hold and continue
-sequential prefetch. Both modes shall retain already fetched words/completions
-until consumption or invalidation. Dynamic prediction remains future work.
+sequential prefetch unless an active BTB predicts an unconditional jump target. Both modes shall retain already fetched words/completions
+until consumption or invalidation. `bimodal` shall likewise ignore the branch
+hold and may steer the frontend according to Section 5.1.
 
 `permit_i` shall independently gate token delivery. `valid_o && ready_i` shall
 be the sole instruction/fault transfer. A successful transfer shall advance PC
-by the original length and release a head word only when the aligner indicates
-it is fully consumed. Prefetch shall fill reserved capacity during delivery
+by the original length unless an accepted prediction selects a target. Without
+a predicted redirect, release a head word only when the aligner indicates it
+is fully consumed; a predicted redirect shall clear the sequential queue.
+`next_pc_o` shall retain the sequential successor, while
+`predicted_next_pc_o` shall carry the selected frontend successor. Prefetch shall fill reserved capacity during delivery
 stalls. The private engine result shall occupy reserved capacity rather than
 extend `MUA_IF_BUFFER_WORDS`. `fetch_busy_o` shall report engine transaction
 ownership, including private waits, retained results and killed drains; it
@@ -3564,7 +3628,7 @@ be resolved when their implementation milestone is undertaken:
 | Zfinx | Real CVFPU adapter, EX/core execution and RVFI FP CSR channels implemented. Default synthesis frontends qualified under build D-306. Extend simulation/synthesis matrices and qualify physical flows; PULP remains blocked on known flag failures. Retain backend-defined latency and scalar FP32 scope. |
 | Register file | Physical timing closure and technology mapping for the initial portable FF/latch backends; preserve logical ports, rising-edge write visibility, and the common pipeline bypass policy. |
 | ISA/CSR/PMP | WB CSR state/access checks, counters, trap/MRET updates, core control/PMP and initial XIF tracking are integrated. Broader architectural verification and core debug integration remain; FPU state awaits its backend. |
-| Frontend | Full-core event arbitration, expansion placement, prefetch/fault association, redirects and none/static_not_taken behavior are connected. Dynamic predictors and the standard XIF compressed channel remain future work. |
+| Frontend | Full-core event arbitration, expansion placement, prefetch/fault association, redirects and none/static_not_taken behavior are connected. Independent direction prediction and target storage are connected; more advanced predictors and the standard XIF compressed channel remain future work. |
 | Milestones | Complete baseline formal/physical acceptance, broaden verification of implemented optional configurations, and define remaining FPU/debug and future-feature milestones. |
 
 Full F and its separate register file are deferred in favor of Zfinx. `ISA_A`

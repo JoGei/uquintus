@@ -410,6 +410,9 @@ class CoreTest(uvm_test):
                 'priv_m_q','mstatus','mie','mip','mtvec','mepc','de_pc_q','mem_pc_q',
                 'wb_we1','wb_waddr1','wb_wdata1')}
         self.edge_o=o
+        if self.params['MUA_BRANCH_PREDICTOR'] != 0 and self.params['MUA_BTB'] != 0:
+            o.update({n:self.signal(n) for n in ('de_fire','de_control_flow','de_branch_taken',
+                'de_next_pc','de_predicted_next_pc_q','de_redirect','predictor_invalidate')})
         if rst:
             assert o['priv_m_q']==self.priv and o['mstatus']==self.csrs[0x300] and o['mie']==self.csrs[0x304], ('IRQ pre-state',o,self.csrs)
             assert o['mip']==irq, ('external IRQ pins/mip',o['mip'],irq)

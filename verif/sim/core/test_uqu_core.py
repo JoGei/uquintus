@@ -5,10 +5,78 @@ from pyuvm import uvm_root
 from core_env import (CoreTest, BOOT, HANDLER, MASK, ins_i, ins_r, ins_s, ins_b,
                       ins_j, csr)
 from rvfi_csrs import CSR_CATALOG
+from compressed_model import compressed
 
 
 def custom_word(rd=6, a=1, b=2, op=0):
     return b << 20 | a << 15 | op << 12 | rd << 7 | 0x0b
+
+
+class PredictionTest(CoreTest):
+    async def cycle(self, *args, **kwargs):
+        o = await super().cycle(*args, **kwargs)
+        if o.get('predictor_invalidate'):
+            self.predictor_invalidations += 1
+        if o.get('de_fire') and not o['wb_exception_fire']:
+            self.resolutions.append(dict(pc=o['de_pc_q'], taken=o['de_branch_taken'],
+                predicted=o['de_predicted_next_pc_q'], actual=o['de_next_pc'],
+                correction=o['de_redirect']))
+        return o
+
+    async def run_phase(self):
+        self.raise_objection()
+        self.resolutions = []
+        self.predictor_invalidations = 0
+        program = [ins_i(1,0,8), ins_i(2,0,0), ins_i(2,2,1), ins_i(1,1,-1),
+                   ins_b(1,0,-8,1), ins_j(5,8), 0, ins_i(6,0,123)]
+        branch_pc = BOOT + 16
+        self.put(BOOT, program + [0x00001437, ins_i(8,8,0x400), ins_j(0,0x1200-(BOOT+40))])
+        # The same indirect jump changes its target on the second visit.
+        self.put(0x1200, [ins_i(5,8,0,0,0x67)])
+        self.put(0x1400, [0x00001437, ins_i(8,8,0x500), ins_j(0,0x1200-0x1408)])
+        if self.params['ISA_ZIFENCEI']:
+            # Revisit the warmed indirect PC after FENCE.I. It must be cold,
+            # rather than predict its old target, and then use the new operand.
+            self.put(0x1500, [ins_i(7,0,77), 0x0000100f, 0x00001437,
+                             ins_i(8,8,0x600), ins_j(0,0x1200-0x1510)])
+        else:
+            self.put(0x1500, [ins_i(7,0,77), ins_j(0,0x1600-0x1504)])
+        finish_pc = 0x1600
+        if self.params['ISA_C']:
+            branch = ins_b(8,0,-2,1)
+            cbranch = next(h for h in range(0xe001, 0x10000, 4)
+                           if compressed(h) and compressed(h)[1] == branch)
+            self.put(0x1600, [(ins_i(8,0,8),4), (0x147d,2), (cbranch,2),
+                              (ins_i(9,0,99),4), (ins_j(0,0),4)])
+            finish_pc = 0x1608
+        else:
+            self.put(0x1600, [ins_i(9,0,99), ins_j(0,0)])
+        await self.reset()
+        await self.finish(finish_pc)
+        assert self.regs[2] == 8 and self.regs[6] == 123 and self.regs[7] == 77
+        assert not self.faults and not self.accesses
+        if self.params['MUA_BRANCH_PREDICTOR'] == 2 and self.params['MUA_BTB'] != 0:
+            loop = [row for row in self.resolutions if row['pc'] == branch_pc]
+            assert len(loop) == 8, loop
+            assert loop[0]['correction'] and not loop[-1]['taken'] and loop[-1]['correction'], loop
+            assert sum(row['taken'] and not row['correction'] for row in loop) >= 4, loop
+            indirect = [row for row in self.resolutions if row['pc'] == 0x1200]
+            assert len(indirect) == 2 + int(bool(self.params['ISA_ZIFENCEI'])), indirect
+            assert indirect[1]['predicted'] == 0x1400, indirect
+            assert indirect[1]['actual'] == 0x1500 and indirect[1]['correction'], indirect
+            assert self.predictor_invalidations == int(bool(self.params['ISA_ZIFENCEI']))
+            if self.params['ISA_ZIFENCEI']:
+                assert indirect[2]['predicted'] == 0x1204 and indirect[2]['actual'] == 0x1600, indirect
+            if self.params['ISA_C']:
+                compact = [row for row in self.resolutions if row['pc'] == 0x1606]
+                assert len(compact) == 8 and compact[-1]['correction'], compact
+                assert sum(row['taken'] and not row['correction'] for row in compact) >= 4, compact
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def prediction(dut):
+    await uvm_root().run_test('PredictionTest')
 
 
 class HartIdTest(CoreTest):

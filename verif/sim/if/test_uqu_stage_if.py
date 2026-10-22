@@ -204,6 +204,52 @@ class CompressedTest(IfStageTest):
         self.drop_objection()
 
 
+class PredictionTest(IfStageTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.reset()
+        if not self.predictor.enabled:
+            await self.until(lambda o:bool(o['valid']))
+            o = await self.cycle(ready=1,predictor_update_valid=1,predictor_update_pc=0x1000,
+                predictor_update_control_flow=1,predictor_update_taken=1,predictor_update_target=0x8000)
+            assert o['predicted_next_pc']==o['next_pc']
+            self.drop_objection(); return
+        # Capture a prediction while IF is stalled. Training the same entry must
+        # not mutate that token; the next visit observes the new target.
+        await self.cycle(predictor_update_valid=1,predictor_update_pc=0x1000,
+            predictor_update_control_flow=1,predictor_update_taken=1,predictor_update_target=0x8000)
+        await self.until(lambda o:bool(o['valid']))
+        for _ in range(4):
+            o = await self.cycle(predictor_update_valid=1,predictor_update_pc=0x1000,
+                predictor_update_control_flow=1,predictor_update_taken=1,predictor_update_target=0x9000)
+            assert o['predicted_next_pc']==0x8000
+        before=len(self.delivered)
+        await self.cycle(ready=1)
+        await self.until(lambda o:len(self.delivered)>before+1,ready=1)
+        assert self.delivered[before+1][0]==0x8000
+        await self.cycle(redirect_valid=1,redirect_addr=0x1000)
+        await self.until(lambda o:bool(o['valid']))
+        assert (await self.cycle())['predicted_next_pc']==0x9000
+        # External recovery wins over a predicted redirect on the same cycle.
+        await self.cycle(ready=1,redirect_valid=1,redirect_addr=0xA000)
+        await self.until(lambda o:bool(o['valid']))
+        assert (await self.cycle())['pc']==0xA000
+        # Prediction uses ordinary fetch/PMP: a denied predicted target faults
+        # at that target, never at the original branch.
+        await self.cycle(predictor_update_valid=1,predictor_update_pc=0xB000,
+            predictor_update_control_flow=1,predictor_update_taken=1,predictor_update_target=0xC000)
+        self.denied.add(0xC000)
+        await self.cycle(redirect_valid=1,redirect_addr=0xB000)
+        await self.until(lambda o:o['pc']==0xC000 and o['exception_valid'],ready=1)
+        assert self.faults[-1]==(0xC000,1,0xC000)
+        # FENCE.I-style invalidation discards learned targets.
+        await self.cycle(predictor_invalidate=1,redirect_valid=1,redirect_addr=0xB000)
+        await self.until(lambda o:bool(o['valid']))
+        o=await self.cycle(ready=1)
+        assert o['predicted_next_pc']==o['next_pc']
+        self.drop_objection()
+
+
 @cocotb.test(timeout_time=1000,timeout_unit='us')
 async def stream(dut):
     await uvm_root().run_test('StreamTest')
@@ -227,3 +273,8 @@ async def redirects(dut):
 @cocotb.test(timeout_time=1000,timeout_unit='us')
 async def compressed(dut):
     await uvm_root().run_test('CompressedTest')
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def prediction(dut):
+    await uvm_root().run_test('PredictionTest')

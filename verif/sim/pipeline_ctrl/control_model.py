@@ -76,9 +76,9 @@ class ControlModel:
         o['de_permit'] = int(admit)
         o['de_ready'] = int(admit and (not occupied[1] or o['ex_fire']))
         o['de_fire'] = int(bool(occupied[0] and i['de_complete'] and o['de_ready']))
-        branch = bool(o['de_fire'] and i['de_branch_taken'] and 0 not in faults)
+        branch = bool(o['de_fire'] and i['de_redirect'] and 0 not in faults)
         if recovery is None and branch:
-            recovery = i['de_branch_target']
+            recovery = i['de_redirect_addr']
         o['if_permit'] = int(not faults and not o['draining'] and recovery is None)
         o['if_ready'] = int(o['if_permit'] and (not occupied[0] or o['de_fire']))
         o['if_fire'] = int(bool(i['if_valid'] and o['if_ready']))

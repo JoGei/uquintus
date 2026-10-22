@@ -29,7 +29,7 @@ BENCHMARK_PROFILE ?= all
 BENCHMARK_ARCHIVE ?=
 BENCHMARK_MODE ?= fast
 
-.PHONY: help test sim lint synth impl sw benchmark-fetch benchmark-build benchmark-run benchmark riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests report test-report test-runner clean
+.PHONY: help test sim lint synth impl sw benchmark-fetch benchmark-build benchmark-run benchmark riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests config-label report test-report test-runner clean
 
 help:
 	@echo 'make test [CONFIG=rv32i] [COMPONENT=gpregfile] [SIM=verilator]'
@@ -59,11 +59,15 @@ help:
 	@echo 'Spike discovery: SPIKE, then RISCV/bin/spike, then PATH; pinned build required.'
 	@echo 'Compiler discovery: RISCV_CC, then RISCV/bin, then PATH (GCC or Clang/LLD).'
 	@echo 'make test-runner  # Check shared component-runner helpers'
+	@echo 'make config-label [CONFIG=rv32i|<hardware.yml>]  # Print the descriptive hardware label'
 	@echo 'make report       # Refresh build/report/index.html from existing artifacts'
 	@echo 'make test-report  # Check report collection, grouping and portable output'
 	@echo 'make clean        # Remove generated build outputs'
 	@echo 'Component settings: config/sim/<component>.yml'
 	@echo 'Provide Bender, Verilator, and verif/requirements.txt externally.'
+
+config-label:
+	@$(PYTHON) verif/sim/common/hw_config.py --config "$(CONFIG)"
 
 test sim lint:
 	$(PYTHON) verif/sim/common/component_runner.py --action $(if $(filter lint,$@),lint,test) \

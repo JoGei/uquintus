@@ -18,10 +18,11 @@ make lint COMPONENT=if CONFIG=rv32ic
 
 Use `PYTHON=.venv/bin/python` for the repository environment. The
 [manifest](../../../config/sim/if.yml) uses the shared runner. Parameters are
-`ISA_C`, `MUA_C_IMPL`, `MUA_C_DECOMPRESS_STAGE`, `MUA_BRANCH_PREDICTOR` and
+`ISA_C`, `MUA_C_IMPL`, `MUA_C_DECOMPRESS_STAGE`, `MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES` and
 `MUA_IF_BUFFER_WORDS`. Defaults follow the hardware configuration catalog.
-The canonical predictor encodings are `none=0` / `UQU_BP_NONE` and
-`static_not_taken=1` / `UQU_BP_STATIC_NOT_TAKEN`, generated from
+The canonical predictor encodings are `none=0` / `UQU_BP_NONE`,
+`static_not_taken=1` / `UQU_BP_STATIC_NOT_TAKEN` and `bimodal=2` /
+`UQU_BP_BIMODAL`, generated from
 `config/selectors.json`. Other values fail elaboration.
 
 ## Control and transfer
@@ -34,6 +35,8 @@ The canonical predictor encodings are `none=0` / `UQU_BP_NONE` and
 | `fetch_enable_i` | Permit new native fetches and presentation of privately waiting requests. Does not suppress delivery of an already available instruction. |
 | `request_permit_i` | Additional permission to present a private request on OBI. A native request can be accepted and checked by PMP while this is low. Local denial needs no bus permission. |
 | `branch_pending_i` | Core/DE reports a recognized unresolved control-flow instruction. In `none` mode, stop new native fetches and private presentation; `static_not_taken` continues sequential prefetch. Existing asserted OBI requests persist in both modes. |
+| `predictor_update_*_i` | Accepted nonfaulting DE instruction PC, control-flow/conditional classification, actual direction and branch target; train the IF-owned predictor once. |
+| `predictor_invalidate_i` | Suppress table lookup and clear learned validity on the edge; used for retired FENCE.I. Ordinary redirects retain learned state. |
 | `permit_i` | Permit delivery to the parent IF/DE register. Suppresses `valid_o`, without itself stopping prefetch. |
 | `valid_o`, `ready_i` | Transfer exactly one instruction/fault token on `valid && ready`. Only a successful transfer advances PC and consumes word storage. |
 | `fetch_busy_o` | Fetch engine has private, presented, outstanding or retained-result work, including a killed transaction being drained. Does not describe buffered instructions or pipeline occupancy. |
@@ -48,7 +51,7 @@ also preserves any buffered data and already outstanding completion.
 
 Fetch fills capacity while `ready_i` or `permit_i` is low. The sequential
 fetch pointer advances by four on native acceptance; PC advances by the original
-instruction length on delivery. With one outstanding transaction and one writer,
+instruction length on delivery unless prediction selects a target. With one outstanding transaction and one writer,
 checking FIFO readiness at native acceptance reserves its eventual response
 capacity, as detailed in the buffer guide. No additional reservation queue exists.
 
@@ -57,11 +60,19 @@ handshakes. FIFO and fetch payload storage remains unreset. Reset may abandon
 bus work under the existing coordinated-system-reset contract; no stale
 pre-reset response may reach a post-reset transaction.
 
+The [prediction frontend](../bpu/README.md) looks up the aligned PC.
+It composes independently configured direction and target storage. It retains a stalled token's predicted next PC despite table updates. Accepted
+taken predictions synchronously clear the sequential word queue and cancel/drain
+old fetch work without suppressing the transferring instruction. Target fetching
+uses normal PMP checks. The core carries the prediction through IF/DE and
+corrects a mismatch on successful DE transfer.
+
 ## Instruction and fault payload
 
 | Outputs | Contract |
 | --- | --- |
 | `pc_o[31:0]` | Current original instruction PC; retained through waits, flush-stop and faults. |
+| `predicted_next_pc_o[31:0]` | Selected frontend successor; stable while a valid token waits for ready. Carry with the parent IF/DE payload for DE comparison. Invalid/faulting output equals the current PC. |
 | `instr_o[31:0]` | IF-expanded instruction in `decompress/if`, otherwise original selected bits. Zero while invalid or faulting. |
 | `original_instr_o[31:0]`, `compressed_o` | Original bits and two-byte length flag. Compressed bits are zero-extended. Invalid/fetch-fault placeholders are zero. An IF expansion fault retains the original compressed bits/flag. |
 | `next_pc_o[31:0]` | PC plus original length for a valid successful candidate, otherwise current PC. |
@@ -112,11 +123,13 @@ IF neither owns PMP CSRs/checkers nor adds privilege signals to OBI.
   simultaneous flush/restart, and coordinated reset recovery.
 - `compressed`: known and randomized supported/reserved compressed encodings at
   both halfword positions; strategy-dependent normalization and fault ownership.
+- `prediction`: held prediction despite table updates, target steering and stale
+  fetch drains, external recovery priority, target PMP faults and invalidation.
 
 The local environment uses byte images, retained permission/error decisions and
 accepted-word credits without reading RTL internals. The separate
 [parent fixture](../if_pipeline/README.md) verifies real IF/DE storage and DE
 branch feedback in all three strategies. The [core](../core/README.md) supplies
 global holds and restarts through the stage ports, including exception and
-FENCE.I arbitration. Core debug, dynamic prediction and the standard CV-X-IF
+FENCE.I arbitration. Core debug, more advanced predictors and the standard CV-X-IF
 compressed channel remain open.

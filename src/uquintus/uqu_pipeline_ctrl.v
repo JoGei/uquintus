@@ -32,8 +32,8 @@ module uqu_pipeline_ctrl #(
     input  wire        de_admit_i,
     input  wire        commit_enable_i,
     input  wire        wb_effect_safe_i,
-    input  wire        de_branch_taken_i,
-    input  wire [31:0] de_branch_target_i,
+    input  wire        de_redirect_i,
+    input  wire [31:0] de_redirect_addr_i,
     // Already accepted event from the instruction at WB, e.g. exception/MRET.
     // Never feed its resulting younger flushes back to that same WB unit.
     input  wire        wb_redirect_valid_i,
@@ -129,7 +129,7 @@ module uqu_pipeline_ctrl #(
     // Empty occupancy already excludes WB recovery. Do not depend on WB
     // completion here: trap_valid feeds WB's external-event suppression.
     wire async_entry = rst_ni && boundary_empty && drain_ready_i;
-    wire branch_redirect = de_fire_o && de_branch_taken_i && !de_fault;
+    wire branch_redirect = de_fire_o && de_redirect_i && !de_fault;
 
     assign irq_eligible_o = rst_ni && irq_enabled && (irq_external || irq_software || irq_timer);
     assign draining_o = rst_ni && (drain_req_i || irq_eligible_o);
@@ -185,7 +185,7 @@ module uqu_pipeline_ctrl #(
     assign redirect_addr_o = !redirect_valid_o ? 32'd0 : wb_redirect ? wb_redirect_addr_i :
         fencei_redirect ? wb_next_pc_i : drain_accept_o ? drain_target_i : trap_valid_o ?
         ({mtvec_i[31:2],2'b00} + ((mtvec_i[1:0] == 2'b01) ? {25'd0,irq_cause,2'b00} : 32'd0)) :
-        de_branch_target_i;
+        de_redirect_addr_i;
 
     always @(posedge clk_i) begin
         if (!rst_ni) begin

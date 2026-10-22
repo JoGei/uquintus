@@ -25,6 +25,9 @@ parameters:
   - MUA_C_IMPL
   - MUA_C_DECOMPRESS_STAGE
   - MUA_BRANCH_PREDICTOR
+  - MUA_BP_ENTRIES
+  - MUA_BTB
+  - MUA_BTB_ENTRIES
   - MUA_REGFILE_IMPL
   - MUA_IF_BUFFER_WORDS
   - MUA_HARDENED
@@ -55,3 +58,4 @@ tests:
   - reset
   - xif
   - fpu
+  - prediction

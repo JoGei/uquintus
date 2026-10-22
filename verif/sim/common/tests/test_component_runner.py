@@ -237,7 +237,7 @@ class ComponentRunnerTests(unittest.TestCase):
         config = load_configuration(ROOT / "config/rv32i.yml", catalog)
         name = "MUA_BRANCH_PREDICTOR"
         path = self.directory / "predictor.yml"
-        for setting,value in (("none",0),("static_not_taken",1)):
+        for setting,value in (("none",0),("static_not_taken",1),("bimodal",2)):
             path.write_text(yaml.safe_dump(dict(config, **{name:setting})))
             checked = load_configuration(path,catalog)
             self.assertEqual(parameters_for_component(checked,[name],catalog),{name:value})
@@ -253,6 +253,46 @@ class ComponentRunnerTests(unittest.TestCase):
         header = (self.directory / "uqu_config.vh").read_text()
         self.assertIn("`define UQU_BP_NONE 0",header)
         self.assertIn("`define UQU_BP_STATIC_NOT_TAKEN 1",header)
+        self.assertIn("`define UQU_BP_BIMODAL 2",header)
+
+    def test_predictor_capacity_is_explicit_and_power_of_two(self):
+        catalog = json.loads((ROOT / "config/selectors.json").read_text())
+        config = load_configuration(ROOT / "config/rv32i.yml", catalog)
+        path = self.directory / 'predictor-capacity.yml'
+        for value in (2, 4, 16, 32, 1024):
+            path.write_text(yaml.safe_dump(dict(config, MUA_BP_ENTRIES=value)))
+            self.assertEqual(load_configuration(path, catalog)['MUA_BP_ENTRIES'], value)
+        for value in (0, 1, 3, 12, 2048, True, '16', 16.0):
+            path.write_text(yaml.safe_dump(dict(config, MUA_BP_ENTRIES=value)))
+            with self.assertRaisesRegex(ValueError, 'MUA_BP_ENTRIES'):
+                load_configuration(path, catalog)
+        del config['MUA_BP_ENTRIES']
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError, 'missing=.*MUA_BP_ENTRIES'):
+            load_configuration(path, catalog)
+
+    def test_btb_selection_and_capacity_are_independent(self):
+        catalog = json.loads((ROOT / 'config/selectors.json').read_text())
+        config = load_configuration(ROOT / 'config/rv32i.yml', catalog)
+        path = self.directory / 'btb.yml'
+        for predictor in ('none', 'static_not_taken', 'bimodal'):
+            for btb, encoded in (('none', 0), ('direct_mapped', 1)):
+                for bp, targets in ((2, 32), (32, 2), (16, 16)):
+                    path.write_text(yaml.safe_dump(dict(config, MUA_BRANCH_PREDICTOR=predictor,
+                        MUA_BTB=btb, MUA_BP_ENTRIES=bp, MUA_BTB_ENTRIES=targets)))
+                    checked = load_configuration(path, catalog)
+                    self.assertEqual(parameters_for_component(checked, ['MUA_BTB'], catalog), {'MUA_BTB':encoded})
+        for value in (0, 1, 3, 2048, True, '16', 16.0):
+            path.write_text(yaml.safe_dump(dict(config, MUA_BTB_ENTRIES=value)))
+            with self.assertRaisesRegex(ValueError, 'MUA_BTB_ENTRIES'):
+                load_configuration(path, catalog)
+        for key in ('MUA_BTB', 'MUA_BTB_ENTRIES'):
+            path.write_text(yaml.safe_dump({k:v for k,v in config.items() if k != key}))
+            with self.assertRaisesRegex(ValueError, 'missing=.*'+key):
+                load_configuration(path, catalog)
+        path.write_text(yaml.safe_dump(dict(config, MUA_BTB='associative')))
+        with self.assertRaisesRegex(ValueError, 'MUA_BTB'):
+            load_configuration(path, catalog)
 
     def test_results_require_exact_selected_tests(self):
         path = self.directory / "results.xml"

@@ -78,6 +78,7 @@ module uqu_if_prefetch_tb #(
         .imem_rvalid_i(imem_rvalid_i), .imem_rdata_i(imem_rdata_i), .imem_err_i(imem_err_i)
     );
     uqu_if_buffer #(.MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)) u_buffer (
+        .clear_i(1'b0),
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
         .push_valid_i(result_valid), .push_ready_o(push_ready),
         .push_addr_i(result_addr), .push_data_i(result_data), .push_error_i(result_error),

@@ -753,6 +753,36 @@ arithmetic against external SoftFloat. See the
 Broader generated ISA programs, upstream architectural-test integration and
 formal FP proofs remain future work.
 
+### 2.11. Branch-prediction regression
+
+The IF-owned predictor shall have an independently selectable
+`COMPONENT=bpu` regression using the shared cocotb/pyuvm runner
+and an abstract target/direction oracle. Cover cold lookup, both conditional
+allocation directions, saturating counter transitions, unconditional and
+changed indirect targets, tag replacement, C-dependent indexing, stale-entry
+removal, lookup/update collision, validity-only reset and invalidation priority.
+Exercise baseline modes and several table capacities independently of core
+execution. Vary direction and target capacities independently, including 2/32
+and 32/2 combinations. Cover disabled BTB, inactive BTB under prediction mode
+`none`, and static-not-taken direction with an enabled BTB for jumps. The
+[component guide](../verif/sim/bpu/README.md)
+defines the implemented tests and parameters.
+
+IF tests shall check stable carried predictions during stalls/table updates,
+accepted target steering, ordinary core-owned PMP faults, held OBI requests,
+discarded responses and external-recovery priority. Parent IF/DE tests shall
+carry the actual prediction metadata and use real DE corrections. Core directed
+programs shall verify correct predictions, loop-exit mispredictions, changing
+JALR targets, compressed branches in all three C strategies and cold lookup
+after FENCE.I. Retain architectural retirement/RVFI and precise-event checks;
+wrong-path instructions shall not acquire architectural effects.
+
+CoreMark cycle comparisons shall reuse the same executable and memory context,
+validate the workload output and retain mode/validation scope. They shall not
+replace instruction-level regression or establish Pareto optimality. Broader
+workload coverage, prediction-event statistics and predictor PPA evaluation
+remain follow-ups.
+
 ## 3. Supported-configuration CI coverage
 
 **Status:** CI requirement agreed; simulation flow implemented, synthesis flow

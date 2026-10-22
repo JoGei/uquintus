@@ -34,7 +34,9 @@ flowchart TB
                 direction TB
                 FETCH["Fetch engine<br/>Word FIFO · aligner"]
                 C_IF["Optional C expansion<br/>IF placement"]
-                FETCH ~~~ C_IF
+                BP["Optional direction predictor<br/>Bimodal · 2-bit counters"]
+                BTB["Optional branch target buffer<br/>Direct mapped"]
+                FETCH ~~~ C_IF ~~~ BP ~~~ BTB
             end
             IF_DE["IF / DE<br/>registers"]
             subgraph DE["DE · decode"]
@@ -89,7 +91,7 @@ flowchart TB
     classDef boundary stroke:#8b5cf6,stroke-width:3px
     classDef external stroke:#6b7280
     class FETCH,DECODE,ALU,ARITH,LSU,COMMIT,CTRL,GPR,HAZARD base
-    class C_IF,C_DE,ISSUE,MULDIV,FPU,RESULT,PMP,XIF optional
+    class C_IF,C_DE,BP,BTB,ISSUE,MULDIV,FPU,RESULT,PMP,XIF optional
     class IF_DE,DE_EX,EX_MEM,MEM_WB boundary
     class IMEM,DMEM external
     style CORE stroke:#6b7280,stroke-width:2px
@@ -116,6 +118,14 @@ or direct compressed decoding in DE, selected by `MUA_C_IMPL` and
 external coprocessor to DE issue/register and WB commit/result endpoints;
 `XIF_DUALWRITE` enables paired writes. The optional FPU path targets scalar FP32
 Zfinx (`ISA_ZFINX`).
+
+`MUA_BRANCH_PREDICTOR` selects `none`, `static_not_taken` or `bimodal`.
+The [prediction frontend](verif/sim/bpu/README.md) independently
+selects target storage with `MUA_BTB: none | direct_mapped`.
+`MUA_BP_ENTRIES` sets direction-counter capacity and `MUA_BTB_ENTRIES` sets
+target capacity; both default to 16. `config/rv32i_bimodal.yml` explicitly
+enables bimodal direction prediction and a direct-mapped BTB. Prediction travels with
+the instruction through IF/DE; DE redirects only on an incorrect prediction.
 
 The GPR file remains core-owned while serving DE reads and WB writes. Its
 third read port is enabled for three-source XIF or Zfinx.

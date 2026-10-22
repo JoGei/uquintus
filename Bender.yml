@@ -51,6 +51,11 @@ sources:
       - target: any(if, if_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_stage_if.v
+      - target: any(bpu, if, if_pipeline_test, rtl, core_test)
+        files:
+          - src/uquintus/uqu_btb.v
+          - src/uquintus/uqu_bp_bimodal.v
+          - src/uquintus/uqu_bpu.v
       - target: if_pipeline_test
         files:
           - verif/sim/if_pipeline/uqu_if_pipeline_tb.v

@@ -22,6 +22,7 @@ depth, pass a complete hardware YAML file with the desired
 | --- | --- |
 | `clk_i`, `rst_ni` | One clock; active-low synchronous reset of pointers and occupancy only. |
 | `flush_i` | Invalidates the whole queue on the edge and immediately suppresses input readiness and both output validities. |
+| `clear_i` | Clears the queue on the edge without masking current outputs/readiness. IF uses this when accepting a predicted-taken head; it has priority over pushes/pops, so no sequential word survives. Tie low for ordinary FIFO use. |
 | `push_valid_i`, `push_ready_o` | Insert one word on `valid && ready`. A full queue is ready if its current head is being popped on the same edge. |
 | `push_addr_i[31:0]`, `push_data_i[31:0]`, `push_error_i` | Returned word address, raw bytes and retained word-level error. Low address bits are ignored; only aligned addresses are stored/exposed. Failed words expose zero data. |
 | `pop_i` | Release one existing head word on the edge. The parent qualifies this with actual instruction transfer and the aligner's `drop_word_o`. Empty pops are ignored. |
