@@ -141,7 +141,7 @@ class IfStageTest(uvm_test):
         o = {name:int(getattr(d,name+'_o').value) for name in names}
         o.update(imem_req=req,imem_addr=addr)
         assert query==(o['pmp_valid'],o['pmp_addr']),'PMP decision fed back into query'
-        recover = bool(self.predictor.depth and i['predictor_invalidate'])
+        recover = bool(self.predictor.hwords and i['predictor_invalidate'])
         invalidate = i['flush'] or i['redirect_valid'] or recover
         active = i['rst_n'] and not invalidate and self.running and not self.fault_hold
         misaligned = active and bool(self.pc % (2 if self.c else 4))

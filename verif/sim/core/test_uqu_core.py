@@ -717,7 +717,7 @@ class IdataProtectionTest(CoreTest):
     async def run_phase(self):
         self.raise_objection()
         active = (self.params['MUA_BRANCH_PREDICTOR'] and self.params['MUA_BTB'] and
-                  self.params['MUA_BTB_IDATA_DEPTH'] and self.params['ISA_PMP'])
+                  self.params['MUA_BTB_IDATA_HWORDS'] and self.params['ISA_PMP'])
         if not active:
             self.put(BOOT,[ins_i(9,0,99),ins_j(0,0)])
             await self.reset()

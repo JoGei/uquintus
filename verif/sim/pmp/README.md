@@ -91,7 +91,7 @@ claimed by these standalone tests.
 
 ## Replay queries
 
-When `MUA_BTB_IDATA_DEPTH > 0`, an additional bank checks the aligned
+When `MUA_BTB_IDATA_HWORDS > 0`, an additional bank checks the aligned
 `replay_addr_i` as a four-byte execute access under `replay_priv_m_i`. With
 `ISA_C=1`, a second bank checks `(replay_addr_i+4) mod 2^32`. Results occupy
 `replay_allow_o[0]` and `[1]`; inactive banks are hardwired allowed. All banks

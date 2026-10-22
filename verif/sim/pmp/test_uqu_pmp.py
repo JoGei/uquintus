@@ -39,7 +39,7 @@ class PMPTest(uvm_test):
         self.dut.replay_priv_m_i.value = machine
         await Timer(1, units='ns')
         replay_model = sum(int(permitted(self.enabled, configs, addresses, (replay_address+4*k)&0xffffffff,
-                                         2, 4, machine) if self.params['MUA_BTB_IDATA_DEPTH'] and
+                                         2, 4, machine) if self.params['MUA_BTB_IDATA_HWORDS'] and
                                          (k == 0 or self.params['ISA_C']) else True) << k for k in range(2))
         assert int(self.dut.replay_allow_o.value) == replay_model
         mem_model = permitted(self.enabled, configs, addresses, address, size, access, machine)

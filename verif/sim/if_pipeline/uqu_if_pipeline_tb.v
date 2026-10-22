@@ -14,7 +14,7 @@ module uqu_if_pipeline_tb #(
     parameter MUA_BP_ENTRIES = 16,
     parameter MUA_BTB = `UQU_BTB_NONE,
     parameter MUA_BTB_ENTRIES = 16,
-    parameter MUA_BTB_IDATA_DEPTH = 0,
+    parameter MUA_BTB_IDATA_HWORDS = 0,
     parameter MUA_IF_BUFFER_WORDS = 2
 ) (
     input wire clk_i,
@@ -94,7 +94,7 @@ module uqu_if_pipeline_tb #(
     uqu_stage_if #(
         .ISA_C(ISA_C), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
-        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_DEPTH(MUA_BTB_IDATA_DEPTH), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_HWORDS(MUA_BTB_IDATA_HWORDS), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
     ) u_if (
         .clk_i(clk_i), .rst_ni(rst_ni), .boot_addr_i(boot_addr_i), .flush_i(flush_i),
         .redirect_valid_i(redirect), .redirect_addr_i(target), .fetch_enable_i(fetch_enable_i),

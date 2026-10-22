@@ -1,4 +1,4 @@
-# RV32I bimodal prediction with four retained target instructions per BTB entry.
+# RV32I bimodal prediction with eight halfwords (four I32 instructions) per BTB entry.
 # Compile-time integration identity; single-hart systems use zero.
 HART_ID: 0
 ISA_E: 0
@@ -22,7 +22,7 @@ MUA_BRANCH_PREDICTOR: bimodal
 MUA_BP_ENTRIES: 16
 MUA_BTB: direct_mapped
 MUA_BTB_ENTRIES: 16
-MUA_BTB_IDATA_DEPTH: 4
+MUA_BTB_IDATA_HWORDS: 8
 MUA_REGFILE_IMPL: ff
 MUA_IF_BUFFER_WORDS: 2
 MUA_HARDENED: 0

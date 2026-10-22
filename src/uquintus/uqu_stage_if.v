@@ -11,7 +11,7 @@ module uqu_stage_if #(
     parameter MUA_BP_ENTRIES = 16,
     parameter MUA_BTB = `UQU_BTB_NONE,
     parameter MUA_BTB_ENTRIES = 16,
-    parameter MUA_BTB_IDATA_DEPTH = 0,
+    parameter MUA_BTB_IDATA_HWORDS = 0,
     parameter MUA_IF_BUFFER_WORDS = 2
 ) (
     input  wire        clk_i,
@@ -60,8 +60,8 @@ module uqu_stage_if #(
     input  wire [31:0] imem_rdata_i,
     input  wire        imem_err_i
 );
-    localparam integer IDATA_DEPTH = ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) &&
-        (MUA_BTB != `UQU_BTB_NONE)) ? MUA_BTB_IDATA_DEPTH : 0;
+    localparam integer IDATA_HWORDS = ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) &&
+        (MUA_BTB != `UQU_BTB_NONE)) ? MUA_BTB_IDATA_HWORDS : 0;
     localparam [4:0] CAUSE_ILLEGAL = 5'd2;
     reg [31:0] pc_q;
     reg [31:0] fetch_addr_q;
@@ -69,7 +69,7 @@ module uqu_stage_if #(
     reg fault_hold_q;
     reg prediction_held_q;
     reg [31:0] prediction_pc_q;
-    wire replay_recover = (IDATA_DEPTH > 0) && predictor_invalidate_i;
+    wire replay_recover = (IDATA_HWORDS > 0) && predictor_invalidate_i;
     wire invalidate = flush_i || redirect_valid_i || replay_recover;
     wire active = rst_ni && !invalidate && running_q && !fault_hold_q;
     wire branch_hold = (MUA_BRANCH_PREDICTOR == `UQU_BP_NONE) && branch_pending_i;
@@ -105,13 +105,13 @@ module uqu_stage_if #(
     wire [31:0] fetched_instr, fetched_next_pc, fetched_tval;
     wire [4:0] fetched_cause;
     wire replay_active;
-    wire [31:0] replay_instr, idata_count, idata_next_pc;
-    wire [32*((IDATA_DEPTH > 0) ? IDATA_DEPTH : 1)-1:0] idata;
+    wire [31:0] replay_instr, idata_hwords, idata_next_pc;
+    wire [16*((IDATA_HWORDS > 0) ? IDATA_HWORDS : 1)-1:0] idata;
     wire replay_short = (ISA_C == 1) && (replay_instr[1:0] != 2'b11);
     wire replay_cross = (ISA_C == 1) && pc_q[1] && !replay_short;
     wire replay_fault = !replay_pmp_allow_i[0] || (replay_cross && !replay_pmp_allow_i[1]);
     wire replay_start = prediction_redirect && prediction_taken &&
-                        (prediction_target == predicted_pc) && (idata_count != 0);
+                        (prediction_target == predicted_pc) && (idata_hwords != 0);
     assign replay_pmp_addr_o = replay_active ? {pc_q[31:2],2'b00} : 32'd0;
     assign replay_pmp_priv_m_o = replay_active && priv_m_i;
     assign selected_valid = replay_active ? active : fetched_valid;
@@ -123,10 +123,10 @@ module uqu_stage_if #(
     assign access_tval = replay_active ?
         ((!replay_pmp_allow_i[0] || !replay_cross) ? pc_q : pc_q + 32'd2) : fetched_tval;
 
-    uqu_if_replay #(.MUA_BTB_IDATA_DEPTH(IDATA_DEPTH)) u_replay (
+    uqu_if_replay #(.ISA_C(ISA_C), .MUA_BTB_IDATA_HWORDS(IDATA_HWORDS)) u_replay (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(invalidate),
         .cancel_i(prediction_redirect || (transfer && candidate_fault)),
-        .start_i(replay_start), .start_count_i(idata_count), .start_data_i(idata),
+        .start_i(replay_start), .start_hwords_i(idata_hwords), .start_data_i(idata),
         .consume_i(transfer), .active_o(replay_active), .instr_o(replay_instr)
     );
 
@@ -168,7 +168,7 @@ module uqu_stage_if #(
     );
     uqu_bpu #(
         .ISA_C(ISA_C), .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
-        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_DEPTH(IDATA_DEPTH)
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_HWORDS(IDATA_HWORDS)
     ) u_bpu (
         .clk_i(clk_i), .rst_ni(rst_ni), .invalidate_i(predictor_invalidate_i),
         .lookup_valid_i(active && selected_valid && !candidate_fault), .lookup_pc_i(pc_q),
@@ -179,7 +179,7 @@ module uqu_stage_if #(
         .update_taken_i(predictor_update_taken_i), .update_target_i(predictor_update_target_i),
         .stream_flush_i(invalidate), .capture_valid_i(transfer && !candidate_fault),
         .capture_pc_i(pc_q), .capture_instr_i(selected_instr),
-        .idata_count_o(idata_count), .idata_next_pc_o(idata_next_pc), .idata_o(idata)
+        .idata_hwords_o(idata_hwords), .idata_next_pc_o(idata_next_pc), .idata_o(idata)
     );
     uqu_if_aligner #(.ISA_C(ISA_C)) u_aligner (
         .valid_i(active), .pc_i(pc_q),
@@ -204,6 +204,8 @@ module uqu_stage_if #(
             assign expansion_fault = 1'b0;
         end
         if (((ISA_C != 0) && (ISA_C != 1)) ||
+            (MUA_BTB_IDATA_HWORDS < 0) || (MUA_BTB_IDATA_HWORDS > 2048) ||
+            ((ISA_C == 0) && ((MUA_BTB_IDATA_HWORDS % 2) != 0)) ||
             ((MUA_C_IMPL != `UQU_C_IMPL_DECOMPRESS) && (MUA_C_IMPL != `UQU_C_IMPL_DECODE_COMPRESSED)) ||
             ((MUA_C_DECOMPRESS_STAGE != `UQU_C_DECOMPRESS_IF) &&
              (MUA_C_DECOMPRESS_STAGE != `UQU_C_DECOMPRESS_DE)) ||

@@ -18,7 +18,7 @@ MUA_BRANCH_PREDICTOR: bimodal
 MUA_BP_ENTRIES: 16
 MUA_BTB: direct_mapped
 MUA_BTB_ENTRIES: 32
-MUA_BTB_IDATA_DEPTH: 0
+MUA_BTB_IDATA_HWORDS: 0
 ```
 
 [`uqu_bp_bimodal.v`](../../../src/uquintus/uqu_bp_bimodal.v) stores tagged two-bit
@@ -103,17 +103,23 @@ report. Broader workloads and prediction-event statistics remain follow-ups.
 
 ## Target instruction data
 
-`MUA_BTB_IDATA_DEPTH` selects 0..1024 retained original instruction encodings
-per entry. Zero is the default and removes payload/fill/replay storage. The
-`rv32i_bimodal_idata` preset selects four. Labels add `+idata4` to the active
-BTB field. Each slot holds a C16 encoding zero-extended or an assembled C32/I32
-encoding; low prefix bits identify its length in C configurations.
+`MUA_BTB_IDATA_HWORDS` selects 0..2048 halfwords of payload per entry. Zero is
+the default and removes payload/fill/replay storage. Without C, reject odd
+counts and use word-sized storage/access. With C, automatically pack C16 as
+one halfword and C32/I32 as two, including across storage-word boundaries.
+Stop at the first instruction that does not fit; never cache partial encodings.
+Low prefix bits identify length without additional per-instruction metadata.
+
+`rv32i_bimodal_idata` selects eight halfwords (four I32 instructions), adding
+`+idata-hw8` to the active BTB label. `rv32ic_bimodal_idata` selects six halfwords
+(96 bits), enough for three I32, six C16, or a mixed sequence such as 32/16/32/16.
+The active IF replay snapshot has the same packed capacity as one entry.
 
 | Additional BPU ports | Contract |
 | --- | --- |
 | `capture_valid_i`, `capture_pc_i`, `capture_instr_i` | Successful IF-to-DE transfer, with original assembled bits. Held/faulting tokens do not capture. |
 | `stream_flush_i` | Stop the current fill stream, retaining stored prefixes; an accepted DE taken-branch update may start a new stream on the same edge. |
-| `idata_count_o`, `idata_next_pc_o`, `idata_o` | Prefix length, first uncached instruction PC and packed slots (slot zero in bits 31:0), qualified by BTB hit. Effective taken steering remains a separate decision. |
+| `idata_hwords_o`, `idata_next_pc_o`, `idata_o` | Valid halfword count, first uncached instruction PC (`target + 2*count`) and packed original encodings (earliest halfword in bits 15:0), qualified by BTB hit. Payload width is `16*H`; disabled ports use a 16-bit placeholder. Effective taken steering remains a separate decision. |
 
 Taken DE updates start collection at the actual target. Exact sequential PCs
 extend the prefix; unchanged targets preserve existing bytes. Reset/FENCE.I,
@@ -129,9 +135,12 @@ make test COMPONENT=if CONFIG=rv32i_bimodal_idata TEST=idata
 make test COMPONENT=core CONFIG=rv32i_bimodal_idata
 ```
 
-The `idata` case uses an independent retained-prefix model for allocation,
-partial extension, wraparound, flushes, capacity, replacement and randomized
+The `idata` case uses an independent instruction-list model for allocation,
+partial extension, wraparound, flushes, halfword capacity, replacement and randomized
 capture/update interleavings. IF tests add stable replay during replacement,
 raw compressed placement, continuation merging, current permission failures
 and code changes after invalidation. Benchmark statistics count replay source
 at retirement, excluding speculation and faults.
+Directed cases also cover zero-extended C16 output, one-halfword capacity,
+rejected C32 with one halfword remaining, and extending that prefix with C16
+after a new visit. The comparison of original bits ignores C16 upper input padding.

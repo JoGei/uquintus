@@ -34,8 +34,8 @@ class PredictorTest(uvm_test):
         expected = self.model.lookup(inputs['lookup_pc'], bool(inputs['lookup_valid'] and inputs['rst_n']),
                                      inputs['invalidate'])
         prefix = self.model.payload(inputs['lookup_pc']) if inputs['rst_n'] and not inputs['invalidate'] and inputs['lookup_valid'] else []
-        assert int(self.dut.idata_count_o.value) == len(prefix), (int(self.dut.idata_count_o.value),prefix,self.model.fill,self.model.payloads,self.history)
-        assert int(self.dut.idata_o.value) == sum(word << (32*k) for k, word in enumerate(prefix))
+        assert int(self.dut.idata_hwords_o.value) == sum(self.model.length(w)//2 for w in prefix), (int(self.dut.idata_hwords_o.value),prefix,self.model.fill,self.model.payloads,self.history)
+        assert int(self.dut.idata_o.value) == self.model.packed(prefix)
         if prefix:
             target = self.model.entries[(inputs['lookup_pc']//self.model.alignment)%self.model.capacity]['target']
             assert int(self.dut.idata_next_pc_o.value) == (target + sum(map(self.model.length, prefix))) & 0xffffffff
@@ -150,15 +150,26 @@ class IdataTest(PredictorTest):
     async def run_phase(self):
         self.raise_objection()
         await self.cycle(rst_n=0)
-        depth = self.params['MUA_BTB_IDATA_DEPTH']
-        if not self.model.depth:
+        hwords = self.model.hwords
+        if not hwords:
             await self.cycle(update_valid=1, capture_valid=1, capture_pc=0x2000, capture_instr=0x13)
-            assert int(self.dut.idata_count_o.value) == 0
+            assert int(self.dut.idata_hwords_o.value) == 0
+            self.drop_objection(); return
+        if hwords == 1:
+            # One halfword may retain C16, never a partial C32 instruction.
+            await self.cycle(update_valid=1,capture_valid=1,capture_pc=0x2000,capture_instr=0x13)
+            assert self.model.payload(0x1000) == []
+            await self.cycle(update_valid=1,capture_valid=1,capture_pc=0x2000,capture_instr=1)
+            assert self.model.payload(0x1000) == [1]
+            await self.cycle(capture_valid=1,capture_pc=0x2002,capture_instr=0x13)
+            assert self.model.payload(0x1000) == [1]
+            await self.cycle(invalidate=1)
+            assert self.model.payload(0x1000) == []
             self.drop_objection(); return
         # Concurrent allocation/first capture; bubbles do not consume slots.
         # C16 and crossing C32 are stored as original assembled instructions.
-        words = [1 if self.params['ISA_C'] and k%2 == 0 else 0x100093+0x100000*k
-                 for k in range(depth)]
+        words = self.model.fit_prefix([1 if self.params['ISA_C'] and k%2 == 0 else 0x100093+0x100000*k
+                 for k in range(hwords)])
         pc = 0xfffffffe if self.params['ISA_C'] else 0xfffffff8
         target = pc
         await self.cycle(update_valid=1, update_target=target, capture_valid=1,
@@ -183,20 +194,39 @@ class IdataTest(PredictorTest):
         await self.cycle(stream_flush=1)
         assert self.model.payload(0x1000) == [0x13]
         await self.cycle(update_valid=1,update_target=0x4000)
-        for k in range(depth):
+        for k in range(hwords//2):
             await self.cycle(capture_valid=1,capture_pc=0x4000+4*k,capture_instr=0x13)
-        assert self.model.payload(0x1000) == [0x13]*depth
+        assert self.model.payload(0x1000) == [0x13]*(hwords//2)
         # Tag miss by a non-control does not clear somebody else's payload.
         alias = 0x1000+self.model.capacity*self.model.alignment
         await self.cycle(update_valid=1,update_pc=alias,update_control_flow=0)
         await self.cycle()
-        assert self.model.payload(0x1000) == [0x13]*depth
+        assert self.model.payload(0x1000) == [0x13]*(hwords//2)
         # Replacement, stale fill and global invalidation cannot leak bytes.
         await self.cycle(update_valid=1,update_pc=alias,update_target=0x8000)
         await self.cycle(capture_valid=1,capture_pc=0x4004,capture_instr=0x13)
         await self.cycle(lookup_pc=alias)
         await self.cycle(invalidate=1,capture_valid=1,capture_pc=0x8000,capture_instr=0x13)
         await self.cycle(lookup_pc=alias)
+        if self.params['ISA_C']:
+            # Leave one halfword free: C32 must not be partially appended.
+            # Upper input padding is irrelevant to a retained C16 encoding.
+            await self.cycle(invalidate=1)
+            target = 0x8002
+            await self.cycle(update_valid=1,update_target=target,
+                             capture_valid=1,capture_pc=target,capture_instr=0xdead0001)
+            for k in range(1,hwords-1):
+                await self.cycle(capture_valid=1,capture_pc=target+2*k,capture_instr=1)
+            tail = target+2*(hwords-1)
+            await self.cycle(capture_valid=1,capture_pc=tail,capture_instr=0x13)
+            assert self.model.payload(0x1000) == [1]*(hwords-1)
+            await self.cycle(capture_valid=1,capture_pc=tail,capture_instr=1)
+            assert self.model.payload(0x1000) == [1]*(hwords-1), 'overflow must stop the old fill stream'
+            await self.cycle(update_valid=1,update_target=target,
+                             capture_valid=1,capture_pc=target,capture_instr=1)
+            for k in range(1,hwords):
+                await self.cycle(capture_valid=1,capture_pc=target+2*k,capture_instr=1)
+            assert self.model.payload(0x1000) == [1]*hwords
         # Random lifecycle/capture interleavings, checked against the model.
         pcs = [0x1000+self.model.alignment*k for k in range(2*self.model.capacity)]
         for _ in range(2048):

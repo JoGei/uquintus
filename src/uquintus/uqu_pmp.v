@@ -5,7 +5,7 @@
 module uqu_pmp #(
     parameter ISA_PMP = 0,
     parameter ISA_C = 0,
-    parameter MUA_BTB_IDATA_DEPTH = 0
+    parameter MUA_BTB_IDATA_HWORDS = 0
 ) (
     input  wire [127:0] pmpcfg_i,
     input  wire [511:0] pmpaddr_i,
@@ -25,7 +25,7 @@ module uqu_pmp #(
     // Size is log2(bytes): 0=byte, 1=halfword, 2=word; 3 is invalid.
     // MEM access is an R/W/X requirement mask in pmpcfg bit order. IF always
     // requires X. Callers derive each port's effective privilege separately.
-    localparam integer PORTS = 2 + ((MUA_BTB_IDATA_DEPTH > 0) ? ((ISA_C == 1) ? 2 : 1) : 0);
+    localparam integer PORTS = 2 + ((MUA_BTB_IDATA_HWORDS > 0) ? ((ISA_C == 1) ? 2 : 1) : 0);
     generate
         if (ISA_PMP == 0) begin : GEN_DISABLED
             assign if_allow_o = 1'b1;

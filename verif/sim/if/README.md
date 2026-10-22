@@ -18,7 +18,7 @@ make lint COMPONENT=if CONFIG=rv32ic
 
 Use `PYTHON=.venv/bin/python` for the repository environment. The
 [manifest](../../../config/sim/if.yml) uses the shared runner. Parameters are
-`ISA_C`, `MUA_C_IMPL`, `MUA_C_DECOMPRESS_STAGE`, `MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES`, `MUA_BTB_IDATA_DEPTH` and
+`ISA_C`, `MUA_C_IMPL`, `MUA_C_DECOMPRESS_STAGE`, `MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES`, `MUA_BTB_IDATA_HWORDS` and
 `MUA_IF_BUFFER_WORDS`. Defaults follow the hardware configuration catalog.
 The canonical predictor encodings are `none=0` / `UQU_BP_NONE`,
 `static_not_taken=1` / `UQU_BP_STATIC_NOT_TAKEN` and `bimodal=2` /
@@ -141,9 +141,14 @@ compressed channel remain open.
 
 ## Retained target sequences
 
-With an enabled BTB and nonzero `MUA_BTB_IDATA_DEPTH`, `uqu_if_replay` supplies
+With an enabled BTB and nonzero `MUA_BTB_IDATA_HWORDS`, `uqu_if_replay` supplies
 assembled original encodings ahead of the optional IF decompressor. A predicted
-target hit snapshots its prefix; replay never removes stored slots. Native
+target hit snapshots its prefix; entries and the snapshot use `16*H` payload
+bits, automatically packing variable-length encodings when C is enabled.
+An odd halfword budget is invalid without C, where word-sized access remains.
+Replay reconstructs C32 even at odd storage-halfword offsets and returns C16
+zero-extended; only complete instructions count toward the valid prefix.
+Replay never removes retained encodings. Native
 fetch starts at the aligned word containing the prefix's first uncached PC,
 and replay does not pop that continuation FIFO. A halfword boundary may reuse
 a word containing both cached and uncached bytes.
@@ -158,4 +163,4 @@ with replay enabled cancels frontend work and refetches the current PC.
 `TEST=idata` checks next-cycle warm target presentation, retained snapshots
 under stalls/table replacement, refill continuation order, first/second-word
 live denials and changed code after invalidation. The same case supports all
-compressed strategies and depth-one/non-power-of-two variants.
+compressed strategies and one-halfword/non-power-of-two capacities.

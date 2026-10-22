@@ -126,8 +126,12 @@ selects target storage with `MUA_BTB: none | direct_mapped`.
 target capacity; both default to 16. `config/rv32i_bimodal.yml` explicitly
 enables bimodal direction prediction and a direct-mapped BTB. Prediction travels with
 the instruction through IF/DE; DE redirects only on an incorrect prediction.
-`MUA_BTB_IDATA_DEPTH` optionally retains target instruction sequences (default
-`0`); [rv32i_bimodal_idata.yml](config/rv32i_bimodal_idata.yml) selects four slots.
+`MUA_BTB_IDATA_HWORDS` optionally retains target instruction sequences (default
+`0`), measured in 16-bit halfwords per entry. Without C it must be even;
+[rv32i_bimodal_idata.yml](config/rv32i_bimodal_idata.yml) selects eight halfwords
+for four I32 instructions. With C, entries and the active replay snapshot pack
+encodings automatically. [rv32ic_bimodal_idata.yml](config/rv32ic_bimodal_idata.yml)
+demonstrates six halfwords (96 bits), retaining a variable number of whole instructions.
 IF replays original encodings with live shared-PMP checks while prefetching the
 uncached continuation.
 

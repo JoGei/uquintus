@@ -313,7 +313,8 @@ class IdataTest(IfStageTest):
             predictor_update_pc=branch,predictor_update_control_flow=1,
             predictor_update_conditional=0,predictor_update_taken=1,predictor_update_target=target)
         before = len(self.delivered)
-        while len(self.delivered)<before+min(self.predictor.depth,len(values))-1:
+        retained = self.predictor.fit_prefix([instr for instr,_ in values])
+        while len(self.delivered)<before+len(retained)-1:
             await self.cycle(ready=1,grant=1)
         return expected
 
@@ -328,14 +329,15 @@ class IdataTest(IfStageTest):
         self.raise_objection()
         self.response_latency = 1
         await self.reset()
-        depth = self.predictor.depth
-        if not depth:
+        hwords = self.predictor.hwords
+        if not hwords:
             self.drop_objection(); return
         target = 0x8002 if self.c else 0x8000
         # Alternating C32/C16, starting with a crossing C32. Continuation ends
         # inside a word at several depths; its other half must stay available.
-        values = [(0x100093+0x100000*k,4) if not self.c or k%2 == 0 else (0x0085,2)
-                  for k in range(depth+6)]
+        values = [(0x100093+0x100000*k,4) if not self.c or (hwords > 1 and k%2 == 0) else (0x0085,2)
+                  for k in range(hwords+6)]
+        depth = len(self.predictor.fit_prefix([instr for instr,_ in values]))
         expected = await self.seed_prefix(0x1000,target,values)
         assert len(self.predictor.payload(0x1000))==depth
         o = await self.visit(0x1000)
@@ -366,7 +368,7 @@ class IdataTest(IfStageTest):
         o=await self.cycle(ready=1)
         assert o['exception_valid'] and o['exception_tval']==target
         self.denied.clear()
-        if self.c:
+        if self.c and values[0][1] == 4:
             await self.visit(0x1000)
             self.denied.add((target&~3)+4)
             o=await self.cycle(ready=1)
@@ -386,8 +388,8 @@ class IdataTest(IfStageTest):
         # Nested target steering replaces the active window, including when
         # the old continuation still has accepted bus work to drain.
         a_branch, b_branch, b_target = 0x1100, 0x9004, 0xA000
-        a_values = [(0x13,4)]*(depth+6)
-        b_values = [(0x0085,2) if self.c and k%2 else (0x13,4) for k in range(depth+6)]
+        a_values = [(0x0085,2) if self.c and hwords == 1 else (0x13,4)]*(depth+6)
+        b_values = [(0x0085,2) if self.c and (hwords == 1 or k%2) else (0x13,4) for k in range(depth+6)]
         await self.seed_prefix(a_branch,b_branch,a_values)
         await self.seed_prefix(b_branch,b_target,b_values)
         o=await self.visit(a_branch)
@@ -417,7 +419,7 @@ class IdataLatencyTest(IdataTest):
         self.raise_objection()
         self.response_latency=1
         await self.reset()
-        depth=self.predictor.depth
+        depth=self.predictor.hwords//2
         if not depth or self.c:
             self.drop_objection(); return
         values=[(0x13,4)]*(depth+8)

@@ -230,9 +230,16 @@ also explicitly set `MUA_BP_ENTRIES`, a power of two from 2 through 1024,
 defaulting to 16 and inactive outside bimodal mode. Independently select target
 storage with `MUA_BTB: none | direct_mapped` (default `none`) and explicit
 `MUA_BTB_ENTRIES` (power of two from 2 through 1024, default 16). Direction and
-target capacities may differ. `MUA_BTB_IDATA_DEPTH` explicitly selects `0` through
-`1024` original instruction slots per target entry; default zero removes the
-payload path. `rv32i_bimodal_idata` demonstrates four slots per entry.
+target capacities may differ. `MUA_BTB_IDATA_HWORDS` explicitly selects `0` through
+`2048` halfwords per target entry; default zero removes the payload path.
+Without C the count must be even, giving an integral number of 32-bit words.
+With C, payloads and the active replay snapshot automatically pack original
+16-/32-bit encodings, stopping before an instruction would exceed capacity.
+`rv32i_bimodal_idata` selects eight halfwords for four I32 instructions;
+`rv32ic_bimodal_idata` selects six halfwords (96 bits) with variable instruction coverage.
+The former instruction-depth parameter is replaced without an alias; convert
+old depth `D` to `H=2*D` to preserve its byte budget, then tune the packed budget
+explicitly. Historical artifacts retain their original parameter names and units.
 Prediction mode `none` disables target steering
 and makes BTB settings inactive. The `rv32i_bimodal` preset explicitly enables
 the direct-mapped BTB. These selectors use the same canonical catalog and
@@ -409,7 +416,7 @@ joining combined selections and `_` separating fields. The optional enabled-only
 | DE operand retention | `[_mua-opret]` | `MUA_DE_OPERAND_RETENTION`; this describes operand retention rather than an instruction buffer. |
 | Compressed handling | `[_mua-c:{decompr-if,decompr-de,decode}]` | Present only for `ISA_C=1`; `MUA_C_IMPL` and, for decompression, `MUA_C_DECOMPRESS_STAGE`. |
 | Branch prediction | `_mua-bp:{none,stnt,bimodal+entries<N>}` | `MUA_BRANCH_PREDICTOR`: `none`, `static_not_taken` or `bimodal`. Include `MUA_BP_ENTRIES` only for bimodal mode. |
-| Branch target storage | `_mua-btb:{none,direct+entries<N>[+idata<D>]}` | `MUA_BTB`, independent `MUA_BTB_ENTRIES` and `MUA_BTB_IDATA_DEPTH`; omit `+idata` at depth zero. Use `none` when disabled or when prediction mode is `none`; omit inactive capacity. |
+| Branch target storage | `_mua-btb:{none,direct+entries<N>[+idata-hw<H>]}` | `MUA_BTB`, independent `MUA_BTB_ENTRIES` and halfword capacity `MUA_BTB_IDATA_HWORDS`; omit `+idata-hw` at zero. Use `none` when disabled or when prediction mode is `none`; omit inactive capacity. |
 | Instruction buffer | `_mua-ifbuf:<words>` | `MUA_IF_BUFFER_WORDS`. |
 | Multiplier | `[_mua-mul:{iter,para,para+stages2}]` | Present only for `ISA_M=1`; `MUA_MUL`: `iterative`, `parallel`, or `parallel+stages+2`. |
 | Divider | `[_mua-div:iter]` | Present only for `ISA_M=1`; the currently supported `MUA_DIV` choice is `iterative`. |

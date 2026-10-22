@@ -208,7 +208,7 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_BP_ENTRIES` | Power-of-two direction-counter capacity from `2` through `1024`; inactive unless `MUA_BRANCH_PREDICTOR = bimodal`. | `16` |
 | `MUA_BTB` | `none` or `direct_mapped`, independently selected target storage; inactive with prediction mode `none`. | `none` |
 | `MUA_BTB_ENTRIES` | Power-of-two target-table capacity from `2` through `1024`, independent of direction capacity; inactive when the BTB is disabled. | `16` |
-| `MUA_BTB_IDATA_DEPTH` | Integer instruction slots per target entry, `0` through `1024`; zero disables payload/fill/replay state. Inactive without prediction and BTB. | `0` |
+| `MUA_BTB_IDATA_HWORDS` | Halfwords of payload per target entry, `0` through `2048`; zero disables payload/fill/replay state. Must be even without C. C automatically packs original encodings; retained instruction count varies. Inactive without prediction and BTB. | `0` |
 | `MUA_REGFILE_IMPL` | `ff`: flip-flop storage; `latch`: latch storage. | `ff` |
 | `MUA_IF_BUFFER_WORDS` | Integer capacity of at least `2` in 32-bit fetch words; non-power-of-two capacities supported. | `2` |
 | `MUA_HARDENED` | `0`: no OBI parity/checksum generation/checking requirement; `1`: planned hardened implementation including OBI parity/checksum generation and checking on both ports; enabled setting unsupported until implemented. | `0` |
@@ -2031,26 +2031,48 @@ active BTB shall retain their accepted-taken-branch redirect behavior.
 
 ### 5.2. Per-entry target instruction-data sequences
 
-**Status:** Implemented in BTB, IF replay and the core-owned shared PMP;
-physical area/timing evaluation remains open
+**Status:** Packed BTB/IF replay and core-owned shared PMP implemented;
+physical measurements of the preceding fixed-slot design remain historical,
+and packed-storage area/timing evaluation remains open.
 
-The elaboration parameter `MUA_BTB_IDATA_DEPTH` is propagated through core,
-IF and BPU into the BTB. Its integer value (`0` through `1024`) shall count instruction-data slots per BTB
-entry: `0` disables storage and replay (the default), `1` holds the target
-instruction, `2` also holds its sequential successor, and depth `D` provides
-indices `0` through `D-1`. It is inactive without an enabled target predictor
+The elaboration parameter `MUA_BTB_IDATA_HWORDS` is propagated through core,
+IF and BPU into the BTB. Its integer value (`0` through `2048`) shall count
+16-bit halfwords per BTB entry, giving exactly `16 * H` payload bits for capacity
+`H`. Zero disables storage and replay (the default). Without C, `H` must be
+even: reject byte budgets that are not multiples of four, even when the BTB is
+inactive. With C, any integer in range is allowed, including one halfword.
+This preserves the preceding design's maximum 4096-byte per-entry budget.
+The setting is inactive without an enabled target predictor
 and BTB. Zero depth shall elaborate without payload arrays or fill/replay state.
 The parameter shall be explicit in hardware presets and the
-active depth included in configuration labels and artifact fingerprints.
+active halfword capacity included in configuration labels and artifact fingerprints.
 
-The payload is one original, assembled instruction encoding per
-32-bit slot. Compressed length is inferred rather than stored separately. A 16-bit instruction
-occupies the low half with zero in the upper half; a 32-bit instruction retains
-all original bits, including an encoding assembled across two memory words.
-Length information defines the sequential PCs: advance by two for C and
-four otherwise. For the supported 16-/32-bit encodings, compressed length may
-be derived from `ISA_C` and the original instruction's low two bits, avoiding
-a separately stored length bit. Replay joins after word alignment and before
+The payload contains contiguous original instruction encodings starting at
+the branch target, without padding to memory-word boundaries. With C enabled,
+packing is automatic: C16 occupies one halfword and C32/I32 two, including a
+32-bit encoding assembled across two memory words. A stored 32-bit instruction
+may start at an odd halfword offset and straddle storage words. Without C,
+elaborate ordinary 32-bit word storage and word-indexed fill/replay; omit
+halfword alignment/length-selection logic.
+
+Only complete instructions belong to the retained prefix. If the next encoding
+does not fit, stop filling and leave the prefix unchanged; never retain a
+partial 32-bit encoding or skip it to cache later instructions. For example,
+`H=6` provides 96 bits and can hold three I32, six C16, or four instructions
+with lengths 32/16/32/16. It does not guarantee four instructions. In increasing
+storage offset, that mixed sequence occupies:
+
+```text
+word 0: [ I0.low16, I0.high16 ]
+word 1: [ I1,       I2.low16 ]
+word 2: [ I2.high16, I3      ]
+```
+
+For supported 16-/32-bit encodings, infer length from `ISA_C` and the original
+instruction's low two bits, with no per-instruction length bitmap. Track a valid
+prefix length in halfwords; its continuation PC is `target + 2 * valid_hwords`.
+Return C16 zero-extended to the existing 32-bit instruction interface. Replay
+joins after ordinary memory-word assembly and before
 optional IF expansion; the storage format is independent of compressed-decode
 placement or implementation:
 
@@ -2063,22 +2085,26 @@ placement or implementation:
 This keeps original bits available for traps/RVFI. Storing expanded instructions
 would additionally require original bits/length and explicit expansion status
 to avoid processing the cached representation as a raw compressed instruction;
-aligned raw words would instead make depth count words and require normal
-alignment/stitching on replay. Original assembled encodings are the implemented payload format.
+memory-aligned raw words would require ordinary fetch alignment on replay.
+The packed prefix is relative to the branch target and adds no bus transaction
+or misaligned memory access.
 
-Each entry shall have a fixed sequence origin: slot zero corresponds to its
-stored branch target. A valid-prefix count shall identify populated slots.
+Each entry shall have a fixed sequence origin: halfword zero corresponds to its
+stored branch target. A valid-prefix count shall identify populated halfwords.
 The sequence shall be retained across hits. On each accepted predicted-taken
 hit that starts replay, reset the active replay index to zero; advance it only
 on successful instruction transfer. IF shares one active replay index
 across entries instead of storing a persistent read pointer in every entry.
-Replay shall read the existing slots without removing or rotating their data.
+The active replay snapshot shall use the same `16 * H`-bit packed format as
+the entries, preserving held instructions across replacement. Replay shall read
+existing encodings without removing or rotating their data. Advance the replay
+offset by one/two halfwords with C, or one word without C, only on transfer.
 An interrupted or partial replay shall leave the prefix and its origin intact
 for the next hit, subject to ordinary entry/context invalidation.
 
 Filling and replay may proceed concurrently using separate fill and replay
 indices. When revisiting a partial entry, skip already retained positions and
-append newly observed sequential instructions at the first missing slot.
+append newly observed complete sequential instructions at the first unused halfword.
 Replayed instructions shall not require writes merely to retain their data.
 Simultaneous fill/read must preserve the currently presented instruction and
 the existing pre-edge lookup semantics. The implementation tracks
@@ -2092,13 +2118,14 @@ transfers, including a target transfer on the same edge that starts collection.
 The first captured PC must equal the resolved target; each later PC must equal
 the previous PC plus its original instruction length. Capture each accepted
 instruction once, with no writes from held tokens or fault responses. Complete
-at depth `D`, or retain the existing prefix and stop on a stream discontinuity,
+when capacity is exhausted or the next whole instruction does not fit, or
+retain the existing prefix and stop on a stream discontinuity,
 flush, invalidation or replacement by another fill stream. Never append
 nonsequential dynamic-path instructions to the same linear sequence. Capturing
 in IF is speculative metadata collection and does not establish retirement.
 
 A predicted-taken BTB hit with a usable prefix should replay through a direct
-IF instruction source before optional decompression, starting with slot zero
+IF instruction source before optional decompression, starting with offset zero
 in the cycle after the branch transfers. Every replayed instruction retains
 its own PC and participates in normal direction/target lookup, DE validation,
 hazards, exceptions and retirement. A nested control transfer may terminate
@@ -2116,8 +2143,8 @@ can remove the initial target-delivery delay while leaving three refill bubbles
 under the existing ideal-memory timing; four cached instructions can cover
 that interval if replay and continuation fetching overlap without extra stages.
 Directed IF latency tests validate one remaining refill gap of three cycles
-at depth one, two at depth two and one at depth three, with no refill bubble
-at depth four, under the stated ideal timing. The uncached continuation retains
+with one retained I32 (`H=2`), two with two (`H=4`) and one with three (`H=6`),
+with no refill bubble at four (`H=8`), under the stated ideal timing. The uncached continuation retains
 the ordinary engine/FIFO latency.
 
 Every replayed instruction shall be checked against the core's current PMP
@@ -2149,11 +2176,11 @@ banks return allow and elaborate without comparison logic. No PMP logic or
 privilege signals move onto OBI.
 
 `uqu_if_replay` snapshots the usable prefix on an accepted predicted redirect.
-Its single active copy costs `32*D` payload bits, independent of BTB capacity,
+Its single active copy costs `16*H` payload bits, independent of BTB capacity,
 plus count/index/control. This protects a held token and the remainder of its
 sequence from concurrent entry replacement or target changes without pinning
 the BTB entry. Snapshot payload, BTB instruction arrays and counts are unreset;
-valid bits establish their usability. Zero effective depth removes all these
+valid bits establish their usability. Zero effective halfword capacity removes all these
 arrays and replay/fill state. A new predicted redirect replaces the active
 snapshot; global recovery cancels it without destroying retained table entries.
 
@@ -2170,9 +2197,11 @@ PMP permissions or execution privilege changed. Ordinary recovery shall cancel
 active replay/fill while otherwise preserving valid cached prefixes. A future
 address-translation extension would need its own mapping/context policy.
 
-Verification should cover depth zero equivalence, depths one/two/four and a
-non-power-of-two depth, concurrent prefix extension/replay, repeated replay
-from slot zero after partial/interrupted traversal, all compressed
+Verification should cover zero-capacity equivalence, single-halfword C capacity,
+non-power-of-two capacities, odd-halfword C32 reconstruction, complete-prefix
+overflow and partial extension, and rejection of odd capacities without C.
+Also cover concurrent prefix extension/replay, repeated replay
+from offset zero after partial/interrupted traversal, all compressed
 strategies, target/entry replacement during holds, nested branches, late faults,
 FENCE.I/self-modifying code and protection/privilege changes. Count cached
 instruction transfers separately from memory-fetched instructions in benchmark
@@ -3256,7 +3285,7 @@ or checker, global event arbitration, architectural trap entry or DE branch
 execution. The [stage guide](../verif/sim/if/README.md) defines exact ports and
 tests. Its parameters shall be `ISA_C`, both compressed strategy selectors,
 `MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES`,
-`MUA_BTB_IDATA_DEPTH` and `MUA_IF_BUFFER_WORDS`. Optional `uqu_if_replay`
+`MUA_BTB_IDATA_HWORDS` and `MUA_IF_BUFFER_WORDS`. Optional `uqu_if_replay`
 provides the protected cached instruction source defined in Section 5.2.
 
 Each active reset edge shall establish a running frontend at the aligned

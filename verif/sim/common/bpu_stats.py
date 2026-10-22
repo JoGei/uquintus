@@ -71,7 +71,7 @@ def statistics(start, stop, parameters, retired):
     require(counts['de_redirects'] <= retired and counts['compressed_control_flow'] <= cf, 'redirect/compressed count')
     if names == COUNTERS:
         require(counts['idata_replayed_instructions'] <= retired, 'replay retirement count')
-        require((active_btb and parameters.get('MUA_BTB_IDATA_DEPTH', 1) > 0) or
+        require((active_btb and parameters.get('MUA_BTB_IDATA_HWORDS', 1) > 0) or
                 counts['idata_replayed_instructions'] == 0, 'replay with disabled instruction storage')
     counts.update(control_flow_instructions=cf, btb_misses=counts['btb_lookups']-counts['btb_hits'],
                   btb_control_flow_misses=counts['btb_control_flow_lookups']-counts['btb_control_flow_hits'])

@@ -28,7 +28,7 @@ module uqu_core #(
     parameter MUA_BP_ENTRIES = 16,
     parameter MUA_BTB = `UQU_BTB_NONE,
     parameter MUA_BTB_ENTRIES = 16,
-    parameter MUA_BTB_IDATA_DEPTH = 0,
+    parameter MUA_BTB_IDATA_HWORDS = 0,
     parameter MUA_REGFILE_IMPL = `UQU_RF_FF,
     parameter MUA_IF_BUFFER_WORDS = 2,
     parameter MUA_HARDENED = 0,
@@ -98,8 +98,8 @@ module uqu_core #(
     input wire [4:0] xif_result_rd_i,
     input wire [XIF_DUALWRITE:0] xif_result_we_i
 );
-    localparam integer IDATA_DEPTH = ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) &&
-        (MUA_BTB != `UQU_BTB_NONE)) ? MUA_BTB_IDATA_DEPTH : 0;
+    localparam integer IDATA_HWORDS = ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) &&
+        (MUA_BTB != `UQU_BTB_NONE)) ? MUA_BTB_IDATA_HWORDS : 0;
     wire [31:0] replay_pmp_addr;
     wire replay_pmp_priv_m;
     wire [1:0] replay_pmp_allow;
@@ -221,7 +221,7 @@ module uqu_core #(
     // Permission writes retire before any younger instruction uses cached bytes.
     // Preserve the BTB payload but refetch/recheck the architectural continuation.
     wire wb_csr_source_zero = wb_csr_op_q[2] ? (wb_csr_src_q[4:0] == 5'd0) : wb_csr_zero_q;
-    wire wb_pmp_recover = (IDATA_DEPTH > 0) && (ISA_PMP == 1) && wb_retire &&
+    wire wb_pmp_recover = (IDATA_HWORDS > 0) && (ISA_PMP == 1) && wb_retire &&
         (wb_kind_q == `UQU_WB_CSR) && ((wb_csr_op_q[1:0] == 2'b01) || !wb_csr_source_zero) &&
         (((wb_csr_addr_q >= 12'h3a0) && (wb_csr_addr_q <= 12'h3af)) ||
          ((wb_csr_addr_q >= 12'h3b0) && (wb_csr_addr_q <= 12'h3ef)));
@@ -269,7 +269,7 @@ module uqu_core #(
     uqu_stage_if #(
         .ISA_C(ISA_C), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
-        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_DEPTH(MUA_BTB_IDATA_DEPTH), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_HWORDS(MUA_BTB_IDATA_HWORDS), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
     ) u_if (
         .clk_i(clk_i), .rst_ni(rst_ni), .boot_addr_i(boot_addr_i), .flush_i(if_flush),
         .redirect_valid_i(redirect_valid), .redirect_addr_i(redirect_addr), .fetch_enable_i(fetch_enable),
@@ -395,7 +395,7 @@ module uqu_core #(
         .we0_o(wb_we0), .waddr0_o(wb_waddr0), .wdata0_o(wb_wdata0), .we1_o(wb_we1), .waddr1_o(wb_waddr1), .wdata1_o(wb_wdata1),
         .mstatus_o(mstatus), .mie_o(mie), .mip_o(mip), .mtvec_o(mtvec), .mepc_o(mepc), .pmpcfg_o(pmpcfg), .pmpaddr_o(pmpaddr), .frm_o(frm), .fflags_o()
     );
-    uqu_pmp #(.ISA_PMP(ISA_PMP), .ISA_C(ISA_C), .MUA_BTB_IDATA_DEPTH(IDATA_DEPTH)) u_pmp (
+    uqu_pmp #(.ISA_PMP(ISA_PMP), .ISA_C(ISA_C), .MUA_BTB_IDATA_HWORDS(IDATA_HWORDS)) u_pmp (
         .replay_addr_i(replay_pmp_addr), .replay_priv_m_i(replay_pmp_priv_m), .replay_allow_o(replay_pmp_allow),
         .pmpcfg_i(pmpcfg), .pmpaddr_i(pmpaddr), .if_addr_i(if_pmp_addr), .if_size_i(if_pmp_size), .if_priv_m_i(if_pmp_priv_m), .if_allow_o(if_pmp_allow),
         .mem_addr_i(mem_pmp_addr), .mem_size_i(mem_pmp_size), .mem_access_i(mem_pmp_access), .mem_priv_m_i(mem_pmp_priv_m), .mem_allow_o(mem_pmp_allow)

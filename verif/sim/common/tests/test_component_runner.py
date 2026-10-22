@@ -336,21 +336,24 @@ class ComponentRunnerTests(unittest.TestCase):
 
 
 
-    def test_instruction_data_depth_is_explicit_and_bounded(self):
+    def test_instruction_data_halfwords_are_explicit_bounded_and_word_aligned_without_c(self):
         catalog = json.loads((ROOT / 'config/selectors.json').read_text())
         config = load_configuration(ROOT / 'config/rv32i.yml', catalog)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / 'idata.yml'
-            for value in (0, 1, 3, 1024):
-                path.write_text(yaml.safe_dump(dict(config, MUA_BTB_IDATA_DEPTH=value)))
-                self.assertEqual(load_configuration(path, catalog)['MUA_BTB_IDATA_DEPTH'], value)
-            for value in (-1, 1025, True, 1.5, '4'):
-                path.write_text(yaml.safe_dump(dict(config, MUA_BTB_IDATA_DEPTH=value)))
-                with self.assertRaisesRegex(ValueError, 'MUA_BTB_IDATA_DEPTH'):
+            for value in (0, 2, 6, 2048):
+                path.write_text(yaml.safe_dump(dict(config, MUA_BTB_IDATA_HWORDS=value)))
+                self.assertEqual(load_configuration(path, catalog)['MUA_BTB_IDATA_HWORDS'], value)
+            for value in (-1, 1, 3, 2049, True, 1.5, '4'):
+                path.write_text(yaml.safe_dump(dict(config, MUA_BTB_IDATA_HWORDS=value)))
+                with self.assertRaisesRegex(ValueError, 'MUA_BTB_IDATA_HWORDS'):
                     load_configuration(path, catalog)
-            del config['MUA_BTB_IDATA_DEPTH']
+            for value in (1, 3, 5, 2047):
+                path.write_text(yaml.safe_dump(dict(config, ISA_C=1, MUA_BTB_IDATA_HWORDS=value)))
+                self.assertEqual(load_configuration(path, catalog)['MUA_BTB_IDATA_HWORDS'], value)
+            del config['MUA_BTB_IDATA_HWORDS']
             path.write_text(yaml.safe_dump(config))
-            with self.assertRaisesRegex(ValueError, 'MUA_BTB_IDATA_DEPTH'):
+            with self.assertRaisesRegex(ValueError, 'MUA_BTB_IDATA_HWORDS'):
                 load_configuration(path, catalog)
 
 if __name__ == "__main__":

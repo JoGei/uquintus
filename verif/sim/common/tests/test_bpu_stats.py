@@ -75,14 +75,14 @@ class BpuStatsTests(unittest.TestCase):
 
     def test_replay_provenance_and_legacy_artifacts(self):
         start, stop, params = self.fixture()
-        params['MUA_BTB_IDATA_DEPTH'] = 4
+        params['MUA_BTB_IDATA_HWORDS'] = 4
         stop[-1] += 40
         stats = statistics(start, stop, params, 100)
         self.assertEqual(stats['counts']['idata_replayed_instructions'], 40)
         self.assertEqual(stats['rates_percent']['idata_replay_rate'], 40)
         self.assertEqual(validate(stats, params, 100), stats)
         with self.assertRaises(ValueError):
-            statistics(start, stop, dict(params, MUA_BTB_IDATA_DEPTH=0), 100)
+            statistics(start, stop, dict(params, MUA_BTB_IDATA_HWORDS=0), 100)
         legacy = statistics(start[:20], stop[:20], params, 100)
         self.assertEqual(legacy['schema_version'], 1)
         self.assertNotIn('idata_replayed_instructions', legacy['counts'])

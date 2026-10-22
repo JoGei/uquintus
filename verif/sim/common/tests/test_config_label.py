@@ -174,10 +174,10 @@ class ConfigurationLabelTests(unittest.TestCase):
 
     def test_btb_instruction_data_label(self):
         active = dict(self.base, MUA_BRANCH_PREDICTOR='bimodal', MUA_BTB='direct_mapped')
-        self.assertIn('mua-btb:direct+entries16+idata4_',
-                      configuration_label(dict(active, MUA_BTB_IDATA_DEPTH=4)))
+        self.assertIn('mua-btb:direct+entries16+idata-hw8_',
+                      configuration_label(dict(active, MUA_BTB_IDATA_HWORDS=8)))
         self.assertNotIn('+idata', configuration_label(active))
-        self.assertEqual(configuration_label(dict(self.base, MUA_BTB_IDATA_DEPTH=4)), BASE_LABEL)
+        self.assertEqual(configuration_label(dict(self.base, MUA_BTB_IDATA_HWORDS=4)), BASE_LABEL)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,15 @@
+# Selected follow-up to the RV32I study: [direction entries, BTB entries, halfwords].
+# Each table pair has an uncached reference. H=6 tests the 96-bit packed prefix.
+- [2, 2, 0]
+- [4, 4, 0]
+- [4, 4, 4]
+- [8, 8, 0]
+- [8, 8, 4]
+- [8, 8, 6]
+- [8, 8, 8]
+- [16, 8, 0]
+- [16, 8, 6]
+- [16, 8, 8]
+- [16, 16, 0]
+- [16, 16, 6]
+- [16, 16, 8]

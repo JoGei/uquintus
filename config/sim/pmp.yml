@@ -4,7 +4,7 @@ test_module: test_uqu_pmp
 parameters:
   - ISA_PMP
   - ISA_C
-  - MUA_BTB_IDATA_DEPTH
+  - MUA_BTB_IDATA_HWORDS
 tests:
   - directed
   - priority

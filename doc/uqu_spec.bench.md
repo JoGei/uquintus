@@ -247,11 +247,20 @@ inventing replay measurements for them. The retirement-window scope is unchanged
 
 An initial same-ELF, same-memory CoreMark performance-profile comparison on
 2026-10-22 measured 1,703,569 cycles with the 16/16 bimodal/BTB configuration
-and zero data slots, versus 1,280,224 with four slots per entry. Both CRCs passed
+and zero data slots, versus 1,280,224 with four slots per entry (now expressed
+as `MUA_BTB_IDATA_HWORDS=8` without C). Both CRCs passed
 and the workload retired 757,486 instructions: about 24.9% fewer cycles. These
 are fast RTL cycle measurements, with one-cycle memory responses and no claimed
-silicon frequency or Pareto optimality. Cache area/timing and broader workloads
-still need measurement.
+silicon frequency or Pareto optimality. The halfword-capacity migration preserves
+the 1,280,224-cycle RV32I result. Historical fixed-slot physical measurements
+are recorded in [the BPU investigation](../impl/asic/orfs/investigations/bpu-replay.md);
+the [RV32IC follow-up](../impl/asic/orfs/investigations/bpu-rv32ic.md) measures
+selected packed-C capacities and compares IF decompression, DE decompression
+and direct compressed decoding with the same executable and physical envelope.
+The [RV32IMC forwarding study](../impl/asic/orfs/investigations/forwarding-rv32imc.md)
+holds BP16/BTB16/H6, IF decompression and a parallel multiplier fixed while
+adding WB-to-DE, WB-to-EX, MEM-to-EX, MEM-to-DE and EX-to-DE bypasses in sequence.
+Broader workloads remain to be measured.
 
 ## 4. Pareto-optimal configuration profiles
 
