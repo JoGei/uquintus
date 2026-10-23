@@ -73,6 +73,20 @@ training and recovery. EX operands select the resolved
 register, PC, immediate or zero as decoded. Store data is resolved in EX.
 An operand admitted under a next-cycle bypass guarantee is captured once it
 becomes ready if EX is held; it cannot disappear when its producer drains.
+Captured EX words connect directly from the parent-owned operand registers.
+The core derives `EX_DEFERRED_OPERANDS` from the configured DE/EX forwarding
+routes. If no later guarantee can be emitted, EX readiness follows the occupied
+slot/use mask and the later operand bypass muxes elaborate away. Otherwise the
+existing hazard resolver supplies uncaptured operands. Qualifiers remain on
+consumption, independently of candidate words.
+
+This optimization applies with `MUA_DE_OPERAND_RETENTION=0` and `1`. Retention
+caches ready operands while DE waits; it does not make an unavailable source
+ready or prevent a permitted EX-entry guarantee. The `operand_capture` test
+covers dependency distances, load consumers and a slow DIV with a held DE
+consumer. Per-cycle checks cover capture/guarantee admission and preservation
+of captured EX values across all core programs.
+
 No LSU effective address or uncommitted CSR placeholder is forwarded as a
 register result. The core also excludes retirement-time CSR read candidates
 from its bypass data/availability descriptors. CSR serialization blocks younger

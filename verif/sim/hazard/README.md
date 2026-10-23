@@ -48,6 +48,15 @@ instruction until it is cleared or replaced. This module assumes that an
 asserted captured-valid bit identifies a value already checked for that source;
 it does not overwrite a correct captured EX value with another producer.
 
+Core integration gives captured EX words a direct path from the parent-owned
+operand registers. If the configured DE routes require every used operand to
+be captured before admission, the core omits the later EX bypass muxes. If
+deferred operands are permitted, this module still resolves those sources;
+correctly captured words use the direct path. The standalone module's ports,
+qualification and captured-source behavior remain unchanged. This integration
+optimization applies in both DE retention modes: retaining a ready value does
+not capture an unavailable source admitted under a future-bypass guarantee.
+
 ## Producer interface
 
 The EX descriptor uses `ex_valid_i`, shared with the EX consumer. MEM and WB

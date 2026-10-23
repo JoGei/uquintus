@@ -101,6 +101,13 @@ module uqu_core #(
 );
     localparam integer IDATA_HWORDS = ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) &&
         (MUA_BTB != `UQU_BTB_NONE)) ? MUA_BTB_IDATA_HWORDS : 0;
+    // DE can defer a source only if its current DE route is disabled and a
+    // corresponding later EX route is enabled. Retention caches ready values;
+    // it does not change this admission rule.
+    localparam EX_DEFERRED_OPERANDS = (MUA_FORWARDING == 1) &&
+        (((MUA_FORWARD_EX_TO_DE == 0) && (MUA_FORWARD_MEM_TO_EX == 1)) ||
+         ((MUA_FORWARD_MEM_TO_DE == 0) &&
+          ((MUA_FORWARD_MEM_TO_EX == 1) || (MUA_FORWARD_WB_TO_EX == 1))));
     wire [31:0] replay_pmp_addr;
     wire replay_pmp_priv_m;
     wire [1:0] replay_pmp_allow;
@@ -180,6 +187,8 @@ module uqu_core #(
     wire [31:0] gpr_data [0:2];
     wire [31:0] de_rs [0:2];
     wire [31:0] ex_rs [0:2];
+    wire [31:0] hazard_ex_rs [0:2];
+    wire [2:0] hazard_ex_rs_ready;
     wire [2:0] de_used, de_need_now, de_ex_used, de_captured, de_rs_ready, de_guaranteed, ex_rs_ready;
     wire [1:0] de_fu, de_a_sel, de_b_sel, de_pending;
     wire [4:0] de_op, de_rd, de_rd1;
@@ -319,7 +328,7 @@ module uqu_core #(
         .ex_valid_i(ex_valid_q), .ex_rs0_addr_i(ex_rs_addr_q[0]), .ex_rs1_addr_i(ex_rs_addr_q[1]), .ex_rs2_addr_i(ex_rs_addr_q[2]),
         .ex_rs0_i(ex_rs_data_q[0]), .ex_rs1_i(ex_rs_data_q[1]), .ex_rs2_i(ex_rs_data_q[2]),
         .ex_rs_used_i(ex_used_q), .ex_rs_captured_i(ex_captured_q),
-        .ex_rs0_o(ex_rs[0]), .ex_rs1_o(ex_rs[1]), .ex_rs2_o(ex_rs[2]), .ex_rs_ready_o(ex_rs_ready),
+        .ex_rs0_o(hazard_ex_rs[0]), .ex_rs1_o(hazard_ex_rs[1]), .ex_rs2_o(hazard_ex_rs[2]), .ex_rs_ready_o(hazard_ex_rs_ready),
         .ex_pending_i(ex_pending_q), .ex_rd0_i(ex_rd_q), .ex_rd1_i(ex_rd1_q),
         .ex_result_available_i(ex_forwardable), .ex_result_forwardable_i(ex_forwardable), .ex_result_i(ex_result), .ex_advance_i(ex_fire),
         .mem_valid_i(mem_valid_q), .mem_pending_i(mem_pending_q), .mem_rd0_i(mem_rd_q), .mem_rd1_i(mem_rd1_q),
@@ -557,12 +566,20 @@ module uqu_core #(
     genvar source_idx;
     generate
         for (source_idx = 0; source_idx < 3; source_idx = source_idx + 1) begin : gen_ex_source
+            // A captured operand is already authoritative. Keep slot/reset,
+            // register matching and result-readiness control off its word.
+            // Without deferred admission, every used EX operand takes this
+            // registered path and the later bypass muxes elaborate away.
+            assign ex_rs[source_idx] = EX_DEFERRED_OPERANDS && !ex_captured_q[source_idx] ?
+                                      hazard_ex_rs[source_idx] : ex_rs_data_q[source_idx];
+            assign ex_rs_ready[source_idx] = EX_DEFERRED_OPERANDS ? hazard_ex_rs_ready[source_idx] :
+                                            (rst_ni && ex_valid_q && ex_used_q[source_idx]);
             always @(posedge clk_i) begin
                 if (rst_ni && !ex_flush) begin
                     if (ex_enable && ex_next_valid) begin
                         ex_rs_addr_q[source_idx] <= de_rs_addr[source_idx];
                         ex_rs_data_q[source_idx] <= de_rs[source_idx];
-                    end else if (ex_valid_q && !ex_fire && ex_used_q[source_idx] &&
+                    end else if (EX_DEFERRED_OPERANDS && ex_valid_q && !ex_fire && ex_used_q[source_idx] &&
                                  !ex_captured_q[source_idx] && ex_rs_ready[source_idx]) begin
                         ex_rs_data_q[source_idx] <= ex_rs[source_idx];
                     end

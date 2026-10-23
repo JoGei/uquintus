@@ -149,3 +149,6 @@ register paths start at `wb_rd_q[1]` and end at an IF fetch-address register.
 These endpoint reports identify remaining timing work; they do not by themselves
 establish stable sensitizability or justify timing exceptions. No further
 multiplier or physical buffer-chain changes are included here.
+
+The [next timing audit](forwarding-fetch-path.md) rechecks the current buffer
+chains and traces the remaining forwarding/fetch-control paths.

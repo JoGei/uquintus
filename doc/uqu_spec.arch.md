@@ -1746,6 +1746,19 @@ be used directly. If an operand is unavailable, execution shall not accept
 stale data; normal DE admission must already have established the guarantee
 instead of intentionally moving an unknown operand wait into EX.
 
+Core integration shall use captured EX operand words directly from the
+parent-owned operand registers, independently of slot/reset and producer
+readiness qualification. These unqualified candidate words shall authorize no
+execution without the existing slot, operand-readiness and fault checks.
+When the forwarding configuration cannot supply an EX-entry guarantee, every
+used operand must be captured at DE transfer and the core shall omit the later
+EX bypass muxes. With forwarding enabled, deferred operands are possible only
+if `(!MUA_FORWARD_EX_TO_DE && MUA_FORWARD_MEM_TO_EX)` or
+`(!MUA_FORWARD_MEM_TO_DE && (MUA_FORWARD_MEM_TO_EX || MUA_FORWARD_WB_TO_EX))`.
+Other configurations retain the hazard unit's resolver for uncaptured sources
+and capture a resolved value if EX is held. No new configuration parameter,
+register bank, admission delay or disabled-path override is introduced.
+
 The hazard unit shall supply source values, bypass selections as needed,
 per-source readiness and dependency-blocking information. The core shall
 connect these to stage operand inputs and the existing EX
@@ -1799,7 +1812,11 @@ Operand data shall not require reset. A third retention slot shall be omitted
 when neither enabled Zfinx nor three-source XIF requires it.
 
 The policy shall be independent of the forwarding master/path parameters;
-retention shall never enable a disabled forwarding route. Both policies shall
+retention shall never enable a disabled forwarding route. Retention stores a
+ready DE value without requiring all other operands to be ready. It shall not
+turn an EX-bypass guarantee into a captured operand or force an extra admission
+cycle. Therefore the EX capture/bypass specialization above shall apply equally
+to both retention policies. Both policies shall
 preserve the same architectural behavior and Section 4.1 contract, while
 allowing different stall counts and implementation cost. The core shall retain
 ownership of the IF/DE and DE/EX boundary registers and global event control;

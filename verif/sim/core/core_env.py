@@ -86,6 +86,7 @@ class CoreTest(uvm_test):
         self.csrs = {0x300: 0x1800, 0x304: 0, 0x305: 0, 0x340: 0,
                      0x341: 0, 0x342: 0, 0x343: 0, 0xf14: self.hart_id, 1: 0, 2: 0, 3: 0}
         self.cycles = 0
+        self.deferred_admissions = 0
         self.random_wait = True
         self.memory_timing = json.loads(os.environ.get('UQU_MEMORY_TIMING', 'null'))
         if self.memory_timing is not None:
@@ -271,7 +272,12 @@ class CoreTest(uvm_test):
         handle = self.signal_handles.get(name)
         if handle is None:
             owner = self.dut if hasattr(self.dut, name) else self.core
-            handle = self.signal_handles[name] = getattr(owner, name)
+            if name.endswith(']'):
+                array, index = name[:-1].rsplit('[', 1)
+                handle = getattr(owner, array)[int(index)]
+            else:
+                handle = getattr(owner, name)
+            self.signal_handles[name] = handle
         return int(handle.value)
 
     def check_rvfi(self, o, rst):
@@ -417,10 +423,23 @@ class CoreTest(uvm_test):
                 'priv_m_q','mstatus','mie','mip','mtvec','mepc','de_pc_q','mem_pc_q',
                 'wb_we1','wb_waddr1','wb_wdata1')}
         self.edge_o=o
+        o.update({n:self.signal(n) for n in ('de_ex_used', 'de_captured',
+            'de_guaranteed', 'ex_used_q', 'ex_captured_q')})
         if self.params['MUA_BRANCH_PREDICTOR'] != 0 and self.params['MUA_BTB'] != 0:
             o.update({n:self.signal(n) for n in ('de_fire','de_control_flow','de_branch_taken',
                 'de_next_pc','de_predicted_next_pc_q','de_redirect','predictor_invalidate')})
         if rst:
+            if self.signal('de_fire'):
+                missing = o['de_ex_used'] & ~o['de_captured']
+                assert not missing & ~o['de_guaranteed'], 'EX admission without capture or guarantee'
+                self.deferred_admissions += int(bool(missing))
+            # With all used operands captured, EX must consume the parent-held
+            # values even if a current MEM/WB writer names the same register.
+            if o['ex_valid_q']:
+                for slot in range(3):
+                    if o['ex_used_q'] & o['ex_captured_q'] & (1 << slot):
+                        assert self.signal(f'ex_rs[{slot}]') == self.signal(f'ex_rs_data_q[{slot}]'), \
+                            'captured EX operand replaced by a later candidate'
             if o['wb_valid_q'] and self.signal('wb_kind_q') == 1:
                 assert not self.signal('wb_forwardable'), 'serialized CSR entered core bypass'
                 assert not self.signal('de_fire'), 'younger instruction admitted before CSR retired'

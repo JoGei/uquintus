@@ -565,6 +565,37 @@ class InterruptsTest(CoreTest):
         self.drop_objection()
 
 
+class OperandCaptureTest(CoreTest):
+    async def run_phase(self):
+        self.raise_objection()
+        self.random_wait = False
+        program = [0x00004637, ins_i(1,0,7), ins_i(2,0,9)]
+        # Adjacent and separated dependencies exercise both EX- and MEM-owned
+        # producers. The retirement model checks every architectural result.
+        for gap in (0, 1, 2, 0, 1):
+            program += [ins_r(3,1,2)] + [ins_i(0,0,0)]*gap
+            program += [ins_r(4,3,2), ins_r(5,4,3)]
+            program += [ins_r(6,5,1,upper=int(bool(self.params['ISA_M'])))]
+        product = 287 if self.params['ISA_M'] else 48
+        program += [ins_s(12,6), ins_i(7,12,0,2,3), ins_r(11,1,2)]
+        # A slow DIV holds EX while DE can retain one ready source and waits
+        # for the other. With retention off, the source is resolved afresh.
+        program += [ins_r(10,6,1,4,1) if self.params['ISA_M'] else ins_r(10,6,1)]
+        program += [ins_r(8,11,10), ins_b(8,0,8,1), ins_s(0,8), ins_i(9,8,1)]
+        end = BOOT + len(program)*4
+        self.put(BOOT,program+[ins_j(0,0)])
+        await self.reset()
+        await self.finish(end)
+        expected = 16 + (product//7 if self.params['ISA_M'] else product+7)
+        assert self.regs[6] == product and self.regs[7] == product
+        assert self.regs[8] == expected and self.regs[9] == expected+1
+        assert not self.accesses and not self.faults and not self.traps
+        assert set(self.memory) == set(range(0x4000,0x4004))
+        assert self.word(self.memory,0x4000) == product
+        self.logger.info('%d admissions used deferred EX operands',self.deferred_admissions)
+        self.drop_objection()
+
+
 class CsrForwardingTest(CoreTest):
     async def run_phase(self):
         self.raise_objection()
@@ -744,6 +775,11 @@ async def privilege(dut):
 @cocotb.test(timeout_time=2000,timeout_unit='us')
 async def interrupts(dut):
     await uvm_root().run_test('InterruptsTest')
+
+
+@cocotb.test(timeout_time=2000,timeout_unit='us')
+async def operand_capture(dut):
+    await uvm_root().run_test('OperandCaptureTest')
 
 
 @cocotb.test(timeout_time=2000,timeout_unit='us')

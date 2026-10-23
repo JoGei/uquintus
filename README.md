@@ -183,6 +183,11 @@ Store data is resolved in EX. Paired XIF results forward only the primary
 destination; the secondary waits for register-file visibility. See the
 [hazard contract](doc/uqu_spec.arch.md#4-configurable-operand-forwarding).
 
+Captured EX operands connect directly from the parent-owned registers. The
+core omits later EX bypass muxes when the configured DE routes require capture
+before admission, and retains them for deferred operands where needed. This
+specialization applies with DE operand retention enabled or disabled.
+
 ## Implemented components
 
 | Component | RTL | Verification guide |
