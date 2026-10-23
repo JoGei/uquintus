@@ -35,11 +35,12 @@ class ParentTest(uvm_test):
         item = self.slot or token()
         g = dict(GLOBALS, valid=int(self.slot is not None), ready=ready, rst_n=int(not reset),
                  flush=int(flush), priv_m=self.priv, **events)
+        g['event_priv_m'] = self.priv
         d.in_valid_i.value = int(incoming is not None)
         for field in FIELDS:
             getattr(d, 'in_'+field+'_i').value = (incoming or token())[field]
         for field in GLOBALS:
-            if field not in ('valid', 'ready', 'priv_m', 'lsu') and not field.startswith('lsu_res_'):
+            if field not in ('valid', 'ready', 'priv_m', 'event_priv_m', 'lsu') and not field.startswith('lsu_res_'):
                 getattr(d, 'rst_ni' if field == 'rst_n' else field+'_i').value = g[field]
         d.commit_ready_i.value = ready
         probes = (self.rng.randrange(32), self.rng.randrange(32))

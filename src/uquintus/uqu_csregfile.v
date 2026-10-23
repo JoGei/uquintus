@@ -25,6 +25,7 @@ module uqu_csregfile #(
     input  wire         csr_rd_zero_i,
     input  wire [31:0]  csr_instr_i,
     input  wire         priv_m_i,
+    input  wire         event_priv_m_i,
     input  wire [31:0]  hart_id_i,
     input  wire         irq_software_i,
     input  wire         irq_timer_i,
@@ -310,7 +311,7 @@ module uqu_csregfile #(
                         ebreaku_q <= 1'b0;
                         prv_m_q <= 1'b1;
                     end else if (debug_enter) begin
-                        prv_m_q <= priv_m_i;
+                        prv_m_q <= event_priv_m_i;
                     end else if (csr_we && (csr_addr_i == 12'h7b0)) begin
                         ebreaku_q <= write_value[12];
                         prv_m_q <= (write_value[1:0] != 2'b00);
@@ -342,7 +343,7 @@ module uqu_csregfile #(
                     counteren_q <= 2'd0;
                 end else begin
                     if (trap_fire) begin
-                        mpp_m_q <= priv_m_i;
+                        mpp_m_q <= event_priv_m_i;
                     end else if (mret_fire) begin
                         mpp_m_q <= 1'b0;
                         if (!mpp_m_q) mprv_q <= 1'b0;

@@ -6,6 +6,10 @@ inferred multiplication (−2.35%). Both retain failed 20 ns setup status. This
 audit explains why removing the memory-response route was not sufficient.
 No RTL, SDC, tool configuration or placement result is changed by this audit.
 
+The later [CSR bypass/context cleanup](csr-bypass-separation.md) implements the
+two RTL fixes identified here. The physical buffer-chain investigation is
+deferred; the measurements below describe the prior netlists.
+
 ## New first paths
 
 | Configuration | Source | Endpoint | Setup slack (ns) |

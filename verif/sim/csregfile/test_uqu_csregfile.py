@@ -45,6 +45,8 @@ class CSRTest(uvm_test):
 
     async def cycle(self, **signals):
         i = dict(INPUTS, **signals)
+        if 'event_priv_m' not in signals:
+            i['event_priv_m'] = i['priv_m']
         for name, value in i.items():
             getattr(self.dut, 'rst_ni' if name == 'rst_n' else name + '_i').value = value
         await Timer(1, units='ns')
@@ -181,6 +183,18 @@ class EventsTest(CSRTest):
     async def run_phase(self):
         self.raise_objection()
         await self.initialize()
+        if self.params['ISA_UMODE']:
+            # Trap/debug save context is independent of the CSR access context.
+            for access_privilege in (0, 1):
+                event_privilege = 1 - access_privilege
+                await self.cycle(priv_m=access_privilege, event_priv_m=event_privilege,
+                                 trap=1, trap_pc=0x2000, trap_interrupt=1, trap_cause=11)
+                assert bool(int(self.dut.mstatus_o.value) & 0x1800) == bool(event_privilege)
+                if self.params['DEBUG']:
+                    await self.cycle(priv_m=access_privilege, event_priv_m=event_privilege,
+                                     debug_enter=1, debug_pc=0x2000, debug_cause=3)
+                    assert int(self.dut.dcsr_o.value) & 3 == (3 if event_privilege else 0)
+            await self.initialize()
         for privilege in (1, 0) if self.params['ISA_UMODE'] else (1,):
             for mie in (0, 1):
                 for interrupt, causes in ((0, (0, 1, 2, 3, 4, 5, 6, 7, 8, 11)), (1, (3, 7, 11))):

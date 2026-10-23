@@ -230,6 +230,12 @@ module uqu_core #(
     wire [31:0] wb_target = wb_exception_fire ? {mtvec[31:2],2'b00} : wb_mret ? mepc : wb_next_pc_q;
     wire ex_forwardable = ex_complete && !ex_exception && !ex_lsu_q && (ex_kind_q == `UQU_WB_RESULT);
     wire mem_forwardable = mem_complete && !mem_exception && !mem_lsu_q && (mem_kind_q == `UQU_WB_RESULT);
+    // CSR instructions serialize younger admission through retirement. Their
+    // read values reach younger consumers through the GPR file after that edge,
+    // never through the speculative candidate bypass into EX/DE arithmetic.
+    wire wb_csr = (wb_kind_q == `UQU_WB_CSR);
+    wire wb_forwardable = wb_result_valid && !wb_csr;
+    wire [31:0] wb_forward_data = wb_csr ? wb_data_q : wb_result;
 
     uqu_pipeline_ctrl #(.ISA_ZIFENCEI(ISA_ZIFENCEI)) u_ctrl (
         .clk_i(clk_i), .rst_ni(rst_ni), .if_valid_i(if_valid),
@@ -319,7 +325,7 @@ module uqu_core #(
         .mem_valid_i(mem_valid_q), .mem_pending_i(mem_pending_q), .mem_rd0_i(mem_rd_q), .mem_rd1_i(mem_rd1_q),
         .mem_result_available_i(mem_forwardable), .mem_result_forwardable_i(mem_forwardable), .mem_result_i(mem_result), .mem_advance_i(mem_fire),
         .wb_valid_i(wb_valid_q), .wb_pending_i(wb_pending_q), .wb_rd0_i(wb_rd_q), .wb_rd1_i(wb_rd1_q),
-        .wb_result_available_i(wb_result_valid), .wb_result_forwardable_i(wb_result_valid), .wb_result_i(wb_result), .wb_advance_i(wb_fire)
+        .wb_result_available_i(wb_forwardable), .wb_result_forwardable_i(wb_forwardable), .wb_result_i(wb_forward_data), .wb_advance_i(wb_fire)
     );
     uqu_stage_de #(
         .ISA_E(ISA_E), .ISA_M(ISA_M), .ISA_C(ISA_C), .ISA_ZFINX(ISA_ZFINX), .ISA_ZIFENCEI(ISA_ZIFENCEI),
@@ -397,7 +403,8 @@ module uqu_core #(
         .kind_i(wb_kind_q), .result_i(wb_data_q), .rd_we_i(wb_rd_we_q), .rd_i(wb_rd_q), .pc_i(wb_pc_q), .instr_i(wb_original_q),
         .csr_addr_i(wb_csr_addr_q), .csr_op_i(wb_csr_op_q), .csr_src_i(wb_csr_src_q), .csr_src_zero_i(wb_csr_zero_q),
         .fflags_valid_i(wb_fflags_valid_q), .fflags_i(wb_fflags_q), .exception_valid_i(wb_exception_q),
-        .exception_cause_i(wb_cause_q), .exception_tval_i(wb_tval_q), .priv_m_i(wb_valid_q ? wb_priv_m_q : priv_m_q),
+        .exception_cause_i(wb_cause_q), .exception_tval_i(wb_tval_q), .priv_m_i(wb_priv_m_q),
+        .event_priv_m_i(priv_m_q),
         .hart_id_i(HART_ID), .irq_software_i(irq_software_i), .irq_timer_i(irq_timer_i), .irq_external_i(irq_external_i),
         .trap_i(trap_valid), .trap_pc_i(trap_pc), .trap_interrupt_i(trap_interrupt), .trap_cause_i(trap_cause), .trap_tval_i(trap_tval),
         .xif_id_i(wb_xif_id_q), .xif_kill_valid_i(xif_kill_valid), .xif_kill_id_i(xif_kill_id), .xif_kill_ready_o(xif_kill_ready),

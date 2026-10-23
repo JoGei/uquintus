@@ -30,7 +30,8 @@ outside zero/one. Enabling Zfinx CSR storage does not implement the FPU.
 | `csr_src_zero_i` | Register source encoding is x0, independent of its value. Ignored for immediate forms, which inspect the five-bit immediate. |
 | `csr_rd_zero_i` | Destination encoding is x0; suppresses CSRRW[I] read intent only. |
 | `csr_instr_i[31:0]` | Original instruction, used as illegal-instruction trap value. |
-| `priv_m_i`, `hart_id_i[31:0]` | Current privilege (M=1/U=0) and stable integration hart identity. Parent owns privilege state; M-only builds must execute in M-mode. |
+| `priv_m_i`, `hart_id_i[31:0]` | CSR access/MRET privilege (M=1/U=0) and stable integration hart identity. Parent supplies the owning instruction's context; M-only builds execute in M-mode. |
+| `event_priv_m_i` | Privilege saved on accepted trap/debug entry. Independent of access permission; valid for the event even without a CSR instruction. |
 | `csr_read_o`, `csr_write_o` | Legal, live read/write **intents**, independent of `csr_commit_i`. They are not update pulses. |
 | `csr_rdata_o[31:0]` | Pre-edge architectural read value; zero if no legal live read is requested. |
 | `csr_exception_valid_o`, `csr_exception_cause_o[4:0]`, `csr_exception_tval_o[31:0]` | Live invalid access reports illegal-instruction cause 2 and original instruction; data/intent outputs are suppressed. Cause/value are zero without an exception. |
@@ -53,7 +54,7 @@ addresses ignore or legalize writes rather than making the CSR read-only.
 | --- | --- |
 | `irq_software_i`, `irq_timer_i`, `irq_external_i` | Synchronous levels read directly as `mip[3]`, `[7]`, `[11]`; no pending storage or clear-on-read. |
 | `retire_i` | One already-qualified successful instruction retirement. Parent must exclude faults, killed instructions, and stalled repetitions. CSR accesses and MRET count through this input, not by inference in this module. |
-| `trap_i` | One accepted trap-entry event. Captures `trap_pc_i[31:0]`, `trap_interrupt_i`, `trap_cause_i[4:0]`, `trap_tval_i[31:0]`; copies MIE to MPIE, clears MIE, and saves current privilege into MPP. Parent changes current privilege to M. |
+| `trap_i` | One accepted trap-entry event. Captures `trap_pc_i[31:0]`, `trap_interrupt_i`, `trap_cause_i[4:0]`, `trap_tval_i[31:0]`; copies MIE to MPIE, clears MIE, and saves `event_priv_m_i` into MPP. Parent changes current privilege to M. |
 | `mret_i` | One accepted legal M-mode return event. Restores MIE from MPIE, sets MPIE, resets MPP to the least privilege implemented, and clears MPRV when returning to U. Parent uses the pre-edge MPP/mepc for privilege/PC restoration. A U-mode event is ignored here; instruction legality is the decoder/controller's responsibility. |
 | `fp_flags_valid_i`, `fp_flags_i[4:0]` | Already committed, age-qualified Zfinx accrued flags; ignored when Zfinx is disabled. OR into fflags. An explicit fflags/fcsr write overrides same-edge accrual; a frm-only write leaves accrual active. |
 | `mstatus_o`, `mie_o`, `mip_o`, `mtvec_o`, `mepc_o` | Architectural 32-bit values for controller/datapath use, assembled from actual state and constants. Effective data privilege from MPRV/MPP is selected by the parent. Vectored target arithmetic remains outside this storage unit. |

@@ -180,6 +180,7 @@ module uqu_wb_pipeline_tb #(
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
         .valid_i(memwb_valid_q), .ready_o(wb_ready_o), .valid_o(wb_valid_o), .ready_i(commit_ready_i),
         .priv_m_i(priv_m_q),
+        .event_priv_m_i(priv_m_q),
         .kind_i(memwb_kind_q),
         .result_i(memwb_result_q),
         .rd_we_i(memwb_rd_we_q),

@@ -48,6 +48,7 @@ module uqu_stage_wb #(
     input  wire [4:0]   exception_cause_i,
     input  wire [31:0]  exception_tval_i,
     input  wire         priv_m_i,
+    input  wire         event_priv_m_i,
     input  wire [31:0]  hart_id_i,
     input  wire         irq_software_i,
     input  wire         irq_timer_i,
@@ -146,6 +147,9 @@ module uqu_stage_wb #(
     wire wb_fire = valid_o && ready_i;
     wire local_debug = wb_fire && debug_break && !fault;
     wire csr_trap = accepted_trap || exception_fire_o;
+    // Access checks use the owning instruction's privilege. External events
+    // can arrive with no WB owner; select their saved privilege only here.
+    wire csr_event_priv_m = (accepted_trap || external_debug) ? event_priv_m_i : priv_m_i;
     wire xif_committed;
     wire xif_commit_sent;
     wire xif_pair;
@@ -258,7 +262,8 @@ module uqu_stage_wb #(
         .csr_valid_i(csr_query), .csr_commit_i(retire_o && (kind_i == KIND_CSR)),
         .csr_addr_i(csr_addr_i), .csr_op_i(csr_op_i), .csr_src_i(csr_src_i),
         .csr_src_zero_i(csr_src_zero_i), .csr_rd_zero_i(rd_i == 5'd0), .csr_instr_i(instr_i),
-        .priv_m_i(priv_m_i), .hart_id_i(hart_id_i), .irq_software_i(irq_software_i),
+        .priv_m_i(priv_m_i), .event_priv_m_i(csr_event_priv_m),
+        .hart_id_i(hart_id_i), .irq_software_i(irq_software_i),
         .irq_timer_i(irq_timer_i), .irq_external_i(irq_external_i), .retire_i(retire_o),
         .trap_i(csr_trap), .trap_pc_i(accepted_trap ? trap_pc_i : pc_i),
         .trap_interrupt_i(accepted_trap && trap_interrupt_i),

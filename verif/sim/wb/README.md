@@ -20,7 +20,8 @@ remember commit permission for the current parent-held token.
 | `csr_addr_i[11:0]`, `csr_op_i[2:0]`, `csr_src_i[31:0]`, `csr_src_zero_i` | Decoded CSR address/funct3, resolved operand, and register-source-is-x0 encoding. Immediate operands use bits 4:0. |
 | `fflags_valid_i`, `fflags_i[4:0]` | Per-instruction FP status for normal Zfinx results. |
 | `exception_valid_i`, `exception_cause_i[4:0]`, `exception_tval_i[31:0]` | Existing synchronous exception, with priority over local legality checks. |
-| `priv_m_i` | Parent-owned current privilege, valid even with no WB token. Debug entry saves this privilege; debug execution uses machine CSR permissions. |
+| `priv_m_i` | Owning WB instruction's saved privilege. Used for access/return checks and synchronous trap/local EBREAK context; unqualified when WB is empty. |
+| `event_priv_m_i` | Current privilege for accepted external trap/debug entry, valid even with no WB owner. Used only for saved event context. |
 | `hart_id_i[31:0]`, `irq_software_i`, `irq_timer_i`, `irq_external_i` | Integration identity and synchronous interrupt levels. |
 
 Retain the token until acceptance or permitted cancellation and consume it once
@@ -75,6 +76,17 @@ Debug Mode also uses this exception path (its architectural behavior is
 unspecified). EBREAK with debug entry disabled is a breakpoint exception with
 its PC in tval. Decode emits the EBREAK class without a preexisting exception
 when applying the debug-break controls.
+
+The full core excludes all CSR candidates from its hazard data and availability
+descriptors because CSR instructions serialize younger admission through
+retirement. Consumers observe the committed GPR value after that edge. The
+standalone WB retirement-time CSR result contract remains available to other
+parents; CSR architectural writes are unaffected.
+
+Access privilege and event privilege remain separate through the CSR interface.
+External trap/debug entry saves `event_priv_m_i`; synchronous WB exceptions and
+local EBREAK entry save `priv_m_i`. Current privilege is never muxed into CSR
+permission checks merely because WB is empty.
 
 The parent forwarding/hazard block still performs matching and youngest-writer
 selection and applies configured bypass paths. It must retain secondary paired

@@ -74,7 +74,17 @@ register, PC, immediate or zero as decoded. Store data is resolved in EX.
 An operand admitted under a next-cycle bypass guarantee is captured once it
 becomes ready if EX is held; it cannot disappear when its producer drains.
 No LSU effective address or uncommitted CSR placeholder is forwarded as a
-register result. MEM issues a load/store and advances on grant; WB owns its response and
+register result. The core also excludes retirement-time CSR read candidates
+from its bypass data/availability descriptors. CSR serialization blocks younger
+admission through retirement; consumers then read the committed GPR value.
+This keeps live `mip` IRQ data out of EX/DE arithmetic without another stall.
+
+WB CSR checks use the instruction's saved privilege directly. A separate
+`event_priv_m_i` carries current privilege for an accepted external trap/debug
+event, including an interrupt with an empty WB slot. Synchronous WB exceptions
+save the owner's privilege. No current-privilege fallback feeds CSR permissions.
+
+MEM issues a load/store and advances on grant; WB owns its response and
 completion. A raw load response can write the GPR file at retirement, but
 becomes available to dependent operands only after registration: through a
 buffered WB response or the updated GPR file. CSR results become available at successful WB commit.

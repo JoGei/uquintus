@@ -4,7 +4,7 @@ MASK = (1 << 32) - 1
 MASK64 = (1 << 64) - 1
 INPUTS = dict(rst_n=1, flush=0, csr_valid=0, csr_commit=0, csr_addr=0,
               csr_op=2, csr_src=0, csr_src_zero=1, csr_rd_zero=0,
-              csr_instr=0xC0002573, priv_m=1, hart_id=0xCAFEBABE,
+              csr_instr=0xC0002573, priv_m=1, event_priv_m=1, hart_id=0xCAFEBABE,
               irq_software=0, irq_timer=0, irq_external=0, retire=0,
               trap=0, trap_pc=0, trap_interrupt=0, trap_cause=0, trap_tval=0,
               mret=0, debug_mode=0, debug_enter=0, debug_pc=0, debug_cause=0,
@@ -121,7 +121,7 @@ class CSRModel:
             self.words[1] |= i['fp_flags']
         if trap:
             status = old_status & ~((3 << 11) | (1 << 7) | (1 << 3))
-            status |= ((3 if i['priv_m'] or not self.p['ISA_UMODE'] else 0) << 11)
+            status |= ((3 if i['event_priv_m'] or not self.p['ISA_UMODE'] else 0) << 11)
             status |= ((old_status >> 3) & 1) << 7
             self.words[0x300] = status
             self.words[0x341] = i['trap_pc'] & (~1 if self.p['ISA_C'] else ~3)
@@ -139,7 +139,7 @@ class CSRModel:
         if self.p['DEBUG']:
             if enter:
                 self.words[0x7B0] &= ~(0x1C0 | 3)
-                self.words[0x7B0] |= (i['debug_cause'] << 6) | (3 if i['priv_m'] or not self.p['ISA_UMODE'] else 0)
+                self.words[0x7B0] |= (i['debug_cause'] << 6) | (3 if i['event_priv_m'] or not self.p['ISA_UMODE'] else 0)
                 self.words[0x7B1] = i['debug_pc'] & (~1 if self.p['ISA_C'] else ~3)
             if debug and i['dret'] and self.words[0x7B0] & 3 != 3:
                 self.words[0x300] &= ~(1 << 17)

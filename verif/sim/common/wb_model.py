@@ -7,7 +7,7 @@ FIELDS = ('kind', 'result', 'rd_we', 'rd', 'pc', 'instr', 'csr_addr', 'csr_op',
           'exception_cause', 'exception_tval', 'xif_id')
 GLOBALS = dict(lsu=0, lsu_res_valid=0, lsu_res_registered=0, lsu_res_data=0,
                lsu_res_forward_data=0,
-               lsu_res_exception_valid=0, lsu_res_exception_cause=0, lsu_res_exception_tval=0, rst_n=1, flush=0, valid=1, ready=1, priv_m=1, hart_id=0xCAFEBABE,
+               lsu_res_exception_valid=0, lsu_res_exception_cause=0, lsu_res_exception_tval=0, rst_n=1, flush=0, valid=1, ready=1, priv_m=1, event_priv_m=1, hart_id=0xCAFEBABE,
                irq_software=0, irq_timer=0, irq_external=0, trap=0,
                trap_pc=0, trap_interrupt=0, trap_cause=0, trap_tval=0,
                debug_mode=0, debug_enter=0, debug_pc=0, debug_cause=3,
@@ -111,7 +111,8 @@ class WBModel:
                       xif_kill_ready=int(self.p['XIF'] and g['rst_n'] and not notify),
                       xif_result_ready=int(live and xif and fault is None and not external_trap and
                                            not external_debug and (self.committed or notify) and g['ready']))
-        ci.update(retire=int(retired), csr_commit=int(retired and item['kind'] == 1),
+        ci.update(event_priv_m=g['event_priv_m'] if external_trap or external_debug else g['priv_m'],
+                  retire=int(retired), csr_commit=int(retired and item['kind'] == 1),
                   trap=int(external_trap or exception_fire), trap_pc=g['trap_pc'] if external_trap else item['pc'],
                   trap_interrupt=g['trap_interrupt'] if external_trap else 0,
                   trap_cause=g['trap_cause'] if external_trap else result['exception_cause'],

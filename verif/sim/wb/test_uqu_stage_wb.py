@@ -25,6 +25,8 @@ class WBTest(uvm_test):
     async def cycle(self, item=None, comb_result=False, **controls):
         item = item or token()
         g = dict(GLOBALS, **controls)
+        if 'event_priv_m' not in controls:
+            g['event_priv_m'] = g['priv_m']
         for field in FIELDS:
             getattr(self.dut, field + '_i').value = item[field]
         for field, value in g.items():
@@ -451,3 +453,32 @@ class MemoryTest(WBTest):
 @cocotb.test()
 async def memory(_dut):
     await uvm_root().run_test(MemoryTest)
+
+
+class ContextsTest(WBTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.initialize()
+        for owner in (0, 1) if self.params['ISA_UMODE'] else (1,):
+            event = 1-owner if self.params['ISA_UMODE'] else 1
+            # Empty-WB interrupt saves current privilege, not stale owner bits.
+            await self.cycle(valid=0, priv_m=owner, event_priv_m=event, trap=1,
+                             trap_pc=0x2000, trap_interrupt=1, trap_cause=11)
+            assert bool(int(self.dut.mstatus_o.value) & 0x1800) == bool(event)
+            # A synchronous WB exception saves its instruction's own privilege.
+            await self.cycle(token(exception_valid=1, exception_cause=2),
+                             priv_m=owner, event_priv_m=event)
+            assert bool(int(self.dut.mstatus_o.value) & 0x1800) == bool(owner)
+            # An unrelated event context never grants a CSR access permission.
+            r = await self.csr(0x340, op=2, zero=1, priv_m=owner, event_priv_m=event)
+            assert r['exception_fire'] == int(not owner)
+            if self.params['DEBUG']:
+                await self.cycle(valid=0, priv_m=owner, event_priv_m=event,
+                                 debug_enter=1, debug_pc=0x3000, debug_cause=3)
+                assert int(self.dut.dcsr_o.value) & 3 == (3 if event else 0)
+        self.drop_objection()
+
+
+@cocotb.test()
+async def contexts(_dut):
+    await uvm_root().run_test(ContextsTest)

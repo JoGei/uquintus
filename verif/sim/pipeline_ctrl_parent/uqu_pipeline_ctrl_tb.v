@@ -181,7 +181,7 @@ module uqu_pipeline_ctrl_tb #(
         .pc_i(pc_q[3]), .instr_i(instr_q[3]), .csr_addr_i(csr_addr_q[3]), .csr_op_i(csr_op_q[3]),
         .csr_src_i(data_q[3]), .csr_src_zero_i(data_q[3] == 32'd0),
         .fflags_valid_i(1'b0), .fflags_i(5'd0), .exception_valid_i(fault_q[3]),
-        .exception_cause_i(cause_q[3]), .exception_tval_i(tval_q[3]), .priv_m_i(priv_m_q),
+        .exception_cause_i(cause_q[3]), .exception_tval_i(tval_q[3]), .priv_m_i(priv_m_q), .event_priv_m_i(priv_m_q),
         .hart_id_i(32'd0), .irq_software_i(irq_software_i), .irq_timer_i(irq_timer_i), .irq_external_i(irq_external_i),
         .trap_i(trap_valid_o), .trap_pc_i(trap_pc_o), .trap_interrupt_i(1'b1), .trap_cause_i(trap_cause_o), .trap_tval_i(32'd0),
         .xif_id_i(3'd0), .xif_kill_valid_i(1'b0), .xif_kill_id_i(3'd0), .xif_kill_ready_o(),

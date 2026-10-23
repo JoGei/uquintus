@@ -421,6 +421,10 @@ class CoreTest(uvm_test):
             o.update({n:self.signal(n) for n in ('de_fire','de_control_flow','de_branch_taken',
                 'de_next_pc','de_predicted_next_pc_q','de_redirect','predictor_invalidate')})
         if rst:
+            if o['wb_valid_q'] and self.signal('wb_kind_q') == 1:
+                assert not self.signal('wb_forwardable'), 'serialized CSR entered core bypass'
+                assert not self.signal('de_fire'), 'younger instruction admitted before CSR retired'
+                assert not o['ex_valid_q'], 'younger EX instruction overlapped serialized CSR in WB'
             assert o['priv_m_q']==self.priv and o['mstatus']==self.csrs[0x300] and o['mie']==self.csrs[0x304], ('IRQ pre-state',o,self.csrs)
             assert o['mip']==irq, ('external IRQ pins/mip',o['mip'],irq)
             # Include the independent bus agent's outstanding/held/granted work;
@@ -430,7 +434,7 @@ class CoreTest(uvm_test):
                          self.coprocessor is not None and self.coprocessor.pre_busy)
             check_interrupt_cycle(o,priv_m=self.priv,mstatus=self.csrs[0x300],mie=self.csrs[0x304],
                 lines=irq,lsu_busy=data_busy,de_fire=self.signal('de_fire'))
-        ci = dict(INPUTS, rst_n=rst, priv_m=self.priv, hart_id=self.hart_id,
+        ci = dict(INPUTS, rst_n=rst, priv_m=self.priv, event_priv_m=self.priv, hart_id=self.hart_id,
             irq_software=int(bool(irq & 8)), irq_timer=int(bool(irq & 128)),
             irq_external=int(bool(irq & 2048)), retire=o['wb_retire'],
             trap=int(bool(o['trap_valid'] or o['wb_exception_fire'])),

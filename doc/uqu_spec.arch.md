@@ -1165,6 +1165,16 @@ forwardable only on successful commitment, since counter read values can change
 while waiting. The existing hazard/forwarding block still owns matching and
 configured path selection.
 
+The full core shall exclude CSR instructions from both WB candidate forwarding
+data and result availability, using the registered WB kind. Their potential
+destination shall remain pending until retirement; younger consumers obtain
+the committed value from GPR storage after that edge. Existing CSR serialization
+already blocks younger admission through the retirement cycle, so this adds no
+stall cycle. Standalone WB may still advertise its retirement-time CSR result
+to other parents; architectural CSR/GPR writeback remains unchanged. Raw CSR
+read data, including live `mip`, shall not enter the core's speculative operand
+datapath merely because forwarding readiness is separately blocked.
+
 `result_o` shall carry unmasked candidate forwarding data, independently of
 `result_valid_o`. For loads, it shall use `lsu_res_forward_data_i`, the LSU's
 registered candidate; architectural writeback may separately use the live
@@ -1186,7 +1196,14 @@ normally an interrupt at a drained boundary, not a raw pending interrupt. It
 suppresses WB acceptance and updates CSR trap state even while the owning WB
 token is canceled. The controller shall prioritize older WB faults before
 asserting such an external event and provide a valid current privilege even
-with no live MEM/WB token. Reset dominates all events. WB's own accepted
+with no live MEM/WB token. `priv_m_i` shall carry the owning WB instruction's
+saved privilege for CSR access/return checks; `event_priv_m_i` shall independently
+carry current privilege for external trap/debug entry. WB shall select the
+appropriate context only for the CSR unit's event-state updates: synchronous
+faults and local EBREAK entry use the owner, external events use the current
+context. The CSR unit's own `event_priv_m_i` shall update MPP/DCSR.prv without
+feeding access permission checks. There shall be no empty-WB privilege fallback
+on the CSR access path. Reset dominates all events. WB's own accepted
 fault/MRET shall consume the token and clear/block younger parent slots; it
 shall not be fed combinationally back into its own `flush_i`, which would cancel
 the acceptance or form a control loop.

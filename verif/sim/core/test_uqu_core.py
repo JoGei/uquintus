@@ -565,6 +565,55 @@ class InterruptsTest(CoreTest):
         self.drop_objection()
 
 
+class CsrForwardingTest(CoreTest):
+    async def run_phase(self):
+        self.raise_objection()
+        # Adjacent CSR consumers must observe the committed GPR value. Masked
+        # IRQ levels remain live in mip, but cannot enter core candidate bypass.
+        upper = 1 if self.params['ISA_M'] else 0
+        self.put(BOOT, [ins_i(1,0,7), csr(0x340,rs=1), csr(0x340,rd=2,f=2),
+                       ins_r(3,2,1,upper=upper), ins_b(3,0,8,1), ins_s(0,3),
+                       csr(0x344,rd=4,f=2), ins_r(5,4,1,upper=upper),
+                       ins_b(5,0,8,1), ins_s(0,5), ins_i(6,5,1), ins_j(0,0)])
+        self.csr_overrides[BOOT+24] = 0x888
+        await self.reset()
+        await self.finish(BOOT+40, irq=0x888)
+        assert self.regs[2] == 7 and self.regs[4] == 0x888
+        assert self.regs[3] == (49 if self.params['ISA_M'] else 14)
+        expected = 0x888*7 if self.params['ISA_M'] else 0x888+7
+        assert self.regs[5] == expected and self.regs[6] == expected+1
+        assert not self.accesses and not self.memory and not self.traps and not self.faults
+        self.drop_objection()
+
+
+class EmptyTrapPrivilegeTest(CoreTest):
+    async def run_phase(self):
+        self.raise_objection()
+        program = self.setup_traps()
+        if self.params['ISA_PMP']:
+            program += [0x000020b7,csr(0x3b0,rs=1),ins_i(1,0,15),csr(0x3a0,rs=1)]
+            self.csrs.update({0x3b0:0,0x3a0:0})
+        program += [ins_i(1,0,-2048),csr(0x304,rs=1),0x000020b7,csr(0x341,rs=1)]
+        program += [csr(0x300,rs=0)] if self.params['ISA_UMODE'] else \
+                   [ins_i(2,0,128),csr(0x300,rs=2)]  # M-only: MPIE enables M-mode IRQ after MRET.
+        program += [0x30200073]
+        self.put(BOOT,program)
+        self.put(0x2000,[ins_i(3,0,9),ins_j(0,0)])
+        self.put(HANDLER,[csr(0x300,rd=10,f=2),csr(0x341,rd=11,f=2),ins_i(9,0,99),ins_j(0,0)])
+        await self.reset()
+        await self.until(lambda o:o['wb_retire'] and o['wb_original_q']==0x30200073)
+        assert self.priv == int(not self.params['ISA_UMODE']) and not self.signal('wb_valid_q')
+        assert self.signal('wb_priv_m_q') == 1  # Stale MRET owner was M-mode.
+        await self.until(lambda o:o['trap_valid'],irq=2048)
+        assert self.traps[-1] == (0x2000,11)
+        expected_mpp = 0 if self.params['ISA_UMODE'] else 0x1800
+        assert self.signal('mstatus') & 0x1800 == expected_mpp
+        await self.finish(HANDLER+8)
+        assert self.regs[10] & 0x1800 == expected_mpp and self.regs[11] == 0x2000
+        assert self.regs[9] == 99 and not self.faults
+        self.drop_objection()
+
+
 class ExtensionsTest(CoreTest):
     async def run_phase(self):
         self.raise_objection()
@@ -695,6 +744,16 @@ async def privilege(dut):
 @cocotb.test(timeout_time=2000,timeout_unit='us')
 async def interrupts(dut):
     await uvm_root().run_test('InterruptsTest')
+
+
+@cocotb.test(timeout_time=2000,timeout_unit='us')
+async def csr_forwarding(dut):
+    await uvm_root().run_test('CsrForwardingTest')
+
+
+@cocotb.test(timeout_time=2000,timeout_unit='us')
+async def empty_trap_privilege(dut):
+    await uvm_root().run_test('EmptyTrapPrivilegeTest')
 
 @cocotb.test(timeout_time=2000,timeout_unit='us')
 async def extensions(dut):
