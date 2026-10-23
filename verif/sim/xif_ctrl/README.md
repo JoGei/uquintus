@@ -38,6 +38,11 @@ instructions remain usable with XIF enabled, but the standard compressed offload
 channel, shared LSU and coprocessor execution traps remain deferred. No private
 memory/fault/completion sidebands are introduced.
 
+Future shared-LSU access, multiple outstanding data transactions, response/effect
+ordering and partial-completion considerations are recorded in the
+[deferred memory contract](../../../doc/uqu_spec.interfaces.md#511-deferred-shared-lsu-concurrency-and-side-effects).
+They do not change this controller or the current single-outstanding data port.
+
 ```sh
 make test COMPONENT=xif_ctrl CONFIG=rv32i_xif
 make test COMPONENT=xif_ctrl CONFIG=rv32i

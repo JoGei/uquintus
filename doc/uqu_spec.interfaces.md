@@ -826,7 +826,8 @@ implicitly replace it with an implemented all-or-nothing memory engine.
 
 Future shared-memory or execution-trap support shall require an explicit
 compatible interface/profile decision under the pinned-specification policy.
-The current standard-only constraint shall remain in force.
+The current standard-only constraint shall remain in force. The deferred
+multi-access and concurrency considerations are recorded in Section 5.1.1.
 
 The implemented WB endpoint and core-internal kill arbitration are documented
 in the [WB guide](../verif/sim/wb/README.md). The
@@ -852,6 +853,70 @@ The DE PC is retained for reissue after return. Shared reset discards pre-reset
 coprocessor work together with core transaction tracking. The initial enabled
 core profile supports uncompressed offloads; native compressed instructions may
 coexist, but the standard compressed offload channel remains deferred.
+
+#### 5.1.1. Deferred shared-LSU concurrency and side effects
+
+**Status:** Design considerations recorded; implementation and memory profile
+deferred. The current `dmem` limit remains one outstanding transaction, with no
+new concurrency parameter or coprocessor signals.
+
+A custom instruction can perform several sequential accesses using one
+outstanding transaction. Multiple outstanding transactions are a possible
+throughput enhancement for independent accesses, not a prerequisite for
+multi-access instructions. A future shared-LSU design may reuse the fetch
+engine's ordered tracking and response-reservation principles, but shall not
+inherit speculative-fetch cancellation semantics for data accesses.
+
+Before enabling shared-LSU concurrency, the integration contract shall settle:
+
+1. **Transaction ownership and response order.** Each access needs internal
+   association with its owning instruction, access sequence, operation and
+   fault address. With the existing ID-less OBI profile, responses must match
+   requests in grant order. Instruction-level XIF identifiers do not replace
+   per-access tracking. Response order alone does not guarantee the order or
+   absence of external memory/device effects; required effect ordering and
+   read/write dependencies must also be defined and enforced.
+2. **Admission and protection.** Capacity must be reserved before presenting
+   every request, including requests awaiting grant. Each access must pass its
+   own alignment, PMP, effective-privilege and ordering checks before external
+   presentation. Registered credits can decouple transport capacity from live
+   responses, but cannot authorize an otherwise unsafe effect. In particular,
+   a deeper queue must not allow a younger native instruction's request to
+   escape before older instructions complete successfully or are proven unable
+   to fault. Removing that live permission dependency may cost an additional
+   cycle; adding transaction slots alone does not remove it.
+3. **Faults and partial effects within one instruction.** If access A faults
+   after access B has been presented or granted, B may already have changed
+   memory or a device. Device reads can also have irreversible effects, and a
+   failed access's own effect guarantees depend on the memory-system contract.
+   The future profile must explicitly choose and provide either an all-or-
+   nothing guarantee or documented partial-completion semantics, including
+   fault selection, status reporting, restart/retry safety and software recovery.
+   Neither alternative is selected or implemented by this deferral. Ordered
+   responses and in-order instruction retirement do not provide rollback.
+4. **Stopping and draining.** On a reported failure, stop initiating further
+   accesses as required by the chosen profile. A request already presented
+   cannot be withdrawn before grant; granted requests must receive their
+   responses. Track and drain all such work, including later accesses whose
+   effects may occur after the first failure is observed. Discarding a response
+   does not undo its access. Speculative instruction kill must retain its
+   no-effect guarantee through an explicit safe-issue policy, not merely mark
+   outstanding accesses killed.
+5. **Instruction completion and interrupts.** Define where the multi-access
+   instruction waits, who consumes each response, and when its final status or
+   fault may be delivered through a compatible interface profile. All accesses
+   required for architectural completion must finish or be drained before
+   instruction completion or trap entry. A blocking copy instruction follows
+   the existing completion-before-interrupt policy and can therefore delay
+   interrupts for the entire transfer. An asynchronous DMA command with an
+   independent memory path needs a separate completion, protection and error
+   contract; it is not implied by allowing several accesses through the LSU.
+
+These considerations do not enable shared-LSU access, execution-time XIF traps,
+partial-effects exceptions or extra CV-X-IF sidebands in the initial profile.
+The earlier deferred intent in D-054, D-090, D-091 and D-232 remains subject to
+an explicit future interface and architectural decision. Verification goals for
+that work are recorded in the [verification specification](uqu_spec.verif.md#212-deferred-xif-memory-concurrency-verification).
 
 ### 5.2. RTL and interrupt-completion contracts
 

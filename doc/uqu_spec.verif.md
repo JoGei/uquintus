@@ -876,6 +876,43 @@ The core `bpu_statistics` case shall exercise real timer markers around a
 branch/JAL loop; optional `UQU_BPU_NATIVE` qualification shall compare both
 marker points and complete statistics against a matching native driver.
 
+### 2.12. Deferred XIF memory concurrency verification
+
+**Status:** Future verification goals; shared-LSU integration and multiple
+outstanding data transactions remain deferred. No current suite or coverage
+claim is implied.
+
+Before enabling that functionality, verification shall cover the contract in
+[interfaces, Section 5.1.1](uqu_spec.interfaces.md#511-deferred-shared-lsu-concurrency-and-side-effects).
+An independent transaction scoreboard shall distinguish instruction ownership,
+per-access sequence, presentation, grant, response and external side effects.
+It shall not infer effect order or rollback from ordered response delivery.
+Required scenarios include:
+
+- Several requests granted before the first response, ordered response/address
+  association, response-storage saturation, delayed grants and independently
+  varying response latency. Local alignment/PMP denials shall reach no bus.
+- A fault on an early access while later requests are unpresented, presented
+  without grant, granted, or already effective. Include stores and device reads
+  with modeled side effects, and a failing access whose own effects follow the
+  chosen integration guarantee. Check the explicitly selected partial-completion
+  or all-or-nothing policy, fault/status selection and recovery/retry behavior.
+- Stopping further issue after failure while preserving presented requests and
+  draining every granted transaction. Later effects and responses must remain
+  associated with their owner; discarding a response must not erase the memory
+  model's already observed effects.
+- Speculative kills, repeated flushes and younger native accesses behind an
+  unresolved older fault. Check the no-effect kill guarantee and native precise
+  exception ordering independently of buffer availability.
+- Instruction/result completion and interrupt entry only after required work is
+  finished or drained. Exercise long blocking transfers and coordinated reset
+  with several transactions pending. Any asynchronous DMA profile shall receive
+  separate completion, protection and error tests under its own contract.
+
+These goals do not add memory/error channels to the pinned CV-X-IF profile or
+select a mechanism for reporting custom execution faults. The compatible
+interface and architectural policy must be settled before implementation.
+
 ## 3. Supported-configuration CI coverage
 
 **Status:** CI requirement agreed; simulation flow implemented, synthesis flow
