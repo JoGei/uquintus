@@ -315,6 +315,8 @@ values 0/1/2 for the existing modes and add `UQU_MUL_DADDA = 3`. The
 `rv32im_dadda` preset and configuration label `mua-mul:dadda` expose the choice.
 See the [component contract](../verif/sim/daddamul/README.md).
 
+The core supplies MUL/DIV with resolved EX RS1 and RS2 through dedicated `uqu_stage_ex.muldiv_a_i` and `muldiv_b_i` inputs. These bypass the ALU's PC/immediate operand selectors; legal native M instructions consume register operands exclusively. The existing captured/deferred operand resolution, readiness, forwarding, cancellation and latency rules still apply. This adds neither operand registers nor a separate arithmetic unit: ALU and iterative MUL/DIV continue sharing the EX-owned arithmetic slice. ALU/FPU operands and functional-unit result selection retain their existing paths.
+
 A [future EX/MEM split](uqu_draft.mul.md#deferred-use-of-mem-as-phase-two) is
 deferred. MEM retains its LSU role; there is no implemented Dadda cut parameter
 or two-phase multiplier interface. The default remains `iterative`.

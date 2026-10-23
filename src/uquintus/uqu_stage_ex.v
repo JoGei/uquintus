@@ -30,6 +30,9 @@ module uqu_stage_ex #(
     input  wire [31:0] a_i,
     input  wire [31:0] b_i,
     input  wire [31:0] c_i,
+    // Resolved register sources bypass the ALU's PC/immediate selection.
+    input  wire [31:0] muldiv_a_i,
+    input  wire [31:0] muldiv_b_i,
     input  wire [2:0]  rm_i,
     input  wire [31:0] pass_data_i,
     input  wire [31:0] store_data_i,
@@ -145,7 +148,7 @@ module uqu_stage_ex #(
     ) u_muldiv (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
         .req_valid_i(request_valid && muldiv_selected), .req_ready_o(muldiv_req_ready),
-        .req_op_i(op_i[2:0]), .req_a_i(a_i), .req_b_i(b_i),
+        .req_op_i(op_i[2:0]), .req_a_i(muldiv_a_i), .req_b_i(muldiv_b_i),
         .res_valid_o(muldiv_res_valid), .res_ready_i(result_ready && muldiv_selected),
         .res_data_o(muldiv_result), .arith_use_o(muldiv_arith_use),
         .arith_a_o(muldiv_arith_a), .arith_b_o(muldiv_arith_b),

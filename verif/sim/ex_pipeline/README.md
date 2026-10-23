@@ -27,6 +27,8 @@ one-per-cycle ALU throughput across the two parent registers, then randomizes
 operands, execution classes, operand readiness, and downstream backpressure.
 Blocked EX/MEM outputs and blocked DE/EX identity must remain stable.
 
+The parent fixture captures separate MUL/DIV register operands alongside the selected ALU/FPU operands. Randomized tokens vary these buses independently, so the scoreboard checks that each functional unit uses its own operands across execution, stalls and transfers.
+
 `drain_flush` checks an older MEM result draining while DIV occupies EX,
 EX cancellation without a late result, EX-only flushing while older EX/MEM
 payload is retained, and reset recovery. RV32I profiles explicitly exercise

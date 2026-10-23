@@ -59,7 +59,8 @@ become empty. See the actual
 | `fu_i[1:0]` | `0`: ALU; `1`: MUL/DIV; `2`: FPU; `3`: pass-through. |
 | `op_i[4:0]` | Selected unit's normalized operation: ALU's four-bit code with bit 4 zero, M-instruction funct3 with bits 4:3 zero, or the five-bit FPU selector. Ignored for pass-through. |
 | `operands_ready_i` | All operands used by this instruction, including store data, are resolved. |
-| `a_i[31:0]`, `b_i[31:0]`, `c_i[31:0]` | Selected and resolved unit operands. |
+| `a_i[31:0]`, `b_i[31:0]`, `c_i[31:0]` | Selected ALU/FPU operands; ALU A/B may select PC/immediate. |
+| `muldiv_a_i[31:0]`, `muldiv_b_i[31:0]` | Resolved RS1/RS2 for MUL/DIV, bypassing ALU PC/immediate selection. |
 | `rm_i[2:0]` | Effective FPU rounding mode. |
 | `pass_data_i[31:0]` | Value accompanying an instruction with no EX computation. |
 | `store_data_i[31:0]` | Resolved store value, independent of ALU operand B. |
@@ -141,6 +142,8 @@ readiness, cancellation at each execution phase and on held results, recovery,
 and consecutive transfers. Tests count real unit request handshakes to prove
 one issue per instruction while the parent keeps `valid_i` asserted. Independent
 mathematical [models](../common/ex_model.py) are shared with the parent fixture.
+
+Directed M-extension cases deliberately disagree with the ALU operand bus, and randomized tokens vary the MUL/DIV and ALU/FPU buses independently. These check source isolation together with the existing latency, backpressure and cancellation contracts. Direct MUL/DIV inputs remove only the preceding PC/immediate selection; iterative operand steering and the ALU-versus-MUL/DIV selector before the shared arithmetic slice remain. Later iterations use the unit's internal state rather than the original EX input bus.
 
 The [core](../core/README.md) connects EX to the decoder, hazards/forwarding,
 central controller and the remaining stages. Its regressions add integrated

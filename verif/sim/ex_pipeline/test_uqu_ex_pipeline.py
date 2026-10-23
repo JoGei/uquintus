@@ -14,7 +14,7 @@ from pyuvm import uvm_root, uvm_test
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from ex_model import FU_MULDIV, FU_PASS, assert_outcome, cycles, outcome, random_token, token
 
-FIELDS = ('fu', 'op', 'a', 'b', 'c', 'rm', 'pass_data', 'store_data', 'instr',
+FIELDS = ('fu', 'op', 'a', 'b', 'c', 'muldiv_a', 'muldiv_b', 'rm', 'pass_data', 'store_data', 'instr',
           'exception_valid', 'exception_cause', 'exception_tval', 'pc', 'rd')
 OUTPUTS = ('result', 'store_data', 'fflags_valid', 'fflags', 'exception_valid',
            'exception_cause', 'exception_tval', 'pc', 'instr', 'rd')

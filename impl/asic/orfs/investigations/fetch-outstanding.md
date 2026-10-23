@@ -150,6 +150,8 @@ instruction request/address outputs. Removing local response-dependent turnover
 does not remove the separate EX arithmetic → DE branch → frontend control
 route. Its functional-unit operand selection remains a subsequent timing target.
 
+The [producer-selection audit](producer-selection.md) measures writeback margin and the result-selection interval, and ranks the next candidates.
+
 The completed evidence is retained under
 [`build/investigations/fetch-outstanding/`](../../../../build/investigations/fetch-outstanding/),
 including scripts, source snapshot, configurations, structural JSON, bounded

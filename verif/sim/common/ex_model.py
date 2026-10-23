@@ -18,6 +18,8 @@ def token(**updates):
                    store_data=0, instr=0x33, exception_valid=0,
                    exception_cause=0, exception_tval=0, pc=0x1000, rd=1)
     payload.update(updates)
+    payload.setdefault('muldiv_a', payload['a'])
+    payload.setdefault('muldiv_b', payload['b'])
     return payload
 
 
@@ -36,7 +38,7 @@ def outcome(payload, params):
             value, flags = fpu_result(op, payload['a'], payload['b'], payload['c'], payload['rm'] if payload['rm'] < 5 else 0)
             return (value, payload['store_data'], 1, flags, 0, 0, 0)
         value = (alu_result(op, payload['a'], payload['b']) if fu == FU_ALU else
-                 muldiv_result(op, payload['a'], payload['b']) if fu == FU_MULDIV else
+                 muldiv_result(op, payload['muldiv_a'], payload['muldiv_b']) if fu == FU_MULDIV else
                  payload['pass_data'])
         return (value, payload['store_data'], 0, 0, 0, 0, 0)
     return (0, 0, 0, 0, 1, cause, tval)
@@ -57,6 +59,7 @@ def random_token(rng, index, params):
     fu = rng.choice([FU_ALU, FU_ALU, FU_MULDIV, FU_PASS, FU_FPU])
     op = rng.choice(list(ALU_OPS.values())) if fu == FU_ALU else rng.randrange(22) if fu == FU_FPU else rng.randrange(8)
     return token(fu=fu, op=op, a=rng.getrandbits(32), b=rng.getrandbits(32),
+                 muldiv_a=rng.getrandbits(32), muldiv_b=rng.getrandbits(32),
                  c=rng.getrandbits(32), rm=rng.randrange(8),
                  pass_data=rng.getrandbits(32), store_data=rng.getrandbits(32),
                  instr=rng.getrandbits(32), exception_valid=int(rng.randrange(16) == 0),

@@ -374,6 +374,7 @@ module uqu_core #(
     ) u_ex (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(ex_flush), .valid_i(ex_valid_q), .ready_o(), .valid_o(ex_complete), .ready_i(ex_ready),
         .fu_i(ex_fu_q), .op_i(ex_op_q), .operands_ready_i(ex_operands_ready), .a_i(ex_a), .b_i(ex_b), .c_i(ex_rs[2]), .rm_i(ex_rm_q),
+        .muldiv_a_i(ex_rs[0]), .muldiv_b_i(ex_rs[1]),
         .pass_data_i(ex_pass_q), .store_data_i(ex_rs[1]), .instr_i(ex_original_q),
         .exception_valid_i(ex_exception_q), .exception_cause_i(ex_cause_q), .exception_tval_i(ex_tval_q),
         .result_o(ex_result), .store_data_o(ex_store_data), .fflags_valid_o(ex_fflags_valid), .fflags_o(ex_fflags),

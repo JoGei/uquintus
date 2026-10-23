@@ -27,6 +27,8 @@ module uqu_ex_pipeline_tb #(
     input wire  [31:0]  in_a_i,
     input wire  [31:0]  in_b_i,
     input wire  [31:0]  in_c_i,
+    input wire  [31:0]  in_muldiv_a_i,
+    input wire  [31:0]  in_muldiv_b_i,
     input wire  [2:0]   in_rm_i,
     input wire  [31:0]  in_pass_data_i,
     input wire  [31:0]  in_store_data_i,
@@ -59,6 +61,8 @@ module uqu_ex_pipeline_tb #(
     reg         [31:0]  deex_a_q;
     reg         [31:0]  deex_b_q;
     reg         [31:0]  deex_c_q;
+    reg         [31:0]  deex_muldiv_a_q;
+    reg         [31:0]  deex_muldiv_b_q;
     reg         [2:0]   deex_rm_q;
     reg         [31:0]  deex_pass_data_q;
     reg         [31:0]  deex_store_data_q;
@@ -116,6 +120,8 @@ module uqu_ex_pipeline_tb #(
                 deex_a_q <= in_a_i;
                 deex_b_q <= in_b_i;
                 deex_c_q <= in_c_i;
+                deex_muldiv_a_q <= in_muldiv_a_i;
+                deex_muldiv_b_q <= in_muldiv_b_i;
                 deex_rm_q <= in_rm_i;
                 deex_pass_data_q <= in_pass_data_i;
                 deex_store_data_q <= in_store_data_i;
@@ -164,6 +170,8 @@ module uqu_ex_pipeline_tb #(
         .a_i(deex_a_q),
         .b_i(deex_b_q),
         .c_i(deex_c_q),
+        .muldiv_a_i(deex_muldiv_a_q),
+        .muldiv_b_i(deex_muldiv_b_q),
         .rm_i(deex_rm_q),
         .pass_data_i(deex_pass_data_q),
         .store_data_i(deex_store_data_q),

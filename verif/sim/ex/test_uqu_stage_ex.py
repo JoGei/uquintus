@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from ex_model import FU_ALU, FU_MULDIV, FU_FPU, FU_PASS, assert_outcome, cycles, outcome, random_token, token
 from rv32_arithmetic import ALU_OPS, MASK
 
-FIELDS = ('fu', 'op', 'a', 'b', 'c', 'rm', 'pass_data', 'store_data', 'instr',
+FIELDS = ('fu', 'op', 'a', 'b', 'c', 'muldiv_a', 'muldiv_b', 'rm', 'pass_data', 'store_data', 'instr',
           'exception_valid', 'exception_cause', 'exception_tval')
 
 
@@ -138,7 +138,8 @@ class DirectedTest(ExTest):
         for op in range(8):
             for a in values[:5]:
                 for b in values[:5]:
-                    await self.operation(token(fu=FU_MULDIV, op=op, a=a, b=b), hold=2)
+                    await self.operation(token(fu=FU_MULDIV, op=op, a=a ^ MASK,
+                        b=b ^ MASK, muldiv_a=a, muldiv_b=b), hold=2)
         if self.params['ISA_ZFINX']:
             for op in range(22):
                 for rm in range(5):
