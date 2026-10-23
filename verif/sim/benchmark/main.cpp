@@ -1,3 +1,4 @@
+#include <deque>
 // Native cycle driver. Python is used only before and after this executable.
 #include "Vuqu_benchmark_tb.h"
 #include "verilated.h"
@@ -151,7 +152,7 @@ int main(int argc, char **argv) {
         uint32_t start_pc = uint32_t(std::stoull(argv[7], nullptr, 0));
         uint32_t stop_pc = uint32_t(std::stoull(argv[8], nullptr, 0));
         require(limit > 0 && latency[0] > 0 && latency[1] > 0, "invalid watchdog/memory latency");
-        Pending pending[2];
+        std::deque<Pending> pending[2];
         bool completion_pending = false;
         uint32_t completion_pc = 0, completion_value = 0;
         auto eval = [&]() { dut->eval(); context->timeInc(1); };
@@ -165,11 +166,11 @@ int main(int argc, char **argv) {
             dut->imem_rdata_i = dut->dmem_rdata_i = 0;
             dut->imem_err_i = dut->dmem_err_i = 1;
             eval();
-            bool returning[2] = {!reset && pending[0].valid && pending[0].delay == 0,
-                                 !reset && pending[1].valid && pending[1].delay == 0};
+            bool returning[2] = {!reset && !pending[0].empty() && pending[0].front().delay == 0,
+                                 !reset && !pending[1].empty() && pending[1].front().delay == 0};
             dut->imem_rvalid_i = returning[0]; dut->dmem_rvalid_i = returning[1];
-            if (returning[0]) { dut->imem_rdata_i = pending[0].data; dut->imem_err_i = 0; }
-            if (returning[1]) { dut->dmem_rdata_i = pending[1].data; dut->dmem_err_i = 0; }
+            if (returning[0]) { dut->imem_rdata_i = pending[0].front().data; dut->imem_err_i = 0; }
+            if (returning[1]) { dut->dmem_rdata_i = pending[1].front().data; dut->dmem_err_i = 0; }
             eval();
             // Availability is an independent input. Grant both buses before
             // sampling requests: a data grant can release DE and redirect IF
@@ -189,12 +190,12 @@ int main(int argc, char **argv) {
                 // simultaneous data store; response data is captured at grant.
                 for (unsigned bus = 0; bus < 2; ++bus) {
                     auto &p = pending[bus]; const auto &r = request[bus];
-                    if (returning[bus]) p.valid = false;
-                    else if (p.valid && p.delay) --p.delay;
+                    if (returning[bus]) p.pop_front();
+                    for (auto &response : p) if (response.delay) --response.delay;
                     if (r.valid) {
-                        require(!p.valid, "multiple outstanding bus requests");
+                        require(p.size() < (bus == 0 ? 2u : 1u), "too many outstanding bus requests");
                         require(!(r.addr & 3), "unaligned bus request");
-                        p = {true, latency[bus]-1, memory.word(r.addr)};
+                        p.push_back({true, latency[bus]-1, memory.word(r.addr)});
                         if (r.we) {
                             memory.store(r.addr, r.data, r.be);
                             if ((r.addr & ~7u) == tohost) {
@@ -231,7 +232,7 @@ int main(int argc, char **argv) {
                         // retirement, including compressed store encodings.
                         require((completion_value & 1) && completion_value, "invalid tohost completion value");
                         require(memory.word(tohost+4) == 0, "nonzero tohost upper word");
-                        require(!pending[1].valid, "completion retired before the data response");
+                        require(pending[1].empty(), "completion retired before the data response");
                         exit_code = completion_value == 1 ? 0 : completion_value >> 1;
                     }
                 }

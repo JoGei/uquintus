@@ -11,6 +11,7 @@ from pyuvm import uvm_root, uvm_test
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1] / 'common'))
 from compressed_model import assemble, compressed
+from response_queue import ResponseQueue
 
 
 class PipelineTest(uvm_test):
@@ -22,6 +23,7 @@ class PipelineTest(uvm_test):
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
         self.words = {}
         self.errors = set()
+        self.responses = ResponseQueue()
         self.response = None
         self.previous_bus = None
         self.slot = None
@@ -102,16 +104,12 @@ class PipelineTest(uvm_test):
         if o['pmp_valid']:
             self.fetches.append(o['pmp_addr'])
         if not i['rst_n']:
-            self.response = None
+            self.responses.clear()
         else:
-            if returning:
-                self.response = None
-            elif self.response is not None:
-                delay,data,error = self.response
-                self.response = delay-1,data,error
+            self.responses.advance(returning)
             if grant:
-                assert self.response is None
-                self.response = self.rng.randrange(5),self.words.get(addr,0x00010001 if self.c else 0x13),int(addr in self.errors)
+                self.responses.issue(self.rng.randrange(5),self.words.get(addr,0x00010001 if self.c else 0x13),int(addr in self.errors))
+        self.response = self.responses.head
         self.previous_bus = addr if req and not grant and i['rst_n'] else None
         d.clk_i.value = 1
         await Timer(1,units='ns')

@@ -8,6 +8,7 @@ from cocotb.triggers import Timer
 from pyuvm import uvm_test
 
 from compressed_model import compressed
+from response_queue import ResponseQueue
 from bpu_model import BpuModel
 
 MASK = (1 << 32)-1
@@ -29,6 +30,7 @@ class IfStageTest(uvm_test):
         self.live = {}
         self.complete = set()
         self.bus_owners = deque()
+        self.responses = ResponseQueue()
         self.response = None
         self.previous_bus = None
         self.pc = 0
@@ -205,7 +207,7 @@ class IfStageTest(uvm_test):
             self.complete.clear()
             self.credits = 0
             self.fault_hold = False
-            self.bus_owners = deque(list(self.bus_owners)[:1] if self.previous_bus is not None else [])
+            self.bus_owners = deque(list(self.bus_owners)[:1] if req and self.bus_owners and self.bus_owners[0][1]==addr else [])
             if not i['rst_n']:
                 self.pc = i['boot_addr']
                 self.fetch_addr = self.pc&~3
@@ -225,7 +227,7 @@ class IfStageTest(uvm_test):
                 self.live.clear()
                 self.complete.clear()
                 self.credits = 0
-                self.bus_owners = deque(list(self.bus_owners)[:1] if self.previous_bus is not None else [])
+                self.bus_owners = deque(list(self.bus_owners)[:1] if req and self.bus_owners and self.bus_owners[0][1]==addr else [])
                 self.replay = prefix if replay_start else []
                 continuation = predicted_pc + (sum(map(self.predictor.length,prefix)) if replay_start else 0)
                 self.fetch_addr = (continuation&MASK)&~3
@@ -255,22 +257,20 @@ class IfStageTest(uvm_test):
                 self.complete.add(address)
         assert 0<=self.credits<=self.depth+3
         if not i['rst_n']:
-            self.response = None
+            self.responses.clear()
         else:
             if returning:
                 _,epoch,address,_,_ = self.response
                 if epoch==self.epoch and address in self.live:
                     self.complete.add(address)
-                self.response = None
-            elif self.response is not None and self.response[0]>0:
-                delay,*payload = self.response
-                self.response = (delay-1,*payload)
+            self.responses.advance(returning)
             if gnt:
-                assert self.response is None,'multiple outstanding OBI responses'
                 epoch,address,data,error = self.bus_owners.popleft()
-                assert addr==address and addr&3==0
+                assert addr==address and addr&3==0, (addr,address,list(self.bus_owners),o,i)
                 self.granted.append(addr)
-                self.response = (self.rng.randrange(8) if self.response_latency is None else self.response_latency-1),epoch,address,data,error
+                self.responses.issue(self.rng.randrange(8) if self.response_latency is None else self.response_latency-1,
+                                     epoch,address,data,error)
+        self.response = self.responses.head
         self.previous_bus = addr if req and not gnt and i['rst_n'] else None
         if not i['rst_n'] or invalidate or transfer:
             self.held_prediction = None

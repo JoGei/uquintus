@@ -47,8 +47,10 @@ ties those inputs to `HART_ID` so synthesis can fold the constant.
 | `fencei_req_o`, `fencei_ack_i` | External instruction synchronization when Zifencei is enabled; otherwise request is inactive. |
 | `xif_*` | Standard coupled issue/register and commit/result channels. When disabled, all outputs are inactive and inputs ignored. When enabled, DE instruction bits are visible for parallel recognition before issue qualification. |
 
-Both memory ports allow independent variable latency, with one outstanding
-transaction each. Once presented, a request persists until grant, including
+Both memory ports allow independent variable latency, with two outstanding
+instruction requests and one outstanding data request. The instruction agent
+queues responses in grant order and advances each latency independently. Once
+presented, a request persists until grant, including
 through a redirect that kills its owning instruction. Responses have no
 backpressure and arrive at least one cycle after their grant. There are no
 internal timeouts. Reset also clears transaction tracking: the memory system

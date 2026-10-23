@@ -1,8 +1,8 @@
 # Instruction-word fetch engine
 
 [uqu_ifetch.v](../../../src/uquintus/uqu_ifetch.v) is the IF-owned, single-word
-OBI transaction engine. It has a combinational request bypass, a private holding register, one granted
-transaction, and two completion slots with optional empty-queue response
+OBI transaction engine. It has a combinational request bypass, a private holding register, two ordered
+outstanding transactions, and two reserved completion slots with optional empty-queue response
 fall-through, independent of the
 fetched-word buffer, [instruction aligner](../if_aligner/README.md) and
 parent-owned IF/DE register.
@@ -16,7 +16,7 @@ make test COMPONENT=ifetch_pmp CONFIG=rv32i_pmp
 ```
 
 Use `PYTHON=.venv/bin/python` for the repository environment. The
-[manifest](../../../config/sim/ifetch.yml) selects eight cocotb/pyuvm suites.
+[manifest](../../../config/sim/ifetch.yml) selects ten cocotb/pyuvm suites.
 `MUA_REDIRECT_BYPASS` enables result fall-through through bit 2; the other
 policies belong to the enclosing IF stage and do not alter this leaf. `ISA_C` and the compressed-decode strategy
 do not change its aligned 32-bit word interface.
@@ -69,7 +69,7 @@ backpressure, ID, retry or internal timeout.
 
 An allowed, permitted request bypasses an empty private holding slot and
 presents its aligned address to OBI immediately, provided completion capacity
-is reserved and the prior granted transaction has completed or is responding.
+is reserved. The prior granted transaction need not have responded.
 A preasserted grant accepts that request on the same edge as native acceptance;
 the engine does not enqueue a duplicate. If grant is delayed, the request/address
 is retained in the private slot. Accepted requests that initially lack permission
@@ -106,15 +106,23 @@ stable. Stored heads always have priority, including simultaneous pop/response.
 Bus errors zero data; invalid result fields are zero. PMP denials remain
 registered. Global flush/reset and killed ownership suppress live data; local
 clear leaves the current live head visible to avoid prediction feedback loops.
-No extra queue storage or outstanding transaction is introduced.
+Result fall-through does not add result storage or change the outstanding limit.
 
-The engine reserves one of its two completion slots before presenting each
-request. It can accept the next native address while the previous request is
-granted, and grant that queued request on the same edge that the older response
-returns. There is at most one granted transaction awaiting its response; a
-response and replacement grant on one edge preserve that limit. Only response
-validity participates in turnover, never response data. This creates a control
-path from `imem_rvalid_i` to request presentation that integration timing must cover.
+The engine reserves one of its two completion places before presenting each
+request. Two granted transactions may await responses concurrently. An ordered
+two-entry metadata FIFO retains their aligned addresses and killed bits. A
+registered reservation count covers outstanding transactions plus stored
+results; an ungranted presented request retains its available reservation.
+Response arrival moves that reservation into result storage rather than freeing
+it. Consuming a stored result can authorize a new request on the same edge.
+A consumed live result releases its reservation at the edge, without making
+request admission depend on that live response.
+
+No instruction response signal participates in this leaf's combinational
+request, address or native-readiness logic, in any bypass configuration.
+Combined frontend response and word-buffer fall-through may still create an
+indirect response-to-request path through alignment, prediction or fault
+containment. This unit does not remove those explicitly selected bypasses.
 
 With continuous input/output readiness, permission, immediate grants and
 one-cycle responses, requests, grants and results sustain one word
@@ -144,7 +152,9 @@ The engine holds completions if that FIFO fills.
 Flush on the grant or response edge follows the same rules. Repeated flushes
 cannot release outstanding ownership early. New-target addresses may queue
 privately behind a killed transaction, but new
-bus work waits for its response to drain. Redirects and target selection belong
+bus work may start before its response drains if an unused reservation remains.
+Each old response must still drain in order; repeated redirects cannot release
+its transaction ownership or capacity early. Redirects and target selection belong
 to the IF/core controller.
 
 Reset clears transaction control, may withdraw a request, and does not wait
@@ -166,10 +176,18 @@ have no reset; validity prevents their use until initialized.
 - `streaming`: 256 back-to-back words with an explicit one-word-per-cycle
   acceptance/grant/result check and same-cycle initial acceptance/grant, then 1,024 pipelined words with independent
   grant/response/consumer waits, mixed PMP denials and bus errors. The scoreboard
-  checks ordering, data, bounded storage and at most one granted outstanding
-  transaction.
+  checks ordering, data, bounded storage and at most two granted outstanding
+  transactions with independently elapsed response delays.
 - `fallthrough`: live consumption without duplicates, blocked-result capture/retention, stored-head priority, local clear/new target overlap, global flush and registered PMP denials.
 - `replace`: 48 combinations of global/local invalidation, idle/private/held/granted/returning/full-result old work, new PMP denials and bus errors; check target ownership, configured completion latency and no duplicates.
+- `outstanding`: second grant before the first response, reservation saturation,
+  registered-result credit reuse, repeated redirects with two killed pending
+  words, and new-target progress before all killed responses drain.
+- `stress`: 5,000 random stream cycles mixing redirects, local clears,
+  replacements, PMP denials, bus errors and independent waits, followed by
+  complete draining. A transaction scoreboard checks ordered surviving results.
+  Every suite probes both `imem_rvalid_i` values before the edge and checks that
+  request/address/native readiness do not change.
 - `pipelined_flush`: registered, outstanding and queued words active together;
   pending/returning killed responses, held requests, full result storage, queued
   denials, new-target turnover and reset. The control suite also checks that

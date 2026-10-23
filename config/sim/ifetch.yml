@@ -12,3 +12,5 @@ tests:
   - clear
   - replace
   - fallthrough
+  - outstanding
+  - stress

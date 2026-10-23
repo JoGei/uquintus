@@ -188,6 +188,12 @@ core omits later EX bypass muxes when the configured DE routes require capture
 before admission, and retains them for deferred operands where needed. This
 specialization applies with DE operand retention enabled or disabled.
 
+Instruction fetch tracks two ordered outstanding requests and reserves response
+storage before presenting each request. The default frontend has no
+combinational instruction-response-to-request dependency; combined response and
+word-buffer fall-through still exposes live instruction control paths. See the
+[fetch timing comparison](impl/asic/orfs/investigations/fetch-outstanding.md).
+
 ## Implemented components
 
 | Component | RTL | Verification guide |

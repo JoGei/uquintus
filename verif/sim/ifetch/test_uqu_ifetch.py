@@ -12,6 +12,7 @@ from pyuvm import uvm_root, uvm_test
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from ifetch_model import MASK, completion, word_address
+from response_queue import ResponseQueue
 
 
 class IfetchTest(uvm_test):
@@ -47,6 +48,14 @@ class IfetchTest(uvm_test):
                 assert o['imem_req'] and o['imem_addr'] == old_o['imem_addr'], 'request withdrawn/replaced'
             if old_o['res_valid'] and not old_i['res_ready'] and not old_i['clear'] and i['rst_n'] and not i['flush']:
                 assert o['res_valid'] and self.result(o) == self.result(old_o), 'retained result changed'
+        # Request admission must not borrow a live response credit. Probe both
+        # values before the edge while keeping native/control inputs unchanged.
+        d.imem_rvalid_i.value = 1-i['imem_rvalid']
+        await Timer(1, units='ns')
+        assert tuple(int(getattr(d,n+'_o').value) for n in ('imem_req','imem_addr','req_ready')) == \
+            tuple(o[n] for n in ('imem_req','imem_addr','req_ready')), 'response-to-request dependency'
+        d.imem_rvalid_i.value = i['imem_rvalid']
+        await Timer(1, units='ns')
         self.previous = i,o
         d.clk_i.value = 1
         await Timer(1, units='ns')
@@ -150,16 +159,16 @@ class StreamingTest(IfetchTest):
     async def stream(self, count, random_wait=False):
         await self.reset()
         expected, bus = deque(), deque()
-        pending = None
+        pending = ResponseQueue()
         accepted = 0
         received = 0
         accepts, grants, results = [], [], []
         for tick in range(100000):
             address = (0x1000+accepted*4) & MASK
             denied = random_wait and accepted%17==3
-            returning = pending is not None and pending[0]==0
-            data = pending[2] if returning else MASK
-            error = pending[3] if returning else 1
+            returning = bool(pending and pending.head[0]==0)
+            data = pending.head[2] if returning else MASK
+            error = pending.head[3] if returning else 1
             ready = int(not random_wait or self.rng.random()<0.6)
             grant = int(not random_wait or self.rng.random()<0.7)
             r = await self.cycle(req_valid=int(accepted<count), req_addr=address,
@@ -178,21 +187,16 @@ class StreamingTest(IfetchTest):
                     bus.append((address,value,int(fault)))
                 accepted += 1
                 accepts.append(tick)
-            if returning:
-                pending = None
-            elif pending is not None:
-                delay,*payload = pending
-                pending = (delay-1,*payload)
+            pending.advance(returning)
             if r['imem_req'] and grant:
-                assert pending is None, 'more than one granted transaction outstanding'
                 assert bus, 'bus request without native acceptance / denied request leaked'
                 addr,value,fault = bus.popleft()
                 assert r['imem_addr']==addr, (r,addr)
-                pending = (self.rng.randrange(9) if random_wait else 0, addr,value,fault)
+                pending.issue(self.rng.randrange(9) if random_wait else 0, addr,value,fault)
                 grants.append(tick)
             assert len(expected)<=3, 'unbounded accepted work'
             if received==count:
-                assert not expected and not bus and pending is None
+                assert not expected and not bus and not pending
                 break
         else:
             raise AssertionError('stream did not drain')
@@ -206,6 +210,96 @@ class StreamingTest(IfetchTest):
         self.raise_objection()
         await self.stream(256)
         await self.stream(1024, random_wait=True)
+        self.drop_objection()
+
+
+class OutstandingTest(IfetchTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.reset()
+        # Issue B before A responds. Saturation must block C even if an
+        # incoming response merely moves a reservation into result storage.
+        for address in (0x1000,0x1004):
+            r=await self.cycle(req_valid=1,req_addr=address,imem_gnt=1)
+            assert r['req_ready'] and r['imem_req'] and r['imem_addr']==address
+        r=await self.cycle(req_valid=1,req_addr=0x1008,imem_gnt=1)
+        assert r['req_ready'] and not r['imem_req']
+        r=await self.cycle(imem_rvalid=1,imem_rdata=0xAAAAAAAA,imem_err=0)
+        assert not r['imem_req']
+        r=await self.cycle(res_ready=1,imem_gnt=1)
+        assert r['imem_req'] and self.result(r)==completion(0x1000,0xAAAAAAAA)
+        # B and C remain outstanding across repeated redirects. The new
+        # target is privately accepted, but must not overbook their slots.
+        r=await self.cycle(flush=1,replace=1,req_valid=1,req_addr=0x8000,imem_gnt=1)
+        assert r['req_ready'] and not r['imem_req']
+        await self.cycle(flush=1,replace=1,req_valid=1,req_addr=0x9000)
+        for _ in range(4):
+            r=await self.cycle(imem_gnt=1)
+            assert not r['imem_req'] and not r['res_valid']
+        r=await self.cycle(imem_rvalid=1,imem_rdata=MASK,imem_err=1)
+        assert not r['imem_req'] and not r['res_valid']
+        r=await self.cycle(imem_gnt=1)
+        assert r['imem_req'] and r['imem_addr']==0x9000
+        r=await self.cycle(imem_rvalid=1,imem_rdata=MASK,imem_err=1)
+        assert not r['res_valid']
+        await self.respond(0xCAFEBABE)
+        await self.consume(completion(0x9000,0xCAFEBABE))
+        self.drop_objection()
+
+
+class StressTest(IfetchTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.reset()
+        expected, owners = deque(), deque()
+        pending = ResponseQueue()
+        serial = 0
+        peak = 0
+        for tick in range(6000):
+            active = tick<5000
+            invalidate = active and self.rng.random()<0.08
+            local = invalidate and bool(self.rng.randrange(2))
+            replace = invalidate and bool(self.rng.randrange(2))
+            address = 0x1000+4*serial
+            denied = self.rng.random()<0.1
+            returning = bool(pending and pending.head[0]==0 and self.rng.random()<0.8)
+            head = pending.head if pending else (0,0,0,0)
+            grant = int(self.rng.random()<0.7)
+            ready = int(self.rng.random()<0.7)
+            valid = active and self.rng.random()<0.85
+            r=await self.cycle(flush=int(invalidate and not local),clear=int(local),replace=int(replace),
+                req_valid=int(valid),req_addr=address,req_access_fault=int(denied),
+                request_permit=int(self.rng.random()<0.8),imem_gnt=grant,
+                imem_rvalid=int(returning),imem_rdata=head[2],imem_err=head[3],res_ready=ready)
+            if r['res_valid']:
+                assert expected and self.result(r)==expected[0], (tick,r,list(expected))
+                if ready: expected.popleft()
+            if invalidate:
+                expected.clear()
+                # Preserve an old presented address even if permission/capacity
+                # opened immediately after the preceding sampling edge.
+                owners=deque(list(owners)[:1] if r['imem_req'] and owners and owners[0][0]==r['imem_addr'] else [])
+            if valid and r['req_ready']:
+                data=address^0xA5C3F00D
+                error=bool(serial%11==3)
+                expected.append(completion(address,data,denied,error))
+                if not denied: owners.append((address,data,int(error)))
+                serial+=1
+            pending.advance(returning)
+            if r['imem_req'] and grant:
+                assert owners, (tick,r)
+                addr,data,error=owners.popleft()
+                assert r['imem_addr']==addr, (tick,r,addr)
+                pending.issue(self.rng.randrange(12),addr,data,error)
+            peak=max(peak,len(pending))
+            assert len(expected)<=3
+            if not active and not r['busy']:
+                assert not expected and not owners and not pending
+                break
+        else:
+            raise AssertionError('randomized redirected stream did not drain')
+        assert peak==2
+        self.logger.info('%d native words accepted, peak %d outstanding',serial,peak)
         self.drop_objection()
 
 
@@ -292,12 +386,12 @@ class ReplaceTest(IfetchTest):
             for phase in ('idle','private','ungranted','grant','pending','response','result','full'):
                 for denied,error in ((False,False),(False,True),(True,False)):
                     await self.reset()
-                    pending = None
+                    pending = deque()
                     if phase != 'idle':
                         await self.accept(0x1000,permit=phase!='private',
                                           grant_high=phase in ('pending','response','result','full'))
                         if phase in ('pending','response'):
-                            pending = 0x1000
+                            pending.append(0x1000)
                         elif phase in ('result','full'):
                             await self.respond(0x11111111)
                             if phase == 'full':
@@ -310,26 +404,26 @@ class ReplaceTest(IfetchTest):
                         imem_rdata=0xDEADBEEF,imem_err=1)
                     accepted = bool(r['req_ready'])
                     assert accepted == (phase!='ungranted'), (phase,r)
-                    if phase=='response': pending=None
-                    if r['imem_req'] and phase!='ungranted': pending=r['imem_addr']
+                    if phase=='response': pending.popleft()
+                    if r['imem_req'] and phase!='ungranted': pending.append(r['imem_addr'])
                     seen = False
                     for tick in range(32):
-                        returning = pending is not None and tick>=3
-                        old_pending = pending
-                        data = 0xCAFEBABE if pending==target else 0xDEADBEEF
+                        returning = bool(pending and tick>=3)
+                        head = pending[0] if pending else None
+                        data = 0xCAFEBABE if head==target else 0xDEADBEEF
                         r = await self.cycle(req_valid=int(not accepted),req_addr=target,
                             req_access_fault=int(denied),imem_gnt=int(tick>=3),
                             imem_rvalid=int(returning),imem_rdata=data,
-                            imem_err=int(error if pending==target else True),res_ready=1)
+                            imem_err=int(error if head==target else True),res_ready=1)
                         if r['res_valid']:
                             assert self.result(r)==completion(target,0xCAFEBABE,denied,error), (phase,r)
                             assert not seen, 'duplicate new-stream completion'
                             seen=True
-                        if returning: pending=None
+                        if returning: pending.popleft()
                         if r['imem_req'] and tick>=3:
-                            assert pending is None, 'two granted outstanding requests'
-                            pending=r['imem_addr']
-                            assert old_pending!=target, 'duplicate target request'
+                            assert len(pending)<2
+                            assert r['imem_addr']==target or phase=='ungranted'
+                            pending.append(r['imem_addr'])
                         if not accepted and r['req_ready']: accepted=True
                         if seen and not r['busy']: break
                     assert seen and accepted and not r['busy'], (local,phase,denied,error,r)
@@ -491,3 +585,13 @@ async def replace(_dut):
 @cocotb.test(timeout_time=1000,timeout_unit='us')
 async def fallthrough(_dut):
     await uvm_root().run_test(FallthroughTest)
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def outstanding(_dut):
+    await uvm_root().run_test(OutstandingTest)
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def stress(_dut):
+    await uvm_root().run_test(StressTest)

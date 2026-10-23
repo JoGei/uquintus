@@ -228,12 +228,12 @@ the ISA parameter `ISA_M` shall remain `0` in this milestone.
 | Custom offload and hardware debug | `XIF = 0`, `DEBUG = 0`; default XIF settings have no active core functionality in this configuration. |
 | Pipeline | Single-issue, in-order IF/DE/EX/MEM/WB; base integer ALU operations complete in one EX execution cycle. |
 | Dependencies and control flow | `MUA_FORWARDING = 1`, `MUA_FORWARD_EX_TO_DE = 1`, `MUA_FORWARD_MEM_TO_DE = 1`, `MUA_FORWARD_MEM_TO_EX = 1`, and `MUA_FORWARD_WB_TO_EX = 1`; WB-to-DE bypass outside the register file, branch prediction `none`, branch/jump resolution in DE. |
-| Instruction-fetch buffer | `MUA_IF_BUFFER_WORDS = 2`; continue filling during downstream stalls subject to capacity and control-flow restrictions; one outstanding fetch request independently of depth. |
-| Redirect/refill bypass | `MUA_REDIRECT_BYPASS = none | if_buffer`, default `none`; IF-owned selection forwards registered fetch results around the word FIFO, including C32 second-word assembly. Redirect pointer and external-response registration remain intact. |
+| Instruction-fetch buffer | `MUA_IF_BUFFER_WORDS = 2`; continue filling during downstream stalls subject to capacity and control-flow restrictions; up to two ordered outstanding fetch requests independently of word-buffer depth. |
+| Redirect/refill bypass | `MUA_REDIRECT_BYPASS = none` by default; independently select `if_buffer`, `redirect_request` and `ifetch_result` fall-through policies in canonical combinations. |
 | Register file | Default flip-flop backend with combinational DE reads. |
 | Hardening | `MUA_HARDENED = 0`; OBI parity/checksum support is a future implementation feature. |
 | Multiply/divide parameters | `MUA_MUL = iterative`, `MUA_DIV = iterative`, `MUA_MULDIV_ITERUNROLL = 8`; all explicitly set but inactive with `ISA_M = 0`. |
-| Memory interfaces | Separate external 32-bit OBI v1.6.0 instruction/data interfaces, variable latency, one outstanding request per port, reserved response capacity with no response backpressure, blocking MEM, little-endian accesses. |
+| Memory interfaces | Separate external 32-bit OBI v1.6.0 instruction/data interfaces, variable latency, two outstanding instruction requests and one outstanding data request, reserved response capacity with no response backpressure, MEM request issue and WB data completion, little-endian accesses. |
 | External fence synchronization | `fence_req_o`/`fence_ack_i` for data/I/O ordering; retain inactive `fencei_req_o`/`fencei_ack_i` ports with `ISA_ZIFENCEI = 0`. Acknowledge immediately when integration already guarantees the required ordering ([architecture, Section 16](uqu_spec.arch.md#16-optional-instruction-fetch-fence) and [architecture, Section 19](uqu_spec.arch.md#19-conservative-data-memory-fence)). |
 | Clock and reset | Single clock, active-low synchronous minimal reset, reset-entry address input. |
 | Hart identification | 32-bit `HART_ID` elaboration parameter, default zero, readable through `mhartid`; no core hart-ID port ([interfaces, Section 9](uqu_spec.interfaces.md#9-hart-identification-parameter)). |

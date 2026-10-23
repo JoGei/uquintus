@@ -56,8 +56,11 @@ fetch pointer advances by four on native acceptance; PC advances by the original
 instruction length on delivery unless prediction selects a target. The engine
 reserves its own registered completion capacity before issuing bus requests and
 retains results when the FIFO is full. `MUA_IF_BUFFER_WORDS` selects FIFO slots;
-up to three additional accepted words may reside in the engine. There remains
-at most one granted transaction awaiting a response. With immediate grants,
+up to three additional accepted words may reside in the engine. It permits
+at most two granted transactions awaiting ordered responses. Request admission
+uses registered response reservations and stored-result consumption; it does
+not require the current response to arrive. Combined result/word fall-through
+can still expose response signals through frontend control. With immediate grants,
 one-cycle responses and continuous delivery, the frontend sustains one word
 per cycle after startup. The FIFO retains its registered contract; the IF-owned
 wrapper optionally forwards its completion input around storage when

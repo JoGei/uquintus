@@ -104,9 +104,13 @@ ordering and permission checks shall gate data requests before they are
 asserted, as required in [architecture, Section 7](uqu_spec.arch.md#7-trap-on-misaligned-data-accesses), [architecture, Section 8.1](uqu_spec.arch.md#81-internal-pmp-and-memory-fault-boundary) and [architecture, Section 9.2](uqu_spec.arch.md#92-early-exception-containment-and-wb-trap-entry); request persistence
 shall not authorize a younger data side effect that those rules prohibit.
 
-The baseline shall allow at most one accepted request awaiting completion per
-memory port. The ports shall be independent, allowing one instruction fetch and
-one data access to be outstanding simultaneously. Each accepted request,
+The baseline shall allow up to two granted instruction requests awaiting
+responses, and one granted data request awaiting its response. Both ports shall
+operate independently. Instruction responses shall arrive in grant order;
+the fetch engine shall retain ordered addresses and cancellation state. Its
+two response reservations cover both outstanding requests and retained results.
+A presented ungranted fetch shall retain its reserved capacity through grant.
+Each accepted request,
 including a store, shall receive a completion response unless the core is reset
 under the integration contract in [interfaces, Section 3](uqu_spec.interfaces.md#3-active-low-synchronous-reset).
 
@@ -154,7 +158,8 @@ guarantees remain implementation or integration follow-ups against that version.
 Both native OBI ports shall omit transaction identifier signals (`aid`, `rid`)
 and user-defined payload signals (`auser`, `wuser`, `ruser`). The core shall not
 require ID or user-field width parameters or metadata storage for those fields.
-Responses shall be associated with each port's single outstanding request.
+Instruction responses shall match the oldest outstanding instruction request;
+data responses shall match the single outstanding data request.
 Interconnects, protocol adapters, and integration wrappers may add any IDs or
 user metadata required by the surrounding system and shall handle their
 association outside the native core interface. Connections to a fuller OBI
@@ -236,7 +241,12 @@ retain its response data and any completion status until consumed. Existing
 pipeline or fetch-buffer storage may provide this capacity; a separate buffer
 is not required. The core shall not issue another request when retained,
 unconsumed responses leave insufficient capacity for its eventual response.
-This capacity rule applies in addition to the one-outstanding-request limit.
+This capacity rule applies in addition to each port's outstanding-request limit.
+Fetch admission shall use registered reservations, optionally reusing capacity
+from a stored result consumed on the current edge; it shall not depend on the
+current instruction response to free an outstanding slot or predict occupancy.
+Optional full frontend fall-through can still create an indirect response-to-
+request path through instruction interpretation and control-flow steering.
 
 Response capture and accepted-transaction tracking shall remain active during
 pipeline stalls. A flush shall not cancel an accepted bus transaction: its
@@ -1313,7 +1323,7 @@ later decisions determine the active contract.
 | D-003 | Keep instruction and data memories outside the core; expose separate read-only `imem` and read/write `dmem` interfaces. | Define a core boundary that leaves memory implementation to the surrounding system. | Agreed |
 | D-014 | Support variable latency through request/response handshakes on both memory interfaces. | Keep the core flexible with respect to the external memory hierarchy, including external caches. | Agreed |
 | D-015 | Use OBI for the initial instruction and data memory interfaces, with other external bus protocols as future integration options. | Establish the initial protocol while allowing the surrounding system's interface requirements to evolve. | Agreed |
-| D-016 | Allow one outstanding transaction per memory port and use a blocking MEM stage; instruction and data ports may operate concurrently. | Keep baseline memory control simple while supporting variable latency and independent instruction and data accesses. | Agreed |
+| D-016 | Allow two outstanding instruction transactions and one outstanding data transaction; instruction and data ports operate independently. MEM issues data requests and WB owns response completion. | Decouple fetch request admission from live response validity while preserving ordered responses and precise data completion. | Implemented; supersedes the initial single-fetch policy |
 | D-024 | Use one clock domain for the core and its memory interfaces; handle clock-domain crossings outside the core. | Keep core timing and control within a single synchronous domain. | Agreed |
 | D-027 | Default to active-low synchronous reset with minimal, documented coverage of architectural, control, and pipeline state. | Establish a clear startup state and a reset contract that can be checked in verification. | Agreed |
 | D-028 | Supply the reset entry address through a 32-bit input, sampled during synchronous reset. | Let the surrounding system supply the boot address. | Agreed |
@@ -1361,7 +1371,7 @@ later decisions determine the active contract.
 | D-192 | Pin OBI v1.6.0 as the reference protocol for both native memory ports; define the remaining optional-signal profile and detailed timing against that version. | Give memory-interface implementation and verification a fixed protocol baseline. | Agreed; baseline names/profile and handshake timing fixed by D-193, D-194, D-197, and D-249; future fields deferred |
 | D-193 | Hold each asserted OBI request and its payload stable until grant despite stalls, flushes, or redirects; retain ownership/capacity and complete then discard wrong-path fetches, except under the separate reset contract. | Preserve the bus handshake while keeping pipeline cancellation independent of request acceptance and completion. | Agreed |
 | D-194 | Allow grant in the first presented request cycle, with the corresponding response one or more cycles after grant; prohibit same-cycle grant and completion of the same transaction for both reads and writes. | Define separate request and response timing while preserving variable latency and permitted overlap between different transactions. | Agreed |
-| D-197 | Omit transaction IDs (`aid`, `rid`) and user fields (`auser`, `wuser`, `ruser`) on both native OBI ports; allow integration logic to add external metadata and retain functional CV-X-IF identifiers. | Keep the core's one-outstanding-request memory interfaces simple without constraining interconnect metadata outside the core. | Agreed |
+| D-197 | Omit transaction IDs (`aid`, `rid`) and user fields (`auser`, `wuser`, `ruser`) on both native OBI ports; allow integration logic to add external metadata and retain functional CV-X-IF identifiers. | Keep ordered native response association simple without constraining interconnect metadata outside the core. | Agreed |
 | D-198 | Present word-aligned byte addresses on dmem, select subword lanes through byte enables and shifted data, and retain the original effective byte address inside the LSU for checks, load extraction, and mtval. | Keep the bus word-oriented while preserving byte-granular instruction semantics and accurate fault information. | Agreed |
 | D-207 | Expose synchronous `fencei_req_o`/`fencei_ack_i` with no address payload; hold a live WB fence's request until an active-edge handshake, allow immediate acknowledgement when visibility is already guaranteed, and retain inactive ports when Zifencei is disabled. | Provide an explicit completion contract for external instruction/data synchronization across different memory hierarchies. | Agreed; per-system maintenance/reset requirements remain to be documented |
 | D-208 | Expose separate synchronous `fence_req_o`/`fence_ack_i` in every configuration, with no address or predecessor/successor payload; hold the live WB FENCE request until acknowledgement and allow high acknowledgement tie-off when ordering is already guaranteed. | Let integration satisfy external data/I/O ordering without conflating it with instruction-fetch synchronization or requiring overly strong OBI completion semantics. | Agreed; per-system ordering/reset requirements remain to be documented |

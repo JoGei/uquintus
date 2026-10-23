@@ -311,8 +311,13 @@ PMP denials, bus errors and independent consumer/grant/response waits.
 `pipelined_flush` shall cover concurrent registered, outstanding and queued
 words, full completion storage, presented-request persistence, killed-response
 turnover into a new stream, denied private work and reset. Scoreboards shall
-check at most one granted transaction awaiting its response, ordered delivery
-and bounded storage. Memory agents shall drive existing responses before
+check at most two granted instruction transactions awaiting responses, ordered
+delivery and bounded storage. The `outstanding` case shall cover grants before
+older responses arrive, saturation, stored-result credit reuse and repeated
+redirects with two killed requests. The `stress` case shall mix random clears,
+replacements, denials, errors and independent waits, then drain completely.
+Request-side outputs shall remain unchanged when response validity is toggled
+with the leaf request/control inputs fixed. Memory agents shall drive existing responses before
 sampling requests so response/request turnover is modeled without an artificial
 bubble. Native/checked benchmark qualification shall retain exact timer and
 BPU-counter agreement after fetch-engine changes.
@@ -349,8 +354,8 @@ Prediction/replay tests shall include minimal prefixes and odd halfword budgets
 with C enabled, including the continuation after replay ends. Core regressions
 shall retain precise fault/PMP/XIF checks with the enabled policy. Leaf tests require initial native acceptance and
 OBI grant to coincide, preserve stable delayed requests across flush, reject
-protection-denied bus requests, and retain one outstanding transaction plus
-bounded registered completion storage. The IF testbench must resolve protection
+protection-denied bus requests, and retain up to two ordered outstanding
+transactions with bounded registered completion storage. The IF testbench must resolve protection
 before sampling the bus; an assumed intermediate allow is not an accepted grant.
 
 

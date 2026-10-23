@@ -9,6 +9,8 @@ modules. Core ports are unchanged.
 `main.cpp` drives the single clock directly through Verilator's C++ API. It
 loads the image prepared by the shared ELF loader, runs two reset edges and
 models independent OBI ports with immediate grants and fixed response latency.
+An ordered response queue permits two outstanding instruction requests and one
+data request; latency elapses independently for every queued transaction.
 Response data is captured at grant; stores update shared RAM then, and a
 simultaneous instruction read observes RAM before the data store. Completion
 waits for the matching `tohost` store to retire after its response. This matches

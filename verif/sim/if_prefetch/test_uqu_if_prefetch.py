@@ -12,6 +12,7 @@ from pyuvm import uvm_root, uvm_test
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1] / 'common'))
 from if_aligner_model import MASK, select
+from response_queue import ResponseQueue
 
 
 class PrefetchTest(uvm_test):
@@ -25,6 +26,7 @@ class PrefetchTest(uvm_test):
         self.errors = set()
         self.buffer = deque()
         self.reserved = deque()
+        self.responses = ResponseQueue()
         self.response = None
         self.previous_bus = None
         self.pc = 0
@@ -128,18 +130,14 @@ class PrefetchTest(uvm_test):
                 self.accepted.append(address)
                 self.fetch_addr = (address+4)&MASK
         if not i['rst_n']:
-            self.response = None
+            self.responses.clear()
         else:
-            if returning:
-                self.response = None
-            elif self.response is not None and self.response[0]>0:
-                delay,address,data,error = self.response
-                self.response = delay-1,address,data,error
+            self.responses.advance(returning)
             if gnt:
-                assert self.response is None,'more than one outstanding bus response'
                 assert bus_addr&3==0
                 self.granted.append(bus_addr)
-                self.response = self.rng.randrange(8),bus_addr,self.memory(bus_addr),int(bus_addr in self.errors)
+                self.responses.issue(self.rng.randrange(8),bus_addr,self.memory(bus_addr),int(bus_addr in self.errors))
+        self.response = self.responses.head
         self.previous_bus = bus_addr if bus_req and not gnt and i['rst_n'] else None
         d.clk_i.value = 1
         await Timer(1,units='ns')

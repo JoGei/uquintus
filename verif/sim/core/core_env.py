@@ -10,6 +10,7 @@ from cocotb.triggers import Timer
 from pyuvm import uvm_test
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
+from response_queue import ResponseQueue
 from compressed_model import compressed
 from fpu_model import decode_instruction as decode_fp, result as fp_result
 from rv32_arithmetic import alu_result, muldiv_result, signed
@@ -72,6 +73,7 @@ class CoreTest(uvm_test):
         self.model_memory = {}
         self.errors = {'imem': set(), 'dmem': set()}
         self.pending = dict(imem=None, dmem=None)
+        self.imem_responses = ResponseQueue()
         self.held = dict(imem=None, dmem=None)
         self.accesses = []
         self.retired = []
@@ -390,7 +392,7 @@ class CoreTest(uvm_test):
             getattr(d, bus+'_err_i').value = 1
         grants, returns = {}, {}
         # Responses are independent inputs. Settle them before observing a
-        # request: IF may turn over its single outstanding transaction here.
+        # request; multiple ordered instruction transactions may be outstanding.
         for bus, pending in self.pending.items():
             response_enable=respond.get(bus) if isinstance(respond,dict) else respond
             returning = rst and pending is not None and (pending[0] == 0 if response_enable is None else response_enable)
@@ -487,14 +489,18 @@ class CoreTest(uvm_test):
             self.csr_overrides[o['wb_pc_q']]=self.csr_observer.read_result
         if rst:
             for bus in self.pending:
-                if returns[bus]:
+                if bus == 'imem':
+                    self.imem_responses.advance(returns[bus])
+                    self.pending[bus] = self.imem_responses.head
+                elif returns[bus]:
                     self.pending[bus] = None
                 elif self.pending[bus] is not None:
                     delay, data, err = self.pending[bus]
                     self.pending[bus] = max(0,delay-1), data, err
                 take, payload = grants[bus]
                 if take:
-                    assert self.pending[bus] is None, f'{bus} multiple outstanding requests'
+                    if bus == 'dmem':
+                        assert self.pending[bus] is None, f'{bus} multiple outstanding requests'
                     addr = payload[1] if bus == 'dmem' else payload[0]
                     assert addr & 3 == 0
                     error = addr in self.errors[bus]
@@ -509,7 +515,11 @@ class CoreTest(uvm_test):
                                     memory[addr+n] = value >> (8*n) & 255
                     delay = (self.memory_timing[bus+'_latency'] - 1 if self.memory_timing is not None else
                              self.rng.randrange(8) if self.random_wait else 0)
-                    self.pending[bus] = delay, data, int(error)
+                    if bus == 'imem':
+                        self.imem_responses.issue(delay, data, int(error))
+                        self.pending[bus] = self.imem_responses.head
+                    else:
+                        self.pending[bus] = delay, data, int(error)
             for name in ('fence','fencei'):
                 if self.signal(name+'_req_o') and ack:
                     self.fences.append(name)
@@ -518,6 +528,7 @@ class CoreTest(uvm_test):
                 assert not any(self.signal(n) for n in ('xif_issue_valid_o','xif_register_valid_o','xif_commit_valid_o','xif_result_ready_o'))
         else:
             self.pending = dict(imem=None,dmem=None)
+            self.imem_responses.clear()
         d.clk_i.value = 1
         await Timer(1, units='ns')
         counter_after = counter_state(self.csr_observer.model)

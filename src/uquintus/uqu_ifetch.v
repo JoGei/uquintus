@@ -1,7 +1,8 @@
 `default_nettype none
 `include "uqu_config.vh"
 
-// Request bypass, one granted transaction and two optionally fall-through results.
+// Request bypass, two ordered outstanding transactions and two result slots.
+// Registered reservations decouple request admission from response validity.
 // A response may retire on the same edge as the following request is granted.
 // The core supplies the completed PMP denial decision at native acceptance.
 module uqu_ifetch #(
@@ -39,9 +40,16 @@ module uqu_ifetch #(
     reg request_killed_q;
     reg [31:0] request_addr_q;
     reg request_fault_q;
-    reg pending_q;
-    reg pending_killed_q;
-    reg [31:0] pending_addr_q;
+    reg [1:0] pending_count_q;
+    reg pending_head_q;
+    reg pending_tail_q;
+    reg [1:0] pending_killed_q;
+    reg [31:0] pending_addr_q [0:1];
+    // Granted work plus retained results. Response arrival merely moves a
+    // reservation between those roles; it does not open request capacity.
+    reg [1:0] reserved_q;
+    wire pending = (pending_count_q != 0);
+    wire pending_killed = pending_killed_q[pending_head_q];
     reg [31:0] result_addr_q [0:1];
     reg [31:0] result_data_q [0:1];
     reg result_error_q [0:1];
@@ -50,52 +58,51 @@ module uqu_ifetch #(
     reg [1:0] result_count_q;
 
     wire invalidate = flush_i || clear_i;
-    wire res_fire = res_valid_o && res_ready_i;
-    wire stored_pop = res_fire && (result_count_q != 0);
+    wire stored_pop = rst_ni && !flush_i && (result_count_q != 0) && res_ready_i;
     // Do not mask the live head with local clear: this very instruction may
     // generate that clear through prediction. Global flush still masks it.
     wire live_response = ((MUA_REDIRECT_BYPASS & `UQU_REDIRECT_BYPASS_IFETCH_RESULT) != 0) &&
                          rst_ni && !flush_i && (result_count_q == 0) &&
-                         pending_q && !pending_killed_q && imem_rvalid_i;
+                         pending && !pending_killed && imem_rvalid_i;
     wire consume_live = live_response && res_ready_i;
-    wire response = pending_q && imem_rvalid_i;
-    wire response_push = response && !pending_killed_q && !invalidate && !consume_live;
-    // Reserve room for the next non-backpressurable response before presenting
-    // its request. A presented request retains that reservation through grant.
-    wire [2:0] count_after_response = {1'b0,result_count_q} - {2'b00,stored_pop} +
-                                    {2'b00,response_push};
-    wire response_room = invalidate || (count_after_response < 3'd2);
+    wire response = pending && imem_rvalid_i;
+    wire response_push = response && !pending_killed && !invalidate && !consume_live;
+    // Only a registered completion can release capacity combinationally.
+    // In particular, do not borrow a credit from this cycle's live response.
+    wire response_room = (reserved_q < 2'd2) || stored_pop;
     wire use_queued = request_valid_q && (!invalidate || request_presented_q);
-    wire may_present = (request_armed_q || request_permit_i) && !invalidate && response_room && (!pending_q || response);
+    wire may_present = (request_armed_q || request_permit_i) && !invalidate && response_room;
     wire queued_request = rst_ni && request_valid_q && !request_fault_q &&
                           (request_presented_q || may_present);
     // An empty request slot bypasses directly to OBI. Native readiness stays
     // independent of the live protection decision and bus grant on this path.
     wire direct_request = rst_ni && (!invalidate || replace_i) && !use_queued && req_valid_i &&
-                          !req_access_fault_i && request_permit_i && response_room &&
-                          (!pending_q || response);
+                          !req_access_fault_i && request_permit_i && response_room;
     wire queued_grant = queued_request && imem_gnt_i;
     wire direct_grant = direct_request && imem_gnt_i;
     wire grant_fire = queued_grant || direct_grant;
-    wire denied_done = request_valid_q && request_fault_q && !pending_q &&
+    wire denied_done = request_valid_q && request_fault_q && !pending &&
                        !invalidate && response_room;
     wire request_done = queued_grant || denied_done;
     wire req_fire = req_valid_i && req_ready_o;
     // Preserve the original next-cycle completion for an idle denied request.
     // Otherwise it queues behind earlier work, preserving response order.
     wire denied_direct = !invalidate && req_fire && req_access_fault_i && !request_valid_q &&
-                         !pending_q && response_room;
+                         !pending && response_room;
     wire push = response_push || denied_done || denied_direct;
-    wire [31:0] push_addr = response_push ? pending_addr_q :
+    wire [31:0] push_addr = response_push ? pending_addr_q[pending_head_q] :
                            denied_done ? request_addr_q : {req_addr_i[31:2],2'b00};
     wire push_error = !response_push || imem_err_i;
     wire [2:0] count_after_push = {1'b0,result_count_q} - {2'b00,stored_pop} + {2'b00,push};
-    wire pending_after = grant_fire || (pending_q && !response);
+    wire release_response = response && (pending_killed || invalidate || consume_live);
+    wire [2:0] reserved_after = {1'b0,reserved_q} + {2'b00,grant_fire} +
+        {2'b00,(denied_done || denied_direct)} - {2'b00,stored_pop} -
+        {2'b00,release_response} - (invalidate ? {1'b0,result_count_q} - {2'b00,stored_pop} : 3'd0);
 
     assign req_ready_o = rst_ni && (!invalidate || replace_i) && (!use_queued || request_done);
-    assign busy_o = rst_ni && (request_valid_q || pending_q || (result_count_q != 0));
+    assign busy_o = rst_ni && (request_valid_q || pending || (result_count_q != 0));
     assign res_valid_o = rst_ni && !flush_i && ((result_count_q != 0) || live_response);
-    assign res_addr_o = !res_valid_o ? 32'd0 : live_response ? pending_addr_q : result_addr_q[result_head_q];
+    assign res_addr_o = !res_valid_o ? 32'd0 : live_response ? pending_addr_q[pending_head_q] : result_addr_q[result_head_q];
     assign res_error_o = res_valid_o && (live_response ? imem_err_i : result_error_q[result_head_q]);
     assign res_data_o = !res_valid_o || res_error_o ? 32'd0 :
                         live_response ? imem_rdata_i : result_data_q[result_head_q];
@@ -113,18 +120,23 @@ module uqu_ifetch #(
             request_presented_q <= 1'b0;
             request_armed_q <= 1'b0;
             request_killed_q <= 1'b0;
-            pending_q <= 1'b0;
-            pending_killed_q <= 1'b0;
+            pending_count_q <= 2'd0;
+            pending_head_q <= 1'b0;
+            pending_tail_q <= 1'b0;
+            pending_killed_q <= 2'b00;
+            reserved_q <= 2'd0;
             result_head_q <= 1'b0;
             result_tail_q <= 1'b0;
             result_count_q <= 2'd0;
         end else begin
-            if (response) pending_q <= 1'b0;
-            if (invalidate && pending_q) pending_killed_q <= 1'b1;
+            reserved_q <= reserved_after[1:0];
+            pending_count_q <= pending_count_q + {1'b0,grant_fire} - {1'b0,response};
+            if (response) pending_head_q <= !pending_head_q;
+            if (invalidate) pending_killed_q <= 2'b11;
             if (grant_fire) begin
-                pending_q <= 1'b1;
-                pending_addr_q <= queued_grant ? request_addr_q : {req_addr_i[31:2],2'b00};
-                pending_killed_q <= queued_grant && (request_killed_q || invalidate);
+                pending_tail_q <= !pending_tail_q;
+                pending_addr_q[pending_tail_q] <= queued_grant ? request_addr_q : {req_addr_i[31:2],2'b00};
+                pending_killed_q[pending_tail_q] <= queued_grant && (request_killed_q || invalidate);
             end
 
             if (request_valid_q && !request_armed_q && request_permit_i)
@@ -138,8 +150,8 @@ module uqu_ifetch #(
             // visible immediately afterwards. Preserve it even if the next
             // cycle introduces a flush before another sampling edge.
             if (request_valid_q && !request_done && !request_fault_q &&
-                (request_armed_q || request_permit_i) && !pending_after &&
-                (count_after_push < 3'd2)) request_presented_q <= 1'b1;
+                (request_armed_q || request_permit_i) &&
+                (reserved_after < 3'd2)) request_presented_q <= 1'b1;
             if (invalidate) begin
                 if (request_valid_q && request_presented_q && !grant_fire)
                     request_killed_q <= 1'b1;
@@ -159,7 +171,7 @@ module uqu_ifetch #(
                 // A bypassed ungranted request becomes retained immediately.
                 // Permission/capacity release also preserves presentation through flush.
                 request_presented_q <= !req_access_fault_i && request_permit_i &&
-                                       !pending_after && (invalidate || (count_after_push < 3'd2));
+                                       (reserved_after < 3'd2);
             end
 
             if (invalidate) begin

@@ -3040,7 +3040,7 @@ Each supported hardware YAML configuration shall set its value explicitly.
 Engine request/completion storage is additional to this FIFO capacity, as
 defined in Section 15.4.
 
-Buffering shall preserve the baseline limit of one outstanding `imem` request,
+Buffering shall preserve the baseline limit of two outstanding `imem` requests,
 independently of the selected depth. Requests shall reserve response capacity
 as required in [interfaces, Section 1](uqu_spec.interfaces.md#1-external-instruction-and-data-memories). Increasing buffer depth shall not increase the
 number of permitted outstanding requests. The buffer shall preserve the
@@ -3054,7 +3054,7 @@ arbitration is connected in Section 3.13.
 Fetch shall continue filling available buffer space during downstream pipeline
 stalls. A downstream stall alone shall not suppress new instruction requests:
 request generation shall instead depend on reserved/free buffer capacity, the
-one-outstanding-request limit, and applicable control-flow and synchronization
+two-outstanding-request limit, and applicable control-flow and synchronization
 restrictions. Without a predicted redirect, prefetch shall follow sequential
 word addresses. Buffer filling shall not advance stalled decode or execution
 instructions.
@@ -3177,8 +3177,9 @@ The [decompressor/strategy guide](../verif/sim/decompressor/README.md),
 `src/uquintus/uqu_ifetch.v` is the IF-owned, read-only word transaction engine.
 Its [component guide](../verif/sim/ifetch/README.md) defines exact ports and
 timing. It owns a private request holding register with a combinational bypass,
-one granted transaction and two completion slots with optional empty-queue fall-through, not the prefetch buffer, instruction aligner or
-core-parent IF/DE register. It has no ISA, prediction,
+two ordered outstanding transactions and two shared completion reservations,
+with optional empty-queue result fall-through. It does not own the prefetch
+buffer, instruction aligner or core-parent IF/DE register. It has no ISA, prediction,
 PMP or compressed-decode parameters.
 
 The requester shall present a containing-word address through `req_addr_i`;
@@ -3194,9 +3195,9 @@ or expose privilege attributes on the memory bus.
 
 With the request slot empty, an allowed request shall reach OBI in its first
 eligible cycle, without a mandatory request-register edge. Permission, protection
-and reserved completion capacity must be available before presentation; an older
-outstanding transaction must have completed or be responding. Immediate grant
-shall create one pending transaction without duplicating it in the request slot.
+and reserved completion capacity must be available before presentation. An older
+transaction need not have responded before another request is presented.
+Immediate grant shall create one pending transaction without duplicating it in the request slot.
 A delayed grant shall retain the presented request/address. Other accepted work
 may queue privately until permission/capacity is available. Native frontend
 acceptance remains distinct from OBI grant and from instruction retirement.
@@ -3328,14 +3329,23 @@ additional accepted words retained across engine request, transaction and
 completion roles. Native acceptance shall not promise an unavailable FIFO slot.
 This supersedes the initial implicit single-slot reservation scheme.
 
-The response of one granted transaction may overlap the next request's grant
-on the same edge, preserving the limit of one granted transaction awaiting a
-response. Completion storage shall remain registered; `ifetch_result` may
-forward a live response only when that storage is empty. Under immediate grants, one-cycle responses, permission
+The engine shall track up to two outstanding granted requests in order,
+retaining their word addresses and killed status. Granted transactions plus
+registered results shall occupy at most two reservations; a presented ungranted
+request shall reserve another available place within that same limit. Current
+response validity shall not feed request admission or its occupancy decision.
+A stored result consumed on this edge may release capacity for a new request.
+The response of an older transaction may overlap a new request's grant.
+Completion storage shall remain registered; `ifetch_result` may forward a live
+response only when that storage is empty. Under immediate grants, one-cycle
+responses, permission
 and continuous delivery, IF shall sustain one fetched word per cycle after
 startup. Initial fetch latency and variable-latency memory behavior remain
-separate from this throughput requirement. A response-valid-to-request control
-path is permitted for turnover and shall be covered by integration timing.
+separate from this throughput requirement. Fetch request turnover shall not
+require a combinational response-valid-to-request dependency. Optional combined
+response/word-buffer fall-through can still expose an indirect path through
+alignment, decoding, prediction or fault containment; integration timing shall
+cover the selected policy.
 
 `MUA_REDIRECT_BYPASS` shall select these independently combinable policies:
 
@@ -3393,7 +3403,10 @@ never be offered. Local clear shall not combinationally mask a live head: that
 head may cause its own prediction clear. At the edge, clear cancels old storage
 and responses while `replace_i` separately identifies new-stream requests.
 An old live response may be consumed/discarded while a new target is granted on
-the same edge, preserving generation ownership and one outstanding transaction.
+the same edge, preserving generation ownership and the two-reservation limit.
+The new target may also be granted before the old response arrives, if capacity
+is available; killed transactions remain tracked until their ordered responses
+are drained, including across repeated redirects.
 Reservation/count updates shall subtract only stored pops and enqueue only
 responses not consumed live. Backpressure shall never require holding OBI's
 unbackpressurable response externally or add result storage slots.
@@ -4079,7 +4092,7 @@ later decisions determine the active contract.
 | D-059 | Default `ISA_UMODE` to `1`. | Retain M+U execution and controlled U-mode cycle/instret counter access in the default configuration. | Agreed |
 | D-060 | Omit hardware `time`/`timeh`; trap their reads and leave optional time emulation to M-mode firmware using an external timer. | Avoid a dedicated timer-value input; retain timer interrupts and cycle/instret counters without claiming complete hardware Zicntr support. | Agreed |
 | D-062 | Support little-endian data accesses only, with increasing byte addresses mapped to increasing byte lanes of a 32-bit bus word. | Fix byte ordering across supported privilege modes and define consistent memory-port lane numbering. | Agreed |
-| D-063 | Use word-aligned 32-bit `imem` requests and an internal prefetch/alignment buffer to select and assemble instructions, including C-enabled word-crossing instructions. | Keep external fetch accesses aligned while supporting compressed instruction streams and reuse of fetched words; retain one outstanding fetch. | Agreed |
+| D-063 | Use word-aligned 32-bit `imem` requests and an internal prefetch/alignment buffer to select and assemble instructions, including C-enabled word-crossing instructions. | Keep external fetch accesses aligned while supporting compressed instruction streams and reuse of fetched words; retain at most two outstanding fetches with reserved response capacity. | Agreed |
 | D-064 | Support Zifencei through the `ISA_ZIFENCEI` parameter, with internal fetch-state invalidation and an explicit external-memory synchronization contract. | Allow software to synchronize instruction execution after code writes while preserving the external memory/cache boundary. | Agreed; external handshake defined by D-207 |
 | D-065 | Default `ISA_ZIFENCEI` to `0` (disabled). | Keep instruction-fetch fencing optional in the default ISA configuration. | Agreed |
 | D-099 | Complete all base integer ALU operations, including shifts, in one EX execution cycle, subject to operand availability and pipeline backpressure. | Keep base integer execution latency uniform in the five-stage pipeline. | Agreed; optional execution-unit latencies remain separate |
@@ -4094,8 +4107,8 @@ later decisions determine the active contract.
 | D-117 | Report faulting addresses in `mtval` for instruction/data misalignment and access faults, and original instruction bits for illegal-instruction traps; write zero for the baseline's other traps. | Provide useful software trap diagnostics while preserving precise instruction and fault-address association. | Agreed; custom-memory fault details remain separate |
 | D-118 | Hardwire `misa` to a constant derived from the implemented RTL configuration; ignore permitted writes and provide no runtime ISA switching. | Identify the configured ISA without writable extension-selection state. | Agreed; custom-extension identification details TBD |
 | D-119 | Initially hardwire `mvendorid`, `marchid`, and `mimpid` to zero as standard read-only identification CSRs. | Use permitted initial values while deferring project-specific identifiers. | Agreed |
-| D-139 | Configure instruction-fetch buffer capacity through `MUA_IF_BUFFER_WORDS`, defaulting to two 32-bit word slots while retaining one outstanding fetch request. | Support instruction reuse and assembly with an adjustable buffer size independent of bus concurrency. | Agreed; supported capacities defined by D-217, prefetch policy defined by D-140 |
-| D-140 | Continue filling available instruction-buffer space during downstream stalls, subject to capacity, one outstanding request, and control-flow/synchronization restrictions. | Overlap fetch latency with pipeline stalls while retaining precise fault handling and correct redirect recovery. | Implemented in IF and integrated core; Sections 15.4–15.5 and 3.13 |
+| D-139 | Configure instruction-fetch buffer capacity through `MUA_IF_BUFFER_WORDS`, defaulting to two 32-bit word slots while retaining at most two outstanding fetch requests. | Support instruction reuse and assembly with an adjustable buffer size independent of bus concurrency. | Agreed; supported capacities defined by D-217, prefetch policy defined by D-140 |
+| D-140 | Continue filling available instruction-buffer space during downstream stalls, subject to capacity, two outstanding fetch requests, and control-flow/synchronization restrictions. | Overlap fetch latency with pipeline stalls while retaining precise fault handling and correct redirect recovery. | Implemented in IF and integrated core; Sections 15.4–15.5 and 3.13 |
 | D-141 | Implement compressed-instruction expansion in a separate module, initially in IF before the IF/DE register, retaining original encoding, PC, length, and fault metadata. | Reuse the native DE decoder and keep decompression placement easy to revisit after timing evaluation. | Implemented standalone, IF/DE and full-core paths under D-282/D-283/D-287/D-289; timing evaluation open |
 | D-142 | Keep PMP CSRs and permission checks inside the core before memory requests; expose no privilege/PMP attributes for external enforcement, and consume external bus faults through the normal error responses. | Make protection a core responsibility while keeping the memory interface independent of PMP implementation. | Implemented internal PMP/CSR/core boundary; enabled profile in Section 8.1 and storage in Section 18.2 |
 | D-143 | Select internal PMP through `ISA_PMP`, defaulting to `0`; omit permission-checking logic and writable PMP-entry storage when disabled. | Keep PMP optional and preserve the default implementation scope. | Agreed; disabled CSR behavior defined by D-144; fixed sixteen-entry enabled capacity by D-251 |
@@ -4157,7 +4170,7 @@ later decisions determine the active contract.
 | D-210 | Omit `mcounteren` with `ISA_UMODE = 0` and trap accesses to its address as illegal instructions; retain machine counters, `mcountinhibit`, and M-mode access to the read-only counter aliases. | Remove a lower-privilege access-control CSR when no lower privilege mode is implemented, without changing machine-mode counter functionality. | Agreed |
 | D-211 | Make CY and IR the only writable bits in `mcountinhibit` and, when present, `mcounteren`; hardwire every other bit to zero and ignore otherwise permitted writes. | Match the cycle/retirement-only counter profile without storing unused inhibit or permission controls. | Agreed |
 | D-212 | Map read-only `hpmcounter3` through `hpmcounter31` and their RV32 high halves in every configuration; return zero for M-mode reads, trap U-mode reads through hardwired-zero HPM permissions, and trap accesses requesting writes. | Provide counter aliases consistent with the constant-zero machine HPM counters and the agreed lower-privilege access controls. | Agreed |
-| D-217 | Support any integer `MUA_IF_BUFFER_WORDS` capacity of at least two, including non-power-of-two values, in all configurations; retain the default of two and one outstanding fetch request, and reject invalid capacities during configuration validation. | Keep fetch storage configurable while guaranteeing space for instruction assembly across two fetch words. | Agreed |
+| D-217 | Support any integer `MUA_IF_BUFFER_WORDS` capacity of at least two, including non-power-of-two values, in all configurations; retain the default of two word slots and two outstanding fetch requests, and reject invalid capacities during configuration validation. | Keep fetch storage configurable while guaranteeing space for instruction assembly across two fetch words. | Agreed |
 | D-219 | Add independent boolean `MUA_FORWARD_EX_TO_DE` and `MUA_FORWARD_MEM_TO_DE` controls under the `MUA_FORWARDING` master switch; when an operand is needed in DE, use an enabled available result from its youngest older writer or stall until that writer reaches a later enabled source, retaining WB-to-DE forwarding. | Make the EX-to-DE timing path optional while supporting MEM-to-DE bypass and correct stall-based fallback without using stale older values. | Agreed; defaults defined by D-226; registered load-result rule defined by D-223 |
 | D-220 | Add independent boolean `MUA_FORWARD_MEM_TO_EX`, defaulting to one and subordinate to `MUA_FORWARDING`; forward available MEM results to EX consumers or use another valid operand route or dependency stalls when the path is disabled. | Support adjacent dependent native ALU operations without requiring the combinational EX-to-DE path, while allowing experiments with MEM-to-EX bypass disabled. | Agreed; registered load-result rule defined by D-223; stall retention defined by D-224 |
 | D-221 | Add independent boolean `MUA_FORWARD_WB_TO_EX`, defaulting to one and subordinate to `MUA_FORWARDING`; forward available WB results to EX consumers with the existing youngest-writer and validity checks, or use another valid route or dependency stalls when disabled. | Supply operands whose producers have advanced beyond MEM without requiring earlier DE forwarding, while retaining independent path configuration. | Agreed; stall retention defined by D-224 |
@@ -4197,7 +4210,7 @@ later decisions determine the active contract.
 | D-280 | Implement DE around decoder/branch/runtime checks and hazard-resolved sources, with parent-owned boundary registers and central permission; implement optional standard coupled XIF issue, stable operands, acceptance tracking and core-internal rejected/bad-transaction kill cleanup. | Assemble the agreed stage contract with precise early containment, guaranteed EX bypass metadata and one-time branch/offload actions while keeping core/retirement ownership explicit. | Implemented DE and native parent-fixture/core integration; Sections 3.12–3.13; initial XIF ID/cleanup connected under D-301 |
 | D-282 | Implement stateless integer RV32C expansion with explicit original bits, compressed/illegal/HINT flags, C-disabled bypass and unchanged native words; preserve HINT register fields for downstream RV32E checks. | Reuse the decoder and DE, retain precise fault/link identity and eliminate expansion logic when C is disabled. | Implemented expansion, fetch assembly and core integration; Sections 15.1–15.5 and 3.13; standard XIF compressed channel deferred |
 | D-283 | Select compressed decoding through MUA_C_IMPL = decompress or decode_compressed, with MUA_C_DECOMPRESS_STAGE = if or de for expansion placement; default to decompress/if and ignore the selectors when C is disabled. | Compare expansion placement against parallel direct decoding while preserving ISA, original instruction identity, shared DE execution control and standard XIF ownership. | All three paths implemented in IF/DE and core; Sections 15.1, 15.5 and 3.13; PPA evaluation open |
-| D-284 | Implement uqu_ifetch as a single-word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented standalone/shared-PMP fixtures, production IF and core integration; Sections 15.2–15.5 and 3.13 |
+| D-284 | Implement uqu_ifetch as an ordered two-outstanding word OBI engine with externally supplied core-PMP denial, latched aligned address, registered retained result/error and persistent killed-request drain; keep one shared core-owned PMP for IF and MEM/LSU. | Build IF transaction handling independently of buffering, assembly, decoding and global control while preserving protection ownership and bus obligations. | Implemented standalone/shared-PMP fixtures, production IF and core integration; Sections 15.2–15.5 and 3.13 |
 | D-285 | Implement stateless uqu_if_aligner over two ordered words with original instruction/length, next-PC and qualified-consumption suggestions; contain fetch faults with the correct first/second portion address and leave storage, PMP, decode and transfer control outside. | Separate word selection/assembly from transaction handling and configurable compressed decoding while preserving precise fault identity and word reuse. | Implemented standalone, prefetch, IF and core integration; Sections 15.3–15.5 and 3.13; component error/availability and stream checks retained |
 | D-286 | Implement uqu_if_buffer as a fetched-word FIFO with two read windows, simultaneous pop/push, non-power-of-two capacity and minimal reset; keep prefetch addresses, response reservation and redirect control in IF, verified by a real fetch/buffer/aligner fixture. | Separate storage from instruction selection and bus handling, originally reserve capacity implicitly for the single-slot engine; the pipelined engine now reserves its own completion capacity under Section 15.4, and preserve killed-response obligations. | Implemented standalone, prefetch, IF and core integration; Sections 15.4–15.5 and 3.13; non-power-of-two/depth regressions retained |
 | D-287 | Assemble uqu_stage_if around fetch, word storage, alignment and selected IF expansion; own frontend pointers/containment while leaving IF/DE, PMP and global arbitration in the core; implement none/static_not_taken control with canonical encodings 0/1. | Make native frontend behavior concrete with reserved capacity, independent request/delivery holds, precise original instruction identity and persistent stale-transaction draining. | Implemented IF, parent fixtures and full-core connection; Sections 15.5 and 3.13; standard XIF compressed channel deferred |
