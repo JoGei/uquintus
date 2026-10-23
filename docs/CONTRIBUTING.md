@@ -52,7 +52,7 @@ Use an emoji prefix, a brief lower-case subject ending in a colon, a blank line,
 <details>
 ```
 
-Start the first detail sentence in lower case as a continuation of the subject's colon. Capitalize subsequent sentences normally. Preserve conventional casing for identifiers and acronyms such as `RV32`, `LSU` and `MUA_` parameters. Hard line breaks are allowed.
+Start the first detail sentence in lower case as a continuation of the subject's colon. Capitalize subsequent sentences normally. Preserve conventional casing for identifiers and acronyms such as `RV32`, `LSU` and `MUA_` parameters. Hard line breaks are allowed. The details are optional for sufficiently small and clear commits.
 
 | Prefix | Type |
 | --- | --- |
