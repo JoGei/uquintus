@@ -158,5 +158,21 @@ class SynthesisTests(unittest.TestCase):
                 self.assertEqual(synth.flow_directory(''),flow)
                 command.assert_called_once_with(['/env/orfs','--flow-dir'])
 
+    def test_ics55_requires_the_exact_qualified_pdk_assets(self):
+        with self.assertRaisesRegex(ValueError,'requires ICS55_PDK_ROOT'):
+            synth.ics55_pdk('')
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            for relative in synth.ICS55_ASSETS.values():
+                path=root/relative
+                path.parent.mkdir(parents=True,exist_ok=True)
+                path.touch()
+            actual,files=synth.ics55_pdk(root)
+            self.assertEqual(actual,root.resolve())
+            self.assertEqual(set(files),set(synth.ICS55_ASSETS))
+            files['typ_liberty'].unlink()
+            with self.assertRaisesRegex(ValueError,'typ_tt_1p2_25'):
+                synth.ics55_pdk(root)
+
 
 if __name__=='__main__':unittest.main()

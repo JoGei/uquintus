@@ -17,12 +17,19 @@ SPIKE ?=
 TOP ?= core
 ASIC_FLOW ?= orfs
 PLATFORM ?= sky130hd
+ICS55_PDK_ROOT ?=
 CLOCK_PERIOD_NS ?= 20
 RESET_INPUT_DELAY_NS ?=
 SDC ?=
+ifeq ($(PLATFORM),ics55)
+DIE_AREA ?= 0 0 340 340
+CORE_AREA ?= 20 20 320 320
+PLACE_DENSITY ?= 0.60
+else
 DIE_AREA ?= 0 0 1240 1240
 CORE_AREA ?= 20 20 1220 1220
 PLACE_DENSITY ?= 0.65
+endif
 JOBS ?= 4
 BENCHMARK ?= coremark
 BENCHMARK_PROFILE ?= all
@@ -38,11 +45,13 @@ help:
 	@echo '          [SEED=1] [TEST=all|<test-name>] [WAVES=0|1]'
 	@echo 'make lint [CONFIG=rv32i]'
 	@echo 'make synth [ASIC_FLOW=orfs] [TOP=core|fpu] [CONFIG=rv32i]'
-	@echo '           [PLATFORM=sky130hd|ihp-sg13g2]'
+	@echo '           [PLATFORM=sky130hd|ihp-sg13g2|ics55]'
+	@echo '           [ICS55_PDK_ROOT=<extracted-pdk>]  # Required for experimental ics55'
 	@echo '           [CLOCK_PERIOD_NS=20] [JOBS=4] [ORFS_ROOT=<installation>]'
 	@echo '           [RESET_INPUT_DELAY_NS=1]  # Optional reset arrival window: 0 to this maximum, in ns'
 	@echo 'make impl [same options as synth]  # Through placement and timing repair, before CTS'
 	@echo '          [DIE_AREA="0 0 1240 1240"] [CORE_AREA="20 20 1220 1220"] [PLACE_DENSITY=0.65]'
+	@echo '          # ics55 defaults: 340 um die, 300 um core, density 0.60'
 	@echo 'Supply SDC=<file> to synth/impl for integration constraints; omit RESET_INPUT_DELAY_NS.'
 	@echo 'Supply YOSYS_EXE / OPENROAD_EXE or tools on PATH; enabled Zfinx requires Slang.'
 	@echo 'make sw [CONFIG=rv32i] [SW=smoke] [RISCV_CC=riscv32-unknown-elf-gcc|clang]'
@@ -103,6 +112,7 @@ synth impl:
 ifeq ($(ASIC_FLOW),orfs)
 	$(PYTHON) impl/asic/orfs/common/synth.py --action "$@" --config "$(CONFIG)" --top "$(TOP)" \
 		--platform "$(PLATFORM)" --clock-period "$(CLOCK_PERIOD_NS)" --jobs "$(JOBS)" \
+		--ics55-pdk-root "$(ICS55_PDK_ROOT)" \
 		$(if $(RESET_INPUT_DELAY_NS),--reset-input-delay "$(RESET_INPUT_DELAY_NS)") \
 		$(if $(SDC),--sdc "$(SDC)") \
 		$(if $(filter impl,$@),--die-area "$(DIE_AREA)" --core-area "$(CORE_AREA)" --place-density "$(PLACE_DENSITY)") \

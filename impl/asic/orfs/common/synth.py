@@ -24,6 +24,15 @@ TARGETS = ORFS.parent/'targets.yml'
 BUFFERING_SETTINGS = dict(ABC_AREA='0', REMOVE_ABC_BUFFERS='1', GPL_TIMING_DRIVEN='1')
 TIMING_REGIONS = ('IF','DE','EX','MEM','WB','CORE')
 TIMING_SCOPES = ('full','reg_to_reg','input_to_reg','reg_to_output','input_to_output')
+ICS55_ASSETS = {
+    'tech_lef': 'prtech/techLEF/N551P6M_ecos.lef',
+    'cell_lef': 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/lef/ics55_LLSC_H7CR_ecos.lef',
+    'typ_liberty': 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_typ_tt_1p2_25_nldm.lib',
+    'slow_liberty': 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ss_rcworst_1p08_125_nldm.lib',
+    'fast_liberty': 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/liberty/ics55_LLSC_H7CR_ff_rcbest_1p32_m40_nldm.lib',
+    'gds': 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/gds/ics55_LLSC_H7CR_M2.gds',
+    'cdl': 'IP/STD_cell/ics55_LLSC_H7C_V1p10C100/ics55_LLSC_H7CR/cdl/ics55_LLSC_H7CR.cdl',
+}
 sys.path.insert(0, str(ROOT/'verif/sim/common'))
 from hw_config import load_configuration, parameters_for_component, write_header
 from component_runner import bender_include_dirs
@@ -64,6 +73,18 @@ def make_path(path):
     if any(c in value for c in ' \t\n\r$#\\'):
         raise ValueError(f'ORFS file paths must not contain whitespace or Make metacharacters: {value}')
     return value
+
+
+def ics55_pdk(root):
+    if not root:
+        raise ValueError('PLATFORM=ics55 requires ICS55_PDK_ROOT or --ics55-pdk-root')
+    directory=Path(root).expanduser().resolve()
+    make_path(directory)
+    files={name:directory/relative for name,relative in ICS55_ASSETS.items()}
+    missing=[str(path) for path in files.values() if not path.is_file()]
+    if missing:
+        raise ValueError('Incomplete ICsprout55 PDK root; missing: '+', '.join(missing))
+    return directory,files
 
 
 def flow_directory(root):
@@ -343,7 +364,9 @@ def main():
     parser.add_argument('--action',choices=('synth','impl'),default='synth')
     parser.add_argument('--config',default='rv32i')
     parser.add_argument('--top',choices=('core','fpu'),default='core')
-    parser.add_argument('--platform',choices=('sky130hd','ihp-sg13g2'),default='sky130hd')
+    parser.add_argument('--platform',choices=('sky130hd','ihp-sg13g2','ics55'),default='sky130hd')
+    parser.add_argument('--ics55-pdk-root',default=os.environ.get('ICS55_PDK_ROOT',''),
+                        help='Extracted ICsprout55 PDK root (required for PLATFORM=ics55)')
     parser.add_argument('--clock-period',type=float,default=20)
     parser.add_argument('--reset-input-delay',type=float,default=None,
                         help='Reset maximum input delay in ns; minimum becomes 0 ns (default: legacy data-input budget)')
@@ -389,6 +412,12 @@ def main():
         if args.top=='fpu' and not config['ISA_ZFINX']:
             raise ValueError('FPU synthesis requires ISA_ZFINX=1; disabled FPU is intentionally empty')
         flow=flow_directory(args.orfs_root)
+        pdk_root=None
+        pdk_files={}
+        if args.platform=='ics55':
+            pdk_root,pdk_files=ics55_pdk(args.ics55_pdk_root)
+            record['context'].update(pdk='ICsprout55',pdk_root=str(pdk_root),
+                                     pdk_profile='H7CR RVT typ_tt_1p2_25 with _ecos LEF')
         abc_script=flow/'scripts/abc_speed.script'
         record['context'].update(abc_wire_load_policy(abc_script))
         shutil.copyfile(abc_script,directory/'abc_speed.script')
@@ -432,7 +461,9 @@ def main():
         shutil.copyfile(ROOT/'Bender.lock',directory/'Bender.lock')
         if supplied_sdc: shutil.copyfile(supplied_sdc,directory/'constraints.sdc')
         else: (directory/'constraints.sdc').write_text(constraints)
-        platform=ORFS/'platforms'/args.platform/'config.mk'
+        platform_directory=ORFS/'platforms'/args.platform
+        platform=platform_directory/'config.mk'
+        if not platform.is_file(): raise ValueError('Project ORFS platform adapter missing: '+str(platform))
         settings=dict(DESIGN_NAME=manifest['module'],VERILOG_FILES=' '.join(map(make_path,sources)),
                       VERILOG_INCLUDE_DIRS=' '.join(map(make_path,includes)),
                       VERILOG_TOP_PARAMS=' '.join(f'{k} {v}' for k,v in parameters.items()),
@@ -445,7 +476,8 @@ def main():
                       POST_SYNTH_TCL=make_path(COMMON/'metrics.tcl'),
                       UQU_ALLOW_LATCHES=str(int(args.top=='core' and config['MUA_REGFILE_IMPL']=='latch')))
         if args.action=='impl': settings.update(physical_settings)
-        (directory/'config.mk').write_text('include '+make_path(platform)+'\n'+
+        preamble=('override export ICS55_PDK_ROOT := '+make_path(pdk_root)+'\n') if pdk_root else ''
+        (directory/'config.mk').write_text(preamble+'include '+make_path(platform)+'\n'+
             '\n'.join(f'export {k} = {v}' for k,v in settings.items())+'\n')
         # Hash all potentially consumed includes and flow/platform resources,
         # including library contents, rather than only a mutable installation path.
@@ -456,11 +488,15 @@ def main():
         inputs.append(directory/'constraints.sdc')
         for folder in includes:
             inputs += [p for p in folder.rglob('*') if p.suffix in ('.vh','.svh')]
-        for folder in (flow/'scripts',flow/'util',flow/'platforms'/args.platform):
+        for folder in (flow/'scripts',flow/'util',flow/'platforms'/args.platform,platform_directory):
             inputs += [p for p in folder.rglob('*') if p.is_file()]
+        inputs += list(pdk_files.values())
         inputs += [flow/'Makefile']
         record['input_sha256']={key(p):digest(p) for p in dict.fromkeys(inputs)}
         library_hashes={key(p):digest(p) for p in (flow/'platforms'/args.platform/'lib').glob('*.lib')}
+        if pdk_files:
+            library_hashes.update({key(path):digest(path) for name,path in pdk_files.items()
+                                   if name.endswith('_liberty')})
         record['context']['library_sha256']=library_hashes
         command=['make','--no-print-directory','-C',str(flow),f'DESIGN_CONFIG={directory}/config.mk',
                  f'WORK_HOME={directory}',f'YOSYS_EXE={yosys}',f'OPENROAD_EXE={openroad}',

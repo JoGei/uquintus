@@ -13,6 +13,7 @@ impl/asic/
     platforms/
       sky130hd/config.mk      # Project settings for the external ORFS platform
       ihp-sg13g2/config.mk
+      ics55/                  # Experimental project-owned ICsprout55 platform
     investigations/           # ORFS-specific experiments and their documentation
 ```
 
@@ -40,11 +41,15 @@ export OPENROAD_EXE=/path/to/openroad
 # If it is not in Yosys's installed plugin directory:
 export YOSYS_PLUGIN_PATH=/path/to/plugin-directory
 
+# ICsprout55 only: external PDK repository populated by `make unzip`.
+export ICS55_PDK_ROOT=/path/to/icsprout55-pdk
+
 make synth ASIC_FLOW=orfs CONFIG=rv32i TOP=core PLATFORM=sky130hd
 make synth CONFIG=rv32i_zfinx TOP=fpu PLATFORM=sky130hd
 make synth CONFIG=rv32i_zfinx TOP=core PLATFORM=sky130hd
 make impl CONFIG=rv32i TOP=core PLATFORM=ihp-sg13g2 RESET_INPUT_DELAY_NS=1
 make impl CONFIG=rv32i_zfinx TOP=core PLATFORM=ihp-sg13g2 RESET_INPUT_DELAY_NS=1
+make impl CONFIG=rv32i TOP=core PLATFORM=ics55
 make report
 ```
 
@@ -57,9 +62,12 @@ For a controlled RV32IMC multiplier comparison with divider unroll 1, use
 [comparison](orfs/investigations/daddamul-div1.md).
 The former standalone EX/MEM split targets are removed; their
 [measurements](orfs/investigations/dadda-split.md) are historical.
-`PLATFORM` defaults to `sky130hd`; `ihp-sg13g2` is also supported. Libraries,
-LEFs and mapping files come from the installed ORFS platform. `CLOCK_PERIOD_NS`
-defaults to 20, and `JOBS` to 4. Provide Python/PyYAML and Bender as for simulation;
+`PLATFORM` defaults to `sky130hd`; `ihp-sg13g2` and experimental `ics55` are
+also supported. Sky130 and IHP libraries, LEFs and mapping files come from the
+installed ORFS platform. ICsprout55 uses the project-owned
+[adapter](orfs/platforms/ics55/README.md) and an externally provisioned PDK at
+`ICS55_PDK_ROOT`. `CLOCK_PERIOD_NS` defaults to 20, and `JOBS` to 4. Provide
+Python/PyYAML and Bender as for simulation;
 `PYTHON` and `BENDER` remain Make overrides. The simulator selection is unrelated.
 Optionally set `RESET_INPUT_DELAY_NS=1` to use a 0–1 ns reset-arrival window:
 the variable sets the maximum, with a 0 ns minimum for hold analysis. Omission
@@ -82,6 +90,8 @@ Detailed SRAM/XIF budgets remain deferred until their integrations are selected.
 
 Implementation defaults to a fixed `DIE_AREA="0 0 1240 1240"` and
 `CORE_AREA="20 20 1220 1220"`, in micrometers, with `PLACE_DENSITY=0.65`.
+For `PLATFORM=ics55`, the defaults are a 340 µm square die, a 300 µm square
+core and density 0.60, matching the qualified RV32I placement trial.
 These are evaluation settings, independent of hardware YAML. The footprint
 matches the earlier IHP experiment, but pins use ORFS's automatic placement.
 Record actual geometry/pins as artifacts; do not attribute differences from
@@ -141,7 +151,7 @@ per run rather than assumed interchangeable.
 
 ## Buffering policy
 
-The baseline explicitly uses these flow settings for both supported platforms:
+The baseline explicitly uses these flow settings for all supported platforms:
 
 | Setting | Value | Purpose |
 |---|---|---|

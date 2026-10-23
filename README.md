@@ -414,6 +414,7 @@ make synth ASIC_FLOW=orfs CONFIG=rv32i TOP=core PLATFORM=sky130hd
 make synth CONFIG=rv32i_zfinx TOP=fpu PLATFORM=sky130hd
 make synth CONFIG=rv32i_zfinx TOP=core PLATFORM=ihp-sg13g2
 make impl CONFIG=rv32i_zfinx TOP=core PLATFORM=ihp-sg13g2 RESET_INPUT_DELAY_NS=1
+make impl CONFIG=rv32i TOP=core PLATFORM=ics55 ICS55_PDK_ROOT=/path/to/icsprout55-pdk
 make report
 ```
 
@@ -427,5 +428,9 @@ two controlled placed results. `make impl` now runs current RTL through placemen
 and timing repair, with scoped critical-path tables in the report. Supply
 `SDC=<file>` for caller-provided constraints; omit the reset-delay override in
 that case. CTS, routing and extracted power/timing remain open.
+The experimental [ICsprout55 adapter](impl/asic/orfs/platforms/ics55/README.md)
+uses the external preview PDK's H7CR RVT library. It requires an extracted,
+pinned PDK tree through `ICS55_PDK_ROOT`; it is intended for comparative
+synthesis and placement, not physical signoff.
 The [benchmarking specification](doc/uqu_spec.bench.md) defines `T_min` and
 estimated maximum frequency with their measurement assumptions.
