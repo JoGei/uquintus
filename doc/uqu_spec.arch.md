@@ -940,8 +940,10 @@ accept no requests when `ISA_M = 0`.
 
 The first arithmetic instance shall remain outside both MUL/DIV and ALU, owned
 by their shared parent EX stage.
-`arith_use_o` selects MUL/DIV's two 33-bit operands, subtraction control, and
-carry-in for that instance; the result and carry-out return combinationally.
+The parent selects MUL/DIV's two 33-bit operands, subtraction control, and
+carry-in from the registered instruction's FU selection; the result and carry-out
+return combinationally. `arith_use_o` reports actual use, independently of the
+candidate arithmetic, and shall not gate that datapath.
 This connection shall have no separate ready/valid handshake. EX shall reserve
 the resource for the owning instruction so that individual arithmetic steps
 cannot stall. MUL/DIV shall instantiate only the additional `F - 1` instances.
@@ -1006,6 +1008,15 @@ EX may accept a native-unit request before the parent can capture its result.
 One local tracking bit shall prevent reissue until transfer or cancellation;
 private execution-unit state and retained results shall remain in the units.
 Qualified pass-through readiness shall also be retained until transfer.
+
+EX result/store words and MEM pass-through result words shall remain unmasked
+candidate data. Completion, operand readiness and exceptions shall qualify
+transfer and forwarding consumption separately; invalid or faulting words need
+not be zero and shall never authorize effects. The arithmetic mux shall use the
+instruction's retained FU selection, rather than a request/ready-dependent
+arithmetic-use indication. No execution or pipeline cycle is added by this
+separation.
+
 No additional instruction payload pipeline register shall be introduced in EX.
 Parent-owned controls and metadata shall remain associated with the instruction
 through stalls. Owning flush/reset shall cancel EX and its units; a younger-only
@@ -1061,7 +1072,11 @@ by WB may overlap the next request/grant. A fault response shall suppress a
 younger request immediately. External response backpressure is not supported:
 if WB cannot consume a response, LSU storage captures its selected result and
 status once and holds them until consumption. `res_registered_o` distinguishes
-this buffered response from the live external response. Stores return zero
+this buffered response from the live external response. `res_forward_data_o`
+separately exposes the existing result register without validity/error masking;
+WB forwarding shall select this registered candidate, never live response data.
+Availability and fault checks still control whether it may be consumed. This
+separation adds no storage or latency. Stores return zero
 data and still require completion acknowledgement. No timeout/retry is added.
 
 `flush_i` cancels the MEM-side request owner, without revoking an older accepted
@@ -1149,6 +1164,13 @@ be advertised through `result_valid_o` while held, but CSR data shall become
 forwardable only on successful commitment, since counter read values can change
 while waiting. The existing hazard/forwarding block still owns matching and
 configured path selection.
+
+`result_o` shall carry unmasked candidate forwarding data, independently of
+`result_valid_o`. For loads, it shall use `lsu_res_forward_data_i`, the LSU's
+registered candidate; architectural writeback may separately use the live
+`lsu_res_data_i` on successful response retirement. No unregistered load bypass
+is introduced. Readiness, faults and commitment shall qualify consumption and
+effects rather than zeroing this forwarding word.
 
 Existing exceptions take priority over malformed normalized controls and CSR
 access failures. The live `exception_valid_o` report and its PC/cause/tval shall
@@ -1800,7 +1822,7 @@ Each descriptor shall contain the following independent information:
 | Destination 0/1 addresses | 5 each | Architectural GPR addresses whose pending writes participate in matching. The parent normalizes optional paired XIF writes into these two destinations. |
 | Result available | 1 | The primary destination's actual architectural result is available now, rather than an intermediate execution value. |
 | Result forwardable | 1 | Instruction-specific success, permission and commitment conditions permit forwarding the primary result. Forwarding still requires availability and an enabled route. |
-| Result data | 32 | The primary destination's architectural value; only usable when both result qualifications hold. |
+| Result data | 32 | Unmasked candidate value; architectural and usable only when both result qualifications hold. |
 | Stage advance | 1 | The instruction actually transfers out of its current slot on this edge. EX/MEM advances move the producer to the next stage; WB advances remove the instruction. |
 
 An invalid slot shall not participate in matching. Pending destination enables
@@ -1915,10 +1937,14 @@ holding obligations shall remain in force.
 the shared component runner and `config/sim/hazard.yml`. Its
 [component guide](../verif/sim/hazard/README.md) defines source-slot behavior,
 normalized producer ports, retention lifecycle and regression commands.
-Unavailable/unused source outputs are deterministic zero; used x0 is ready
-with value zero, and RV32E-invalid source addresses remain unavailable without
-aliasing. The core remains responsible for converting illegal-register cases
-and native faults into their appropriate exception/control paths.
+Unavailable source data is not consumable and need not be zero. Candidate
+selection follows the youngest matching producer and configured route,
+independently of its result availability/forwardability; these qualifiers affect
+readiness and guarantees only. An unavailable younger writer still blocks all
+older values. Used x0 is ready with value zero, and RV32E-invalid source
+addresses remain unavailable without aliasing. Unused/disabled outputs remain
+tied off in this implementation. The core remains responsible for converting
+illegal-register cases and native faults into their appropriate exception/control paths.
 
 EX guarantees are emitted only when a used source is not currently ready and
 is not needed in DE. An EX producer must advance to MEM with a qualified result

@@ -28,7 +28,7 @@ instance for standalone tests.
 | `req_op_i[2:0]` | M-extension instruction `funct3`, as listed below. |
 | `req_a_i[31:0]`, `req_b_i[31:0]` | Source operands. Keep the request payload stable while valid and blocked. |
 | `res_valid_o`, `res_ready_i` | Result transfer occurs on their conjunction at a rising edge. |
-| `res_data_o[31:0]` | Selected destination value, stable while valid and blocked. Zero when invalid. |
+| `res_data_o[31:0]` | Candidate destination value, stable while valid and blocked; unqualified when invalid. |
 
 | `req_op_i` | Instruction | Result |
 | --- | --- | --- |
@@ -67,12 +67,13 @@ must reject M instructions in that configuration rather than issue them here.
 | `arith_carry_out_i` | Connect from `uqu_arith.carry_o`; subtraction carry means no borrow. |
 
 These are **combinational datapath connections**, with no ready/valid protocol.
-EX reserves the shared instance for the owning instruction. When
-`arith_use_o = 1`, the parent selects the MUL/DIV operands and controls and
-returns result/carry in the same cycle. EX must not arbitrate or stall individual arithmetic steps; doing so
+EX reserves the shared instance using the live instruction's FU selector,
+independently of `arith_use_o`, and returns result/carry in the same cycle.
+`arith_use_o` reports actual arithmetic use; candidate operands and result data
+remain independent of request validity and flush controls. EX must not arbitrate or stall individual arithmetic steps; doing so
 would violate fixed execution latency. Unrelated normal ALU operands must not
 feed slice zero during those cycles. When `arith_use_o = 0`, the arithmetic
-payload outputs are inactive zeros and the arithmetic response is ignored.
+response cannot advance execution state; candidate payloads need not be zero.
 
 A typical parent-owned connection is:
 

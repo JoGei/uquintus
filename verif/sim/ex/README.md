@@ -94,8 +94,8 @@ redirect side effects. Their metadata follows the parent's normal pipeline path.
 
 | Port | Meaning |
 | --- | --- |
-| `result_o[31:0]` | Selected compute result or pass-through value; zero when invalid/faulting. |
-| `store_data_o[31:0]` | Resolved store value for EX/MEM capture; zero when invalid/faulting. |
+| `result_o[31:0]` | Unmasked selected candidate result/pass-through value; consume only on qualified success. |
+| `store_data_o[31:0]` | Unmasked resolved store value; only a successful store may use it. |
 | `fflags_valid_o`, `fflags_o[4:0]` | Per-instruction FPU flags for later retirement-qualified accrual. Valid with a native Zfinx result, including zero-valued flags. |
 | `exception_valid_o`, `exception_cause_o[4:0]`, `exception_tval_o[31:0]` | Exception metadata accompanying the output token. |
 

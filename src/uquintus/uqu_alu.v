@@ -59,11 +59,11 @@ module uqu_alu (
     assign arith_use_o = req_fire && ((req_op_i == OP_ADD) || subtract);
     // Signed subtraction has a 33-bit signed result, including overflow of
     // the ordinary 32-bit difference. Unsigned subtraction uses no-borrow.
-    assign arith_a_o = arith_use_o ?
-        {signed_compare && req_a_i[31], req_a_i} : 33'd0;
-    assign arith_b_o = arith_use_o ?
-        {signed_compare && req_b_i[31], req_b_i} : 33'd0;
-    assign arith_sub_o = arith_use_o && subtract;
+    // The parent selects the slice owner from the live slot's FU selector.
+    // arith_use_o reports actual use; it must not qualify candidate arithmetic.
+    assign arith_a_o = {signed_compare && req_a_i[31], req_a_i};
+    assign arith_b_o = {signed_compare && req_b_i[31], req_b_i};
+    assign arith_sub_o = subtract;
     assign arith_carry_in_o = arith_sub_o;
 
     // Reversing wires around one right barrel shifter also implements SLL.
@@ -91,8 +91,7 @@ module uqu_alu (
     end
 
     assign res_valid_o = enabled && (held_valid_q || req_fire);
-    assign res_data_o = !res_valid_o ? 32'd0 :
-                       held_valid_q ? held_result_q : computed_result;
+    assign res_data_o = held_valid_q ? held_result_q : computed_result;
 
     always @(posedge clk_i) begin
         if (!rst_ni || flush_i) begin

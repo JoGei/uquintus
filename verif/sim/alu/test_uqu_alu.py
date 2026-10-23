@@ -142,7 +142,6 @@ class ControlTest(AluTest):
                     self.dut.res_ready_i.value = 1
                     await self.settle()
                     assert self.outputs() == (0, 0, 0)
-                    assert int(self.dut.res_data_o.value) == 0
                     await self.edge()
                     self.dut.req_valid_i.value = 0
                     self.dut.rst_ni.value = 1

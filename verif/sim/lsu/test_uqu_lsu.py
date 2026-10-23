@@ -102,6 +102,8 @@ class LsuTest(uvm_test):
             for _ in range(hold):
                 assert int(d.res_valid_o.value) and int(d.res_registered_o.value)
                 assert self.result() == expected
+                if not error and not req['we']:
+                    assert int(d.res_forward_data_o.value) == expected[0]
                 await self.edge()
             d.res_ready_i.value = 1
             await self.edge()

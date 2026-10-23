@@ -12,7 +12,7 @@ from cocotb.triggers import Timer
 from pyuvm import uvm_root, uvm_test
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
-from ex_model import FU_MULDIV, FU_PASS, cycles, outcome, random_token, token
+from ex_model import FU_MULDIV, FU_PASS, assert_outcome, cycles, outcome, random_token, token
 
 FIELDS = ('fu', 'op', 'a', 'b', 'c', 'rm', 'pass_data', 'store_data', 'instr',
           'exception_valid', 'exception_cause', 'exception_tval', 'pc', 'rd')
@@ -77,7 +77,7 @@ class PipelineTest(uvm_test):
                 assert int(d.ex_valid_o.value) and int(d.ex_pc_o.value) == held_ex_pc
             if int(d.out_valid_o.value):
                 assert expected, 'unsolicited or duplicate pipeline result'
-                assert self.outputs() == expected[0], (self.outputs(), expected[0])
+                assert_outcome(self.outputs(), expected[0])
                 if int(d.out_ready_i.value):
                     expected.popleft()
                     received += 1

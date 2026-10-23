@@ -110,7 +110,10 @@ class PipelineTest(uvm_test):
                 assert int(d.dmem_req_o.value) and self.packet() == held_bus
             if int(d.out_valid_o.value):
                 assert queue and expected.get(queue[0]['pc']) is not None
-                assert self.outputs() == expected[queue[0]['pc']], (self.outputs(), expected[queue[0]['pc']])
+                actual, reference = self.outputs(), expected[queue[0]['pc']]
+                assert actual[1:] == reference[1:], (actual, reference)
+                if not reference[3]:
+                    assert actual[0] == reference[0], (actual, reference)
                 if int(d.out_ready_i.value):
                     queue.popleft()
                     received += 1

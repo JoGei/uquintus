@@ -33,8 +33,11 @@ For each source slot n = 0, 1, 2:
 
 Resolved `de_rsN_o` and `ex_rsN_o` values are accompanied by
 `de_rs_ready_o`, `de_rs_ex_guaranteed_o` and `ex_rs_ready_o` masks.
-Unused, invalid, unavailable and disabled-slot data/availability outputs are
-zero; guarantees are zero for need-now sources and for already-ready sources.
+Unavailable data need not be zero: producer identity and enabled routes select
+the candidate word independently of result availability/forwardability. Consume
+it only with the corresponding ready bit; an unavailable youngest writer still
+blocks older values. Unused, invalid and disabled-slot outputs remain zero.
+Guarantees are zero for need-now sources and for already-ready sources.
 Used x0 is ready with value zero. With `ISA_E=1`, used x16..x31 report
 unavailable rather than aliasing a smaller address; the decoder/core remains
 responsible for producing the illegal-instruction exception.
@@ -57,7 +60,7 @@ stage's output-completion indication. Each stage prefix also has:
 | `<stage>_rd0_i[4:0]`, `<stage>_rd1_i[4:0]` | Primary/secondary architectural destinations. |
 | `<stage>_result_available_i` | The primary architectural result is available now. |
 | `<stage>_result_forwardable_i` | Success/commit/permission conditions permit forwarding it. |
-| `<stage>_result_i[31:0]` | Primary architectural result, not an intermediate load address. |
+| `<stage>_result_i[31:0]` | Candidate primary value; architectural only when available and forwardable. MEM LSU addresses are never qualified as destination results. |
 | `<stage>_advance_i` | Actual outgoing instruction transfer on this edge. |
 
 The core supplies correct pending enables, ignored-write normalization and

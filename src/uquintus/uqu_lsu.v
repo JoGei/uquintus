@@ -24,6 +24,7 @@ module uqu_lsu (
     output wire        res_valid_o,
     input  wire        res_ready_i,
     output wire [31:0] res_data_o,
+    output wire [31:0] res_forward_data_o,
     output wire        res_exception_valid_o,
     output wire [4:0]  res_exception_cause_o,
     output wire [31:0] res_exception_tval_o,
@@ -100,6 +101,9 @@ module uqu_lsu (
     assign res_registered_o = res_valid_o && response_buffer_valid_q;
     assign res_data_o = !res_valid_o || response_error || we_q ? 32'd0 :
                         response_buffer_valid_q ? result_q : load_result;
+    // Unqualified registered candidate for forwarding. Never expose the live
+    // response on this path; res_registered_o and fault control permit its use.
+    assign res_forward_data_o = result_q;
     assign res_exception_valid_o = res_valid_o && response_error;
     assign res_exception_cause_o = !res_exception_valid_o ? 5'd0 :
                                   we_q ? CAUSE_STORE_ACCESS : CAUSE_LOAD_ACCESS;

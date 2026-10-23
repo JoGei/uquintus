@@ -29,6 +29,7 @@ module uqu_stage_mem (
     output wire        lsu_res_valid_o,
     output wire        lsu_res_registered_o,
     output wire [31:0] lsu_res_data_o,
+    output wire [31:0] lsu_res_forward_data_o,
     output wire        lsu_res_exception_valid_o,
     output wire [4:0]  lsu_res_exception_cause_o,
     output wire [31:0] lsu_res_exception_tval_o,
@@ -79,8 +80,9 @@ module uqu_stage_mem (
         exception_valid_i ? exception_cause_i : lsu_exception_cause;
     assign exception_tval_o = !exception_valid_o ? 32'd0 :
         exception_valid_i ? exception_tval_i : lsu_exception_tval;
-    assign result_o = !valid_o || exception_valid_o ? 32'd0 :
-                     result_i;
+    // Candidate payload only. Completion/fault qualification belongs on
+    // valid_o and the parent's forwarding/transfer enables, not this word.
+    assign result_o = result_i;
     assign load_result_valid_o = 1'b0; // Load values become available in WB.
     assign fflags_valid_o = valid_o && !exception_valid_o && !lsu_i && fflags_valid_i;
     assign fflags_o = fflags_valid_o ? fflags_i : 5'd0;
@@ -117,7 +119,7 @@ module uqu_stage_mem (
         .req_exception_tval_o(lsu_exception_tval),
         .busy_o(lsu_busy_o), .res_valid_o(lsu_res_valid_o),
         .res_ready_i(lsu_res_ready_i), .res_registered_o(lsu_res_registered_o),
-        .res_data_o(lsu_res_data_o),
+        .res_data_o(lsu_res_data_o), .res_forward_data_o(lsu_res_forward_data_o),
         .res_exception_valid_o(lsu_res_exception_valid_o),
         .res_exception_cause_o(lsu_res_exception_cause_o),
         .res_exception_tval_o(lsu_res_exception_tval_o),

@@ -155,9 +155,12 @@ module uqu_hazard #(
                             de_value = retained_data;
                             de_ready = 1'b1;
                         end else if (|de_ex_match) begin
+                            // Select candidate data by producer identity and
+                            // configured route, independently of availability.
+                            if (de_ex_match[0] && (MUA_FORWARDING == 1) &&
+                                (MUA_FORWARD_EX_TO_DE == 1)) de_value = ex_result_i;
                             if (de_ex_match[0] && ex_result_usable && (MUA_FORWARDING == 1)) begin
                                 if (MUA_FORWARD_EX_TO_DE == 1) begin
-                                    de_value = ex_result_i;
                                     de_ready = 1'b1;
                                 end else if (!de_rs_need_now_i[source_idx] && ex_advance_i &&
                                              (MUA_FORWARD_MEM_TO_EX == 1)) begin
@@ -165,9 +168,10 @@ module uqu_hazard #(
                                 end
                             end
                         end else if (|de_mem_match) begin
+                            if (de_mem_match[0] && (MUA_FORWARDING == 1) &&
+                                (MUA_FORWARD_MEM_TO_DE == 1)) de_value = mem_result_i;
                             if (de_mem_match[0] && mem_result_usable && (MUA_FORWARDING == 1)) begin
                                 if (MUA_FORWARD_MEM_TO_DE == 1) begin
-                                    de_value = mem_result_i;
                                     de_ready = 1'b1;
                                 end else if (!de_rs_need_now_i[source_idx]) begin
                                     // The producer can stay in MEM or advance to WB
@@ -177,8 +181,8 @@ module uqu_hazard #(
                                 end
                             end
                         end else if (|de_wb_match) begin
+                            if (de_wb_match[0] && (MUA_FORWARDING == 1)) de_value = wb_result_i;
                             if (de_wb_match[0] && wb_result_usable && (MUA_FORWARDING == 1)) begin
-                                de_value = wb_result_i;
                                 de_ready = 1'b1;
                             end
                         end else begin
@@ -198,15 +202,17 @@ module uqu_hazard #(
                             ex_value = ex_data[source_idx];
                             ex_ready = 1'b1;
                         end else if (|ex_mem_match) begin
+                            if (ex_mem_match[0] && (MUA_FORWARDING == 1) &&
+                                (MUA_FORWARD_MEM_TO_EX == 1)) ex_value = mem_result_i;
                             if (ex_mem_match[0] && mem_result_usable && (MUA_FORWARDING == 1) &&
                                 (MUA_FORWARD_MEM_TO_EX == 1)) begin
-                                ex_value = mem_result_i;
                                 ex_ready = 1'b1;
                             end
                         end else if (|ex_wb_match) begin
+                            if (ex_wb_match[0] && (MUA_FORWARDING == 1) &&
+                                (MUA_FORWARD_WB_TO_EX == 1)) ex_value = wb_result_i;
                             if (ex_wb_match[0] && wb_result_usable && (MUA_FORWARDING == 1) &&
                                 (MUA_FORWARD_WB_TO_EX == 1)) begin
-                                ex_value = wb_result_i;
                                 ex_ready = 1'b1;
                             end
                         end

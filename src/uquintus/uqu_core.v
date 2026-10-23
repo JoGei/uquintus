@@ -365,7 +365,7 @@ module uqu_core #(
         .exception_valid_o(ex_exception), .exception_cause_o(ex_cause), .exception_tval_o(ex_tval)
     );
     wire lsu_res_valid, lsu_res_registered, lsu_res_exception, lsu_res_ready;
-    wire [31:0] lsu_res_data, lsu_res_tval;
+    wire [31:0] lsu_res_data, lsu_res_forward_data, lsu_res_tval;
     wire [4:0] lsu_res_cause;
     reg wb_lsu_q;
     uqu_stage_mem u_mem (
@@ -376,6 +376,7 @@ module uqu_core #(
         .lsu_res_ready_i(lsu_res_ready), .lsu_res_flush_i(1'b0),
         .lsu_res_valid_o(lsu_res_valid), .lsu_res_registered_o(lsu_res_registered),
         .lsu_res_data_o(lsu_res_data), .lsu_res_exception_valid_o(lsu_res_exception),
+        .lsu_res_forward_data_o(lsu_res_forward_data),
         .lsu_res_exception_cause_o(lsu_res_cause), .lsu_res_exception_tval_o(lsu_res_tval),
         .lsu_busy_o(lsu_busy), .pmp_valid_o(mem_pmp_valid), .pmp_addr_o(mem_pmp_addr), .pmp_size_o(mem_pmp_size),
         .pmp_access_o(mem_pmp_access), .pmp_priv_m_o(mem_pmp_priv_m), .pmp_allow_i(mem_pmp_allow),
@@ -391,6 +392,7 @@ module uqu_core #(
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(1'b0), .valid_i(wb_valid_q), .ready_o(), .valid_o(wb_complete), .ready_i(wb_ready),
         .lsu_i(wb_lsu_q), .lsu_res_valid_i(lsu_res_valid), .lsu_res_registered_i(lsu_res_registered),
         .lsu_res_data_i(lsu_res_data), .lsu_res_exception_valid_i(lsu_res_exception),
+        .lsu_res_forward_data_i(lsu_res_forward_data),
         .lsu_res_exception_cause_i(lsu_res_cause), .lsu_res_exception_tval_i(lsu_res_tval), .lsu_res_ready_o(lsu_res_ready),
         .kind_i(wb_kind_q), .result_i(wb_data_q), .rd_we_i(wb_rd_we_q), .rd_i(wb_rd_q), .pc_i(wb_pc_q), .instr_i(wb_original_q),
         .csr_addr_i(wb_csr_addr_q), .csr_op_i(wb_csr_op_q), .csr_src_i(wb_csr_src_q), .csr_src_zero_i(wb_csr_zero_q),

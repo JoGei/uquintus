@@ -60,7 +60,12 @@ transaction and routes younger MEM flushes separately.
 | `we1_o`, `waddr1_o[4:0]`, `wdata1_o[31:0]` | Simultaneous secondary paired-XIF write; otherwise zero. |
 | `result_valid_o`, `result_o[31:0]` | Primary destination available for parent forwarding. Ordinary/matching XIF data may be advertised while held; CSR data only on successful retirement. |
 
-Address/data outputs are zero when their write enable is zero. CSR results are
+GPR write address/data outputs are zero when their write enable is zero.
+`result_o` is an unmasked forwarding candidate; `result_valid_o` qualifies its
+use. Loads use the separate `lsu_res_forward_data_i` from the existing LSU
+response register, while retirement may use live `lsu_res_data_i`. No response
+register or forwarding cycle is added, and live load data is never bypassed.
+CSR results are
 architectural pre-update read values. Held counter queries may change, so CSR
 results are not forwardable before commitment. Existing exceptions win over
 malformed controls and CSR checks. Disabled XIF, DRET outside Debug Mode,

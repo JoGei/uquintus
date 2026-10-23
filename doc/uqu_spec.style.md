@@ -207,6 +207,16 @@ flush cancellation. Concrete payload widths and status fields are defined by
 the implemented unit interfaces and their linked component guides; an imported
 FPU backend still requires its own adapter.
 
+**Payload qualification:** Agreed. A deasserted valid/readiness qualifier does not
+require its data word to be zero. Prefer an unmasked candidate datapath and
+separate availability, fault and transfer controls; do not route those controls
+through wide arithmetic by zeroing intermediate results or operands. Consumers
+shall ignore unqualified data, including during reset/flush and on exceptions.
+Valid blocked payloads shall still remain stable. Architectural constants such
+as x0, disabled-feature tie-offs and explicitly specified protocol values remain
+required zeros. This convention does not permit incomplete combinational
+assignments, inferred latches, or explicit X/Z values in candidate datapaths.
+
 **Pipeline control names:** Agreed. Use `*_stall` to hold a stage and `*_flush`
 to discard its instruction.
 

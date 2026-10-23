@@ -178,6 +178,7 @@ module uqu_mem_pipeline_tb #(
         .exception_tval_i(exmem_exception_tval_q),
         .lsu_res_flush_i(1'b0), .lsu_res_ready_i(memwb_valid_q && memwb_lsu_q && out_ready_i),
         .lsu_res_valid_o(res_valid), .lsu_res_registered_o(), .lsu_res_data_o(res_data),
+        .lsu_res_forward_data_o(),
         .lsu_res_exception_valid_o(res_error), .lsu_res_exception_cause_o(res_cause), .lsu_res_exception_tval_o(res_tval),
         .request_permit_i(request_permit_i && (!memwb_valid_q || (out_valid_o && !out_exception_valid_o))), .lsu_busy_o(lsu_busy_o),
         .pmp_valid_o(pmp_valid), .pmp_addr_o(pmp_addr), .pmp_size_o(pmp_size),

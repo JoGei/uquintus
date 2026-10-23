@@ -82,7 +82,7 @@ module uqu_ifetch_pmp_tb #(
     assign mem_exception_cause_o = req_fault ? req_cause : res_cause;
     assign mem_exception_tval_o = req_fault ? req_tval : res_tval;
     uqu_lsu u_lsu (
-        .res_flush_i(mem_flush_i), .res_registered_o(),
+        .res_flush_i(mem_flush_i), .res_registered_o(), .res_forward_data_o(),
         .req_exception_valid_o(req_fault), .req_exception_cause_o(req_cause), .req_exception_tval_o(req_tval),
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(mem_flush_i),
         .req_valid_i(mem_valid_i), .req_ready_o(req_ready),

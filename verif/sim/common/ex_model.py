@@ -6,6 +6,13 @@ from rv32_arithmetic import ALU_OPS, alu_result, muldiv_result
 FU_ALU, FU_MULDIV, FU_FPU, FU_PASS = range(4)
 
 
+def assert_outcome(actual, expected):
+    """Faulting instructions carry status/identity, not usable result data."""
+    assert actual[2:] == expected[2:], (actual, expected)
+    if not expected[4]:
+        assert actual[:2] == expected[:2], (actual, expected)
+
+
 def token(**updates):
     payload = dict(fu=FU_ALU, op=0, a=0, b=0, c=0, rm=0, pass_data=0,
                    store_data=0, instr=0x33, exception_valid=0,

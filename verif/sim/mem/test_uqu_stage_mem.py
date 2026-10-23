@@ -54,6 +54,8 @@ class MemTest(uvm_test):
         d.dmem_rvalid_i.value = 0
         d.lsu_res_ready_i.value = 0
         await self.settle()
+        # The candidate word is not masked by grant/completion/local faults.
+        assert int(d.result_o.value) == item['result']
         fault = (item['exception_cause'], item['exception_tval']) if item['exception_valid'] else \
             local_exception(request(item, allow)) if item['lsu'] else None
         if fault or not item['lsu']:

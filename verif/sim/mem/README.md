@@ -29,6 +29,7 @@ validation/payload cannot be reinterpreted by changing live inputs.
 | --- | --- |
 | `lsu_res_valid_o`, `lsu_res_ready_i` | Pending transaction completion, independent of the current MEM token. |
 | `lsu_res_data_o[31:0]` | Selected/extended load value; zero for stores/errors. |
+| `lsu_res_forward_data_o[31:0]` | Unmasked existing response-register candidate; no live bus-data path. |
 | `lsu_res_exception_valid_o`, `lsu_res_exception_cause_o[4:0]`, `lsu_res_exception_tval_o[31:0]` | Bus error status, cause and original effective address. |
 | `lsu_res_registered_o` | Completion is buffered; eligible for registered-only forwarding. |
 | `lsu_res_flush_i` | Cancel response ownership, distinct from MEM-only flush. Core ties low for oldest WB operations. |
@@ -38,8 +39,8 @@ The core routes this channel into WB. A successful response can retire while
 MEM issues the next request. An error or unresolved older WB response blocks
 younger effects. The LSU buffers nonbackpressurable bus responses if WB stalls.
 
-`result_o` is the pass-through value or effective-address metadata, zero on
-fault/invalid output. It is never a loaded value; `load_result_valid_o` is tied
+`result_o` is the unmasked pass-through value or effective-address metadata,
+independent of completion and faults. It is never a loaded value; `load_result_valid_o` is tied
 low for compatibility. The core excludes memory tokens from MEM destination
 forwarding. FP flags propagate only on successful nonmemory tokens.
 

@@ -41,6 +41,8 @@ class WBTest(uvm_test):
             await Timer(1, units='ns')
         result, _ = self.model.evaluate(item, g)
         for name, value in result.items():
+            if name == 'result' and not result['result_valid']:
+                continue
             if value is not None:
                 actual = int(getattr(self.dut, name + '_o').value)
                 assert actual == value, f'{name}: expected={value}, actual={actual}, token={item}, control={g}'
@@ -420,6 +422,12 @@ class MemoryTest(WBTest):
             for _ in range(4):
                 r = await self.cycle(item, lsu=1)
                 assert not r['valid'] and not r['retire'] and not r['result_valid']
+            # Candidate forwarding sees the old registered word, never a live
+            # bus response. Qualification still blocks consumption of that word.
+            r = await self.cycle(item, lsu=1, lsu_res_valid=1,
+                                 lsu_res_data=0x13579BDF, lsu_res_forward_data=0x2468ACE0, ready=0)
+            assert not r['result_valid'] and not r['we0']
+            assert int(self.dut.result_o.value) == 0x2468ACE0
             # Raw bus response can retire/write at this edge, never bypass.
             r = await self.cycle(item, lsu=1, lsu_res_valid=1, lsu_res_data=0xDEADBEEF)
             assert r['retire'] and not r['result_valid']
@@ -427,7 +435,7 @@ class MemoryTest(WBTest):
             # A response held by the LSU becomes a registered forwarding source.
             for ready in (0, 0, 1):
                 r = await self.cycle(item, lsu=1, lsu_res_valid=1, lsu_res_registered=1,
-                                     lsu_res_data=0x89ABCDEF, ready=ready)
+                                     lsu_res_data=0x89ABCDEF, lsu_res_forward_data=0x89ABCDEF, ready=ready)
                 assert r['result_valid'] == int(not store)
             r = await self.cycle(item, lsu=1, lsu_res_valid=1, lsu_res_exception_valid=1,
                 lsu_res_exception_cause=7 if store else 5, lsu_res_exception_tval=0x1000, ready=0)

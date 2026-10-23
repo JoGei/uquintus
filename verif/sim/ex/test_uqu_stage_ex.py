@@ -11,7 +11,7 @@ from cocotb.triggers import Timer
 from pyuvm import uvm_root, uvm_test
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
-from ex_model import FU_ALU, FU_MULDIV, FU_FPU, FU_PASS, cycles, outcome, random_token, token
+from ex_model import FU_ALU, FU_MULDIV, FU_FPU, FU_PASS, assert_outcome, cycles, outcome, random_token, token
 from rv32_arithmetic import ALU_OPS, MASK
 
 FIELDS = ('fu', 'op', 'a', 'b', 'c', 'rm', 'pass_data', 'store_data', 'instr',
@@ -91,7 +91,7 @@ class ExTest(uvm_test):
             requests = self.requests()
             starts = [old + new for old, new in zip(starts, requests)]
             if valid:
-                assert self.outputs() == expected, (payload, self.outputs(), expected)
+                assert_outcome(self.outputs(), expected)
             await self.edge()
             # A native computation must continue even if an external operand
             # producer disappears after acceptance. Its payload stays retained.
@@ -104,7 +104,7 @@ class ExTest(uvm_test):
         for _ in range(hold):
             await self.settle()
             assert int(self.dut.valid_o.value) and not int(self.dut.ready_o.value)
-            assert self.outputs() == expected
+            assert_outcome(self.outputs(), expected)
             requests = self.requests()
             starts = [old + new for old, new in zip(starts, requests)]
             await self.edge()
@@ -112,7 +112,7 @@ class ExTest(uvm_test):
             self.dut.ready_i.value = 1
             await self.settle()
             assert int(self.dut.valid_o.value) and int(self.dut.ready_o.value)
-            assert self.outputs() == expected
+            assert_outcome(self.outputs(), expected)
             starts = [old + new for old, new in zip(starts, self.requests())]
             await self.edge()
         expected_starts = [0, 0, 0]
@@ -122,7 +122,7 @@ class ExTest(uvm_test):
         self.dut.valid_i.value = 0
         await self.settle()
         assert int(self.dut.ready_o.value) and not int(self.dut.valid_o.value)
-        assert self.outputs() == (0,) * 7
+        assert self.outputs()[2:] == (0,) * 5
         self.checks += 1
 
 
@@ -171,6 +171,27 @@ class ControlTest(ExTest):
         self.raise_objection()
         await self.initialize()
         self.dut.ready_i.value = 0
+        # Candidate arithmetic is independent of launch/fault/flush controls.
+        # None of these observations may start or transfer an operation.
+        candidates = [token(op=0, a=0x12345678, b=0x87654321),
+                      token(op=8, a=5, b=9),
+                      token(fu=FU_PASS, pass_data=0xDEADBEEF)]
+        multiply = token(fu=FU_MULDIV, op=1, a=0x80000000, b=0xFFFFFFFF)
+        if self.params['ISA_M'] and cycles(multiply, self.params) == 1:
+            candidates.append(multiply)
+        for payload in candidates:
+            self.drive(payload)
+            self.dut.operands_ready_i.value = 0
+            for valid, fault, flush in ((0, 0, 0), (1, 0, 0), (1, 1, 0), (1, 0, 1)):
+                self.dut.valid_i.value = valid
+                self.dut.exception_valid_i.value = fault
+                self.dut.flush_i.value = flush
+                await self.settle()
+                assert self.requests() == (0, 0, 0)
+                assert int(self.dut.result_o.value) == outcome(payload, self.params)[0]
+        self.dut.valid_i.value = 0
+        self.dut.flush_i.value = 0
+        self.drive(token())
         # An empty parent-owned slot can accept work even behind blocked MEM.
         await self.settle()
         assert int(self.dut.ready_o.value) and not int(self.dut.valid_o.value)
@@ -200,7 +221,7 @@ class ControlTest(ExTest):
                     await self.settle()
                     assert not int(self.dut.valid_o.value) and not int(self.dut.ready_o.value)
                     assert self.requests() == (0, 0, 0)
-                    assert self.outputs() == (0,) * 7
+                    assert self.outputs()[2:] == (0,) * 5
                     await self.edge()
                     self.dut.valid_i.value = 0
                     self.dut.rst_ni.value = 1

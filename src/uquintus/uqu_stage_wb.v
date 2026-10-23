@@ -27,6 +27,7 @@ module uqu_stage_wb #(
     input  wire         lsu_res_valid_i,
     input  wire         lsu_res_registered_i,
     input  wire [31:0]  lsu_res_data_i,
+    input  wire [31:0]  lsu_res_forward_data_i,
     input  wire         lsu_res_exception_valid_i,
     input  wire [4:0]   lsu_res_exception_cause_i,
     input  wire [31:0]  lsu_res_exception_tval_i,
@@ -211,7 +212,10 @@ module uqu_stage_wb #(
     assign result_valid_o = valid_o && !fault && destination_nonzero &&
                             ((kind_i != KIND_CSR) || retire_o) &&
                             (!lsu_i || lsu_res_registered_i);
-    assign result_o = result_valid_o ? selected_result : 32'd0;
+    // Forwarding candidate is separate from the live response used to write
+    // the GPR file at retirement. Availability/faults qualify result_valid_o.
+    assign result_o = is_xif ? xif_result_data_i[31:0] :
+        (kind_i == KIND_CSR) ? csr_rdata : lsu_i ? lsu_res_forward_data_i : result_i;
     assign we0_o = retire_o && destination_nonzero;
     assign waddr0_o = we0_o ? selected_rd : 5'd0;
     assign wdata0_o = we0_o ? selected_result : 32'd0;

@@ -39,6 +39,11 @@ input changes. `res_registered_o` is high only for such buffered data: raw bus
 responses **must not** be used for DE/EX forwarding. If WB retires a raw load,
 its value becomes available through the register file after that edge.
 
+`res_forward_data_o` exposes the existing buffered-result register directly,
+without response-valid/error masking or a live bus-data mux. It is a candidate
+only: WB must still require a registered, successful load response before
+forwarding it. This adds no storage or latency; stale/invalid contents are ignored.
+
 There is one accepted outstanding transaction. A successful consumed response
 may overlap the next grant, giving one operation per clock with next-cycle
 responses. An error response prevents the younger request even if permission

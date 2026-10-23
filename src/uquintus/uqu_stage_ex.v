@@ -110,10 +110,11 @@ module uqu_stage_ex #(
         exception_valid_i ? exception_cause_i : CAUSE_ILLEGAL_INSTRUCTION;
     assign exception_tval_o = !exception_valid_o ? 32'd0 :
         exception_valid_i ? exception_tval_i : instr_i;
-    assign result_o = !valid_o || fault ? 32'd0 :
-        alu_selected ? alu_result : muldiv_selected ? muldiv_result :
+    // Candidate data remains independent of completion and exception control.
+    // Only qualified consumers may forward or transfer it.
+    assign result_o = alu_selected ? alu_result : muldiv_selected ? muldiv_result :
         fpu_selected ? fpu_result : pass_data_i;
-    assign store_data_o = valid_o && !fault ? store_data_i : 32'd0;
+    assign store_data_o = store_data_i;
     assign fflags_valid_o = valid_o && !fault && fpu_selected;
     assign fflags_o = fflags_valid_o ? fpu_fflags : 5'd0;
 
@@ -171,10 +172,10 @@ module uqu_stage_ex #(
     // EX owns slice zero. Return wires fan out; only the owning unit consumes
     // them. No iteration can be stalled or arbitrated independently.
     uqu_arith u_arith (
-        .a_i(muldiv_arith_use ? muldiv_arith_a : alu_arith_a),
-        .b_i(muldiv_arith_use ? muldiv_arith_b : alu_arith_b),
-        .sub_i(muldiv_arith_use ? muldiv_arith_sub : alu_arith_sub),
-        .carry_i(muldiv_arith_use ? muldiv_arith_carry_in : alu_arith_carry_in),
+        .a_i(muldiv_selected ? muldiv_arith_a : alu_arith_a),
+        .b_i(muldiv_selected ? muldiv_arith_b : alu_arith_b),
+        .sub_i(muldiv_selected ? muldiv_arith_sub : alu_arith_sub),
+        .carry_i(muldiv_selected ? muldiv_arith_carry_in : alu_arith_carry_in),
         .result_o(arith_result), .carry_o(arith_carry_out), .borrow_o()
     );
 endmodule

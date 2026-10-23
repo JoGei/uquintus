@@ -49,6 +49,8 @@ class ParentTest(uvm_test):
         for name, value in expected.items():
             if value is None or name == 'lsu_res_ready':
                 continue
+            if name == 'result' and not expected['result_valid']:
+                continue
             port = 'wb_'+name+'_o' if name in ('valid', 'ready') else name+'_o'
             assert int(getattr(d, port).value) == value, (name, value, item, g)
         redirect = any(expected[n] for n in ('exception_fire', 'mret', 'dret', 'debug_enter', 'debug_exception', 'debug_ebreak'))

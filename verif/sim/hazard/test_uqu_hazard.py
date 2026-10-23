@@ -23,6 +23,10 @@ class HazardTest(uvm_test):
     async def compare(self, i):
         expected = self.model.outputs(i)
         for name, value in expected.items():
+            if name in ('de_rs0', 'de_rs1', 'de_rs2', 'ex_rs0', 'ex_rs1', 'ex_rs2'):
+                consumer, slot = name[:2], int(name[-1])
+                if not expected[consumer+'_rs_ready'] & (1 << slot):
+                    continue  # Unready candidate data has no architectural value.
             actual = int(getattr(self.dut, name+'_o').value)
             assert actual == value, (name, actual, value, i, self.model.retained, self.p)
         self.checks += 1
@@ -54,6 +58,22 @@ class DirectedTest(HazardTest):
     async def run_phase(self):
         self.raise_objection()
         await self.reset()
+        # An unavailable youngest producer still selects candidate data; only
+        # readiness changes. Do not route response/fault qualification into the
+        # operand word and then through downstream arithmetic.
+        for stage in ('ex', 'mem', 'wb'):
+            for available, forwardable in itertools.product(range(2), repeat=2):
+                i = defaults()
+                i.update({stage+'_pending': 1, stage+'_rd0': 1,
+                          stage+'_result_available': available,
+                          stage+'_result_forwardable': forwardable,
+                          stage+'_result': 0xA5C03F17})
+                await self.check(i)
+                for consumer in ('de', 'ex'):
+                    if stage == 'ex' and consumer == 'ex':
+                        continue
+                    if self.model.route(stage, consumer):
+                        assert int(getattr(self.dut, consumer+'_rs0_o').value) == 0xA5C03F17
         # Occupancy, pending intent and both result qualifications are separate.
         # Every producer targets all source slots in turn, including x0/E bounds.
         for stage in ('ex', 'mem', 'wb'):

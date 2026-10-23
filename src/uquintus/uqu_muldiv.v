@@ -80,28 +80,31 @@ module uqu_muldiv #(
             wire enabled = rst_ni && !flush_i;
             wire req_fire = req_valid_i && req_ready_o;
             wire res_fire = res_valid_o && res_ready_i;
-            wire start = (state_q == ST_IDLE) && req_fire;
-            wire [2:0] op = start ? req_op_i : op_q;
+            // Idle candidate arithmetic uses the request payload even without
+            // a handshake. Only validity and state updates depend on req_fire.
+            wire idle = (state_q == ST_IDLE);
+            wire start = idle && req_fire;
+            wire [2:0] op = idle ? req_op_i : op_q;
             wire request_signed_a = (req_op_i == 3'b001) || (req_op_i == 3'b010);
             wire request_signed_b = (req_op_i == 3'b001);
             wire request_div_signed = !req_op_i[0];
             wire request_negative_a = request_div_signed && req_a_i[31];
             wire request_negative_b = request_div_signed && req_b_i[31];
-            wire signed_a = start ? request_signed_a : signed_a_q;
-            wire signed_b = start ? request_signed_b : signed_b_q;
-            wire [5:0] step = start ? 6'd0 : step_q;
+            wire signed_a = idle ? request_signed_a : signed_a_q;
+            wire signed_b = idle ? request_signed_b : signed_b_q;
+            wire [5:0] step = idle ? 6'd0 : step_q;
             wire last_group = (step == LAST_GROUP);
-            wire [32:0] multiplicand = start ?
+            wire [32:0] multiplicand = idle ?
                 {request_signed_a && req_a_i[31], req_a_i} : multiplicand_q;
-            wire phase_mul = enabled && (MUA_MUL == `UQU_MUL_ITERATIVE) &&
-                ((start && !req_op_i[2]) || (state_q == ST_MUL));
-            wire phase_prep_a = start && req_op_i[2];
-            wire phase_prep_b = enabled && (state_q == ST_DIV_PREP_B);
-            wire phase_div = enabled && (state_q == ST_DIV);
-            wire phase_finish = enabled && (state_q == ST_DIV_FINISH);
-            wire phase_single_cycle = start && !req_op_i[2] &&
+            wire phase_mul = (MUA_MUL == `UQU_MUL_ITERATIVE) &&
+                ((idle && !req_op_i[2]) || (state_q == ST_MUL));
+            wire phase_prep_a = idle && req_op_i[2];
+            wire phase_prep_b = (state_q == ST_DIV_PREP_B);
+            wire phase_div = (state_q == ST_DIV);
+            wire phase_finish = (state_q == ST_DIV_FINISH);
+            wire phase_single_cycle = idle && !req_op_i[2] &&
                 ((MUA_MUL == `UQU_MUL_PARALLEL) || (MUA_MUL == `UQU_MUL_DADDA));
-            wire phase_parallel_2 = enabled && (state_q == ST_MUL_PARALLEL_2);
+            wire phase_parallel_2 = (state_q == ST_MUL_PARALLEL_2);
 
             wire [32:0] selected_magnitude = op_q[1] ? accum_q : {1'b0, bits_q};
             wire [32:0] prepared_b;
@@ -114,8 +117,8 @@ module uqu_muldiv #(
                                                        (negative_a_q ^ negative_b_q);
 
             assign req_ready_o = enabled && (state_q == ST_IDLE);
-            assign arith_use_o = phase_mul || phase_prep_a || phase_prep_b ||
-                                 phase_div || phase_finish;
+            assign arith_use_o = enabled && (!idle || req_fire) &&
+                (phase_mul || phase_prep_a || phase_prep_b || phase_div || phase_finish);
             if (F == 1) begin : gen_serial_preparation
                 assign prepared_b = 33'd0;
             end
@@ -152,8 +155,8 @@ module uqu_muldiv #(
                     assign arith_sub_o = subtract;
                     assign arith_carry_in_o = subtract;
                     assign first_result = result;
-                    assign mul_accum_in = start ? 33'd0 : accum_q;
-                    assign mul_bits_in = start ? req_b_i : bits_q;
+                    assign mul_accum_in = idle ? 33'd0 : accum_q;
+                    assign mul_bits_in = idle ? req_b_i : bits_q;
                     assign div_rem_in = accum_q;
                     assign div_bits_in = bits_q;
                     assign result = arith_result_i;
@@ -265,15 +268,15 @@ module uqu_muldiv #(
                 phase_mul ? iterative_product :
                 divide_zero_q ? (op_q[1] ? original_a_q : 32'hffffffff) :
                 first_result[31:0];
-            assign res_valid_o = enabled && (complete || (state_q == ST_HOLD));
-            assign res_data_o = !res_valid_o ? 32'd0 :
-                (state_q == ST_HOLD) ? held_result_q : completed_result;
+            assign res_valid_o = enabled && (((!idle || req_fire) && complete) ||
+                                             (state_q == ST_HOLD));
+            assign res_data_o = (state_q == ST_HOLD) ? held_result_q : completed_result;
 
             always @(posedge clk_i) begin
                 if (!rst_ni || flush_i) begin
                     state_q <= ST_IDLE;
                 end else begin
-                    if (complete && !res_ready_i) begin
+                    if (res_valid_o && complete && !res_ready_i) begin
                         held_result_q <= completed_result;
                     end
                     case (state_q)

@@ -21,7 +21,7 @@ in the [processor core](../core/README.md).
 | `req_op_i[3:0]` | Normalized operation code from the table below. |
 | `req_a_i[31:0]`, `req_b_i[31:0]` | Selected operands; register/immediate and PC selection belongs upstream. |
 | `res_valid_o`, `res_ready_i` | Result transfer on their conjunction at a rising edge. |
-| `res_data_o[31:0]` | Destination value; zero when invalid and stable while valid and blocked. |
+| `res_data_o[31:0]` | Candidate destination value; consume only while valid. Stable while valid and blocked. |
 
 | `req_op_i` | Operation | Result |
 | --- | --- | --- |
@@ -62,7 +62,7 @@ the data register need not reset.
 | Port | Meaning |
 | --- | --- |
 | `arith_use_o` | The accepted request needs the external arithmetic instance this cycle. |
-| `arith_a_o[32:0]`, `arith_b_o[32:0]` | Extended operands; zero when inactive. |
+| `arith_a_o[32:0]`, `arith_b_o[32:0]` | Unmasked extended candidate operands, independent of request validity. |
 | `arith_sub_o`, `arith_carry_in_o` | Subtraction control and raw carry-in for `uqu_arith`. |
 | `arith_result_i[32:0]` | Same-cycle extended arithmetic result from the parent. |
 | `arith_carry_out_i` | Same-cycle carry beyond bit 32; subtraction carry means no borrow. |
