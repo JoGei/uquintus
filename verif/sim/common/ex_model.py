@@ -43,7 +43,7 @@ def cycles(payload, params):
     factor = params['MUA_MULDIV_ITERUNROLL']
     if payload['op'] >= 4:
         return (2 + factor - 1) // factor + 32 // factor + 1
-    return {0: 1, 1: 2, 2: 32 // factor}[params['MUA_MUL']]
+    return {0: 1, 1: 2, 2: 32 // factor, 3: 1}[params['MUA_MUL']]
 
 
 def random_token(rng, index, params):

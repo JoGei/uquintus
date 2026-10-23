@@ -202,3 +202,11 @@ the bounded read-only debugger commands/state snapshots. Report metrics expose
 Spike v3 adds `spike_compared_interrupts` and bundles `interrupts.json` plus
 `spike-irq-build.json`/`.log` for input and SDK/helper provenance. Interrupt entries
 do not count as instructions; they remain visible as separate trace events.
+
+## Structural Dadda source generation
+
+`gen_daddamul.py` generates the checked-in, fixed-RV32 combinational
+`uqu_daddamul.v`. Run it after changing the reduction schedule; use `--check`
+to reject stale output. It is not a normal build dependency. Select the unit
+in the core with `MUA_MUL: dadda`; see the
+[component contract](../verif/sim/daddamul/README.md). EX/MEM splitting is deferred.

@@ -14,7 +14,7 @@ COMMON = Path(__file__).resolve().parents[1]
 ROOT = COMMON.parents[2]
 sys.path.insert(0, str(COMMON))
 
-from hw_config import configuration_label, load_configuration
+from hw_config import configuration_label, load_configuration, parameters_for_component
 
 
 BASE_LABEL = (
@@ -76,7 +76,7 @@ class ConfigurationLabelTests(unittest.TestCase):
 
     def test_mul_implementations_share_one_unroll_field_with_div(self):
         for implementation, token in (("iterative", "iter"), ("parallel", "para"),
-                                      ("parallel+stages+2", "para+stages2")):
+                                      ("parallel+stages+2", "para+stages2"), ("dadda", "dadda")):
             for factor in (1, 2, 4, 8, 16, 32):
                 config = dict(self.base, ISA_M=1, MUA_MUL=implementation,
                               MUA_MULDIV_ITERUNROLL=factor)
@@ -85,6 +85,16 @@ class ConfigurationLabelTests(unittest.TestCase):
                     self.assertTrue(label.endswith(
                         f"_mua-mul:{token}_mua-div:iter_mua-mdu:unroll{factor}"))
                     self.assertEqual(label.count("unroll"), 1)
+
+    def test_dadda_preset_uses_a_distinct_single_cycle_selector(self):
+        config = load_configuration(ROOT/'config/rv32im_dadda.yml', self.catalog)
+        self.assertEqual(config['MUA_MUL'], 'dadda')
+        self.assertEqual(parameters_for_component(config, ['MUA_MUL'], self.catalog), {'MUA_MUL': 3})
+        self.assertIn('_mua-mul:dadda_', configuration_label(config))
+        self.assertFalse(any('CUT_ROWS' in name for name in config))
+        # Existing encodings must retain their meanings for stored configs.
+        for label, value in [('parallel', 0), ('parallel+stages+2', 1), ('iterative', 2)]:
+            self.assertEqual(self.catalog['MUA_MUL'][label]['value'], value)
 
     def test_fpu_pipeline_counts_placement_and_backend_are_visible(self):
         for backend in ("th32", "thmulti"):

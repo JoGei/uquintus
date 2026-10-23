@@ -49,6 +49,14 @@ make report
 ```
 
 `TOP` defaults to `core`; `fpu` selects the actual standalone adapter/backend.
+For the structural single-cycle Dadda multiplier, select `TOP=core` and a
+configuration with `MUA_MUL: dadda` (for example `CONFIG=rv32im_dadda`).
+For a controlled RV32IMC multiplier comparison with divider unroll 1, use
+`CONFIG=rv32imc_bimodal_idata_dadda_div1` versus
+`CONFIG=rv32imc_bimodal_idata_parallel_div1`; see the
+[comparison](orfs/investigations/daddamul-div1.md).
+The former standalone EX/MEM split targets are removed; their
+[measurements](orfs/investigations/dadda-split.md) are historical.
 `PLATFORM` defaults to `sky130hd`; `ihp-sg13g2` is also supported. Libraries,
 LEFs and mapping files come from the installed ORFS platform. `CLOCK_PERIOD_NS`
 defaults to 20, and `JOBS` to 4. Provide Python/PyYAML and Bender as for simulation;

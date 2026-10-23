@@ -229,7 +229,7 @@ Enumerated hardware selectors shall use readable YAML labels. In particular,
 `MUA_BRANCH_PREDICTOR` shall use `none`, `static_not_taken` or `bimodal` for the currently
 defined choices, and `MUA_REGFILE_IMPL` shall use `ff` or `latch`. Their default
 YAML selections shall be `none` and `ff`, respectively. `MUA_MUL` shall use
-`parallel`, `parallel+stages+2`, or `iterative` as defined in [architecture, Section 3](uqu_spec.arch.md#3-classical-five-stage-pipeline).
+`parallel`, `parallel+stages+2`, `iterative`, or `dadda` as defined in [architecture, Section 3](uqu_spec.arch.md#3-classical-five-stage-pipeline).
 `MUA_DIV` shall use `iterative`. Both default YAML selections shall be
 `iterative`, sharing the iterative arithmetic chain. All hardware presets shall
 also explicitly set `MUA_BP_ENTRIES`, a power of two from 2 through 1024,
@@ -425,7 +425,7 @@ joining combined selections and `_` separating fields. The optional enabled-only
 | Branch target storage | `_mua-btb:{none,direct+entries<N>[+idata-hw<H>]}` | `MUA_BTB`, independent `MUA_BTB_ENTRIES` and halfword capacity `MUA_BTB_IDATA_HWORDS`; omit `+idata-hw` at zero. Use `none` when disabled or when prediction mode is `none`; omit inactive capacity. |
 | Instruction buffer | `_mua-ifbuf:<words>` | `MUA_IF_BUFFER_WORDS`. |
 | Redirect/refill bypass | `[_mua-rb:<policies>]` | Omit for `none`; otherwise join enabled policies in canonical order with `+`: `ifbuf` for `if_buffer`, `redirect` for `redirect_request`, `result` for `ifetch_result`. All eight selector values are supported, e.g. `mua-rb:ifbuf+redirect+result`. |
-| Multiplier | `[_mua-mul:{iter,para,para+stages2}]` | Present only for `ISA_M=1`; `MUA_MUL`: `iterative`, `parallel`, or `parallel+stages+2`. |
+| Multiplier | `[_mua-mul:{iter,para,para+stages2,dadda}]` | Present only for `ISA_M=1`; `MUA_MUL`: `iterative`, `parallel`, `parallel+stages+2`, or `dadda`. |
 | Divider | `[_mua-div:iter]` | Present only for `ISA_M=1`; the currently supported `MUA_DIV` choice is `iterative`. |
 | Shared iterative arithmetic | `[_mua-mdu:unroll<factor>]` | `MUA_MULDIV_ITERUNROLL`, when M is enabled and at least one MUL/DIV implementation is iterative. |
 | FPU implementation | `[_mua-fpu:<backend>+pipe-<placement>+fma<N>+divsqrt<N>+noncomp<N>+conv<N>]` | Present only for `ISA_ZFINX=1`; `MUA_FPU_DIVSQRT`, `MUA_FPU_PIPE_CONFIG`, then the four `MUA_FPU_PIPE_REGS_*` counts in the displayed order. Use the validated YAML labels for backend and placement. |

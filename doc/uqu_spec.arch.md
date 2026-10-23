@@ -213,7 +213,7 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_IF_BUFFER_WORDS` | Integer capacity of at least `2` in 32-bit fetch words; non-power-of-two capacities supported. | `2` |
 | `MUA_REDIRECT_BYPASS` | `none` or canonical `+` combinations of `if_buffer`, `redirect_request`, and `ifetch_result`: independently select word-FIFO fall-through, same-cycle target requests, and empty-result-queue response fall-through. All eight choices are defined in Section 15.4. | `none` |
 | `MUA_HARDENED` | `0`: no OBI parity/checksum generation/checking requirement; `1`: planned hardened implementation including OBI parity/checksum generation and checking on both ports; enabled setting unsupported until implemented. | `0` |
-| `MUA_MUL` | `parallel`, `parallel+stages+2`, or `iterative`; iterative unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
+| `MUA_MUL` | `parallel`, `parallel+stages+2`, `iterative`, or `dadda`; iterative unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
 | `MUA_DIV` | `iterative`; unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
 | `MUA_MULDIV_ITERUNROLL` | Integer factor 1, 2, 4, 8, 16, or 32 for the shared iterative chain; 1 means no unrolling; inactive when `ISA_M = 0`. | `8` |
 | `MUA_FPU_PIPE_REGS_FMA` | Nonnegative register count for the FP32 add/multiply/fused-operation group. | `2` |
@@ -291,11 +291,13 @@ additional ALU execution steps.
 
 When `ISA_M = 1`, `MUA_MUL` shall select the integer multiplier implementation
 at elaboration time. Its readable YAML choices shall select a parallel or
-iterative implementation family, translated into integer RTL settings under
+iterative implementation, including an explicit structural Dadda choice,
+translated into integer RTL settings under
 [build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets):
 
 | `MUA_MUL` value | Implementation contract |
 | --- | --- |
+| `dadda` | Use `uqu_daddamul`: an explicit 32×32 Dadda compressor tree with integrated signed corrections and a final 64-bit adder; produce the selected result in one EX computation cycle. |
 | `parallel` | Infer a parallel multiplier using the Verilog `*` operator initially; produce the result in one EX execution cycle once operands are available. |
 | `parallel+stages+2` | Partition parallel multiplication across two computation stages with an internal register boundary; execute in exactly two EX cycles. |
 | `iterative` | Use the shared iterative radix-2 datapath with unroll factor `F = MUA_MULDIV_ITERUNROLL`; execute in exactly `32 / F` EX cycles. This is the default. |
@@ -303,6 +305,19 @@ iterative implementation family, translated into integer RTL settings under
 The selection shall apply to `MUL`, `MULH`, `MULHU`, and `MULHSU`, with the
 signedness and result selection defined by the
 [RISC-V M-extension specification](https://docs.riscv.org/reference/isa/unpriv/m-st-ext.html).
+
+`MUA_MUL: dadda` instantiates the combinational `uqu_daddamul` in `uqu_muldiv`.
+The unit returns a full 64-bit product; MUL/DIV chooses signedness and the high
+or low half, using its existing single-cycle completion, held-result and
+flush/reset behavior. Dadda multiplication does not use the shared EX adder;
+DIV continues using the configured iterative arithmetic chain. Selectors retain
+values 0/1/2 for the existing modes and add `UQU_MUL_DADDA = 3`. The
+`rv32im_dadda` preset and configuration label `mua-mul:dadda` expose the choice.
+See the [component contract](../verif/sim/daddamul/README.md).
+
+A [future EX/MEM split](uqu_draft.mul.md#deferred-use-of-mem-as-phase-two) is
+deferred. MEM retains its LSU role; there is no implemented Dadda cut parameter
+or two-phase multiplier interface. The default remains `iterative`.
 
 For the parallel family, the stage count shall describe computation stages,
 not merely delay registers after a complete combinational multiplier. Internal
@@ -427,7 +442,7 @@ add/sub-and-fixed-shift slices shall implement the remaining steps. With
 same chain and the same unroll factor. Separate chains shall not be generated
 for MUL and DIV. Factor one shall generate no additional arithmetic slices.
 
-With `MUA_MUL = parallel` or `parallel+stages+2` and `MUA_DIV = iterative`,
+With `MUA_MUL = parallel`, `parallel+stages+2`, or `dadda` and `MUA_DIV = iterative`,
 only division shall use the shared iterative chain; multiplication shall use
 its separate parallel datapath and retain its selected stage-count contract.
 The initial shared chain uses the 33-bit `uqu_arith` primitive, with

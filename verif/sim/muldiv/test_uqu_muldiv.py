@@ -27,7 +27,7 @@ class MuldivTest(uvm_test):
     def latency(self, op):
         if op >= 4:
             return (2 + self.factor - 1) // self.factor + 32 // self.factor + 1
-        return {0: 1, 1: 2, 2: 32 // self.factor}[self.mul_mode]
+        return {0: 1, 1: 2, 2: 32 // self.factor, 3: 1}[self.mul_mode]
 
     async def settle(self):
         await Timer(1, units='ns')
@@ -117,6 +117,25 @@ class MuldivTest(uvm_test):
         await self.settle()
         assert self.outputs() == (1, 0, 0), 'unit did not drain exactly once'
         self.checks += 1
+
+    async def consecutive_multiplies(self):
+        if self.latency(0) != 1:
+            return
+        # Keep valid asserted: every cycle must accept and complete a different
+        # operation, with no hidden recovery bubble between single-cycle MULs.
+        self.dut.res_ready_i.value = 1
+        for index in range(128):
+            op = index % 4
+            a, b = self.rng.getrandbits(32), self.rng.getrandbits(32)
+            self.request(op, a, b)
+            await self.settle()
+            assert self.outputs() == (1, 1, int(self.mul_mode == 2))
+            assert int(self.dut.res_data_o.value) == reference(op, a, b)
+            await self.edge()
+            self.checks += 1
+        self.dut.req_valid_i.value = 0
+        await self.settle()
+        assert self.outputs() == (1, 0, 0)
 
     async def pending_request(self):
         # A second, stable request waits through computation and held-result
@@ -217,6 +236,7 @@ class ControlTest(MuldivTest):
         if not self.enabled:
             await self.disabled()
         else:
+            await self.consecutive_multiplies()
             await self.pending_request()
             for op in range(8):
                 # Every computation phase, result cycle, and held-result state.

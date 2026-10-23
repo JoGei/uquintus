@@ -42,7 +42,7 @@ class ExecArithTest(uvm_test):
             return 1
         if op >= 4:
             return (2 + self.factor - 1) // self.factor + 32 // self.factor + 1
-        return {0: 1, 1: 2, 2: 32 // self.factor}[self.mul_mode]
+        return {0: 1, 1: 2, 2: 32 // self.factor, 3: 1}[self.mul_mode]
 
     def request(self, muldiv, op, a, b):
         self.dut.select_muldiv_i.value = muldiv

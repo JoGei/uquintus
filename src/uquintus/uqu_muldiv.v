@@ -32,7 +32,8 @@ module uqu_muldiv #(
     localparam CONFIG_VALID =
         ((MUA_MUL == `UQU_MUL_PARALLEL) ||
          (MUA_MUL == `UQU_MUL_PARALLEL_2) ||
-         (MUA_MUL == `UQU_MUL_ITERATIVE)) &&
+         (MUA_MUL == `UQU_MUL_ITERATIVE) ||
+         (MUA_MUL == `UQU_MUL_DADDA)) &&
         (MUA_DIV == `UQU_DIV_ITERATIVE) &&
         ((MUA_MULDIV_ITERUNROLL == 1) || (MUA_MULDIV_ITERUNROLL == 2) ||
          (MUA_MULDIV_ITERUNROLL == 4) || (MUA_MULDIV_ITERUNROLL == 8) ||
@@ -98,8 +99,8 @@ module uqu_muldiv #(
             wire phase_prep_b = enabled && (state_q == ST_DIV_PREP_B);
             wire phase_div = enabled && (state_q == ST_DIV);
             wire phase_finish = enabled && (state_q == ST_DIV_FINISH);
-            wire phase_parallel_1 = start && !req_op_i[2] &&
-                (MUA_MUL == `UQU_MUL_PARALLEL);
+            wire phase_single_cycle = start && !req_op_i[2] &&
+                ((MUA_MUL == `UQU_MUL_PARALLEL) || (MUA_MUL == `UQU_MUL_DADDA));
             wire phase_parallel_2 = enabled && (state_q == ST_MUL_PARALLEL_2);
 
             wire [32:0] selected_magnitude = op_q[1] ? accum_q : {1'b0, bits_q};
@@ -208,15 +209,25 @@ module uqu_muldiv #(
 
             wire [31:0] iterative_product = (op == 3'b000) ?
                 next_mul_bits : next_mul_accum[31:0];
-            wire [31:0] parallel_product;
+            wire [31:0] single_cycle_product;
             wire [31:0] parallel_product_2;
 
             if (MUA_MUL == `UQU_MUL_PARALLEL) begin : gen_parallel
                 wire signed [32:0] operand_a = {request_signed_a && req_a_i[31], req_a_i};
                 wire signed [32:0] operand_b = {request_signed_b && req_b_i[31], req_b_i};
                 wire signed [65:0] product = operand_a * operand_b;
-                assign parallel_product = (req_op_i == 3'b000) ?
+                assign single_cycle_product = (req_op_i == 3'b000) ?
                                             product[31:0] : product[63:32];
+                assign parallel_product_2 = 32'd0;
+            end else if (MUA_MUL == `UQU_MUL_DADDA) begin : gen_dadda
+                wire [63:0] product;
+                uqu_daddamul u_daddamul (
+                    .a_i(req_a_i), .b_i(req_b_i),
+                    .signed_a_i(request_signed_a), .signed_b_i(request_signed_b),
+                    .product_o(product)
+                );
+                assign single_cycle_product = (req_op_i == 3'b000) ?
+                    product[31:0] : product[63:32];
                 assign parallel_product_2 = 32'd0;
             end else if (MUA_MUL == `UQU_MUL_PARALLEL_2) begin : gen_parallel_2
                 // Stage 1 computes the low partial product. Stage 2 computes
@@ -239,17 +250,17 @@ module uqu_muldiv #(
                         operand_b_q <= operand_b;
                     end
                 end
-                assign parallel_product = 32'd0;
+                assign single_cycle_product = 32'd0;
                 assign parallel_product_2 = (op_q == 3'b000) ?
                     combined_product[31:0] : combined_product[63:32];
             end else begin : gen_no_parallel
-                assign parallel_product = 32'd0;
+                assign single_cycle_product = 32'd0;
                 assign parallel_product_2 = 32'd0;
             end
 
-            wire complete = phase_parallel_1 || phase_parallel_2 ||
+            wire complete = phase_single_cycle || phase_parallel_2 ||
                             (phase_mul && last_group) || phase_finish;
-            wire [31:0] completed_result = phase_parallel_1 ? parallel_product :
+            wire [31:0] completed_result = phase_single_cycle ? single_cycle_product :
                 phase_parallel_2 ? parallel_product_2 :
                 phase_mul ? iterative_product :
                 divide_zero_q ? (op_q[1] ? original_a_q : 32'hffffffff) :
@@ -287,7 +298,8 @@ module uqu_muldiv #(
                                         divisor_q <= prepared_b;
                                         state_q <= ST_DIV;
                                     end
-                                end else if (MUA_MUL == `UQU_MUL_PARALLEL) begin
+                                end else if ((MUA_MUL == `UQU_MUL_PARALLEL) ||
+                                             (MUA_MUL == `UQU_MUL_DADDA)) begin
                                     state_q <= res_fire ? ST_IDLE : ST_HOLD;
                                 end else if (MUA_MUL == `UQU_MUL_PARALLEL_2) begin
                                     state_q <= ST_MUL_PARALLEL_2;

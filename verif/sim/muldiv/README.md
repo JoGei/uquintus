@@ -100,7 +100,7 @@ independent operands to prepare both magnitudes in parallel.
 
 ## Configuration and cycle counts
 
-`MUA_MUL` is `iterative` (default), `parallel`, or `parallel+stages+2`.
+`MUA_MUL` is `iterative` (default), `parallel`, `parallel+stages+2`, or `dadda`.
 `MUA_DIV` is `iterative`. `F = MUA_MULDIV_ITERUNROLL` defaults to eight and accepts
 only 1, 2, 4, 8, 16, or 32. Labels and numeric RTL constants come from
 [config/selectors.json](../../../config/selectors.json). The default M-enabled
@@ -116,7 +116,14 @@ MUL cycles and six DIV/REM cycles at factor eight.
 | 16 | 2 | 4 |
 | 32 | 1 | 3 |
 
-Parallel multiplication takes one cycle; its two-stage variant takes two.
+`parallel` infers a one-cycle multiplier with `*`; its two-stage variant takes
+two EX cycles. `dadda` instantiates the one-cycle structural
+[`uqu_daddamul`](../daddamul/README.md), with signed corrections integrated into
+one 32×32 tree and a final 64-bit adder. MUL/DIV selects the product half; the
+same existing completion/held-result logic applies. Dadda multiplication uses
+no shared ALU arithmetic slice. DIV retains its iterative implementation and
+unroll factor. `rv32im_dadda` selects this implementation without changing the
+default or assigning arithmetic to MEM.
 These timings are operand independent, including zero, signed overflow, and
 division by zero. Backpressure can delay result transfer but never result
 availability. There is no cross-instruction fusion or saved-result reuse.

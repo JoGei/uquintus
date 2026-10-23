@@ -102,6 +102,9 @@ sources:
       - target: branch_test
         files:
           - verif/sim/branch/uqu_branch_tb.v
+      - target: any(daddamul, muldiv, muldiv_test, exec_arith_test, ex, ex_pipeline_test, rtl, core_test)
+        files:
+          - src/uquintus/uqu_daddamul.v
       - target: any(arith, alu, alu_test, exec_arith_test, muldiv, muldiv_test, ex, ex_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_arith.v

@@ -210,6 +210,7 @@ destination; the secondary waits for register-file visibility. See the
 | Execute stage | [uqu_stage_ex.v](src/uquintus/uqu_stage_ex.v) | [EX interface and tests](verif/sim/ex/README.md) |
 | Base integer ALU | [uqu_alu.v](src/uquintus/uqu_alu.v) | [ALU interface and tests](verif/sim/alu/README.md) |
 | Native scalar Zfinx FPU | [uqu_fpu.v](src/uquintus/uqu_fpu.v) | [FPU interface and tests](verif/sim/fpu/README.md) |
+| Structural single-cycle multiplier | [uqu_daddamul.v](src/uquintus/uqu_daddamul.v) | [Dadda interface, selection and tests](verif/sim/daddamul/README.md) |
 | Native multiply/divide | [uqu_muldiv.v](src/uquintus/uqu_muldiv.v) | [MUL/DIV interface and tests](verif/sim/muldiv/README.md) |
 | Shared extended add/sub datapath | [uqu_arith.v](src/uquintus/uqu_arith.v) | [Arithmetic tests and interface](verif/sim/arith/README.md) |
 
