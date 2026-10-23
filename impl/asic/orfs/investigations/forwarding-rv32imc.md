@@ -90,6 +90,126 @@ All six CRC checks passed and retired the same number of instructions.
 Full forwarding reduces cycles by 32.3% relative to stall-only handling.
 The final EX-to-DE path saves 10,794 cycles relative to step 4.
 
+## Sky130 placement results
+
+All six 60 ns placements pass setup/hold, electrical and placement checks.
+The evidence audit passes all twelve joined benchmark/implementation records.
+
+| Step | Placed cell area (µm²) | T_min (ns) | Estimated F_max (MHz) | Estimated CoreMark time (ms) |
+| ---: | ---: | ---: | ---: | ---: |
+| 0 | 426,797 | 48.413 | 20.66 | 43.255 |
+| 1 | 428,626 | 47.944 | 20.86 | 36.921 |
+| 2 | 428,219 | 50.574 | 19.77 | 35.097 |
+| 3 | 429,736 | 52.113 | 19.19 | 33.703 |
+| 4 | 431,977 | 51.584 | 19.39 | 31.765 |
+| 5 | 435,272 | 51.751 | 19.32 | 31.309 |
+
+Full forwarding is fastest for this workload/envelope: 32.3% fewer cycles and
+27.6% shorter estimated runtime than stall-only handling, with 2.0% more cell
+area. Adding EX-to-DE after the other paths saves 1.8% of cycles; its 0.32%
+period increase and 0.76% area increase leave a 1.44% estimated-runtime benefit.
+The lowest-area point is step 0; step 1 has the highest frequency estimate.
+
+Every full constrained worst path starts at `fence_ack_i` and ends in the
+iterative divider's accumulator state. Thus EX-to-DE forwarding is not the
+dominant endpoint in this M-enabled comparison. Forwarding and mapping still
+change its fan-in, cells and loads. One placement per setting does not isolate
+all such effects.
+
+Frequency estimates depend on the optimization target: the tighter 40 ns pilot
+mapped faster netlists that narrowly missed its target. The six 60 ns results
+are a controlled trend comparison, not a per-configuration clock-period search
+or the highest achievable frequency of each design. The rendered comparison
+and standalone SVG plots are in `build/investigations/forwarding-rv32imc-60ns/`.
+
+## Why full forwarding still has CPI 1.922
+
+A passive diagnostic replay of step 5 uses the unchanged compiled Verilator
+RTL archive. Only its C++ driver is rebuilt to observe existing internal
+signals. It reproduces the original complete native outcome, start/stop
+boundaries, BPU counters, 604,991 window cycles, 314,834 retirements and CRCs.
+
+Empty-slot provenance tags follow the actual parent-owned pipeline-register
+enable/next-valid signals. They attribute each non-retirement cycle once,
+allowing overlapping upstream stalls to be hidden by older work. These are
+operational bubble categories, not independent counterfactual speedups.
+
+| Contribution | Cycles | Cycles / instruction |
+| --- | ---: | ---: |
+| Successful retirement | 314,834 | 1.000000 |
+| LSU sequencing | 206,472 | 0.655812 |
+| Redirect-recovery bubbles | 61,527 | 0.195427 |
+| DE operand-dependency bubbles | 20,331 | 0.064577 |
+| Other frontend supply bubbles | 1,824 | 0.005794 |
+| Serialization | 3 | 0.000010 |
+| Total | 604,991 | 1.921619 |
+
+The measured code executes 54,381 loads, 14,443 stores and 9,396 multiplies.
+ALU/MUL execution adds no EX completion-wait cycles. Although DIV/REM appear
+in the executable, none executes inside this measured window.
+
+Each of the 68,824 memory operations occupies MEM for four cycles even with
+immediate grants and a one-cycle response:
+
+| MEM cycle | LSU state at cycle start | Action |
+| ---: | --- | --- |
+| 1 | `ST_IDLE` | Accept the native request and capture address/data. |
+| 2 | `ST_REQUEST` | Present and grant the OBI request. |
+| 3 | `ST_RESPONSE` | Receive and register data/status. |
+| 4 | `ST_RESULT` | Forward the registered result and transfer to WB. |
+
+That is exactly `68,824 * 3 = 206,472` additional cycles, or 71.2% of the
+290,157-cycle overhead. Memory operations are 21.86% of this workload, so
+MEM occupancy alone gives a lower bound of `1 + 3 * 0.2186 ≈ 1.656` CPI,
+before branch recovery and dependency bubbles. Forwarding cannot remove
+that functional-unit occupancy cost. EX is blocked by downstream capacity in 145,479
+cycles; those observations overlap the LSU cost and must not be added again.
+Likewise, the raw 81,327 DE blocked-with-an-EX-slot observations are not an
+additional cycle cost beyond the provenance accounting above.
+
+The BPU observer records 13,131 DE correction redirects. A frontend bubble is
+tagged as redirect recovery from a correction until the first subsequent IF
+acceptance; later frontend gaps retain the ordinary supply tag. Propagating
+those tags to empty WB slots yields the recovery contribution above. This is
+not a fixed penalty for every branch or for a correctly predicted BTB hit.
+
+The next throughput improvement should examine LSU acceptance/request timing
+and turnover while preserving registered response data, precise side effects
+and the existing one-outstanding policy. That implementation work is separate
+from this fixed-RTL forwarding experiment. Diagnostic sources, a twelve-cycle
+LSU example, `census.json` and its validation `audit.json` are retained under
+`build/investigations/forwarding-rv32imc-60ns/cpi/`.
+
+### Reference LSU pipeline structures
+
+CV32E40P documents ideal aligned loads/stores at one-cycle throughput, with
+request processing in EX and response handling in WB. It supports two
+outstanding OBI transactions and still requires write responses. Its interface
+omits `err`, so its bus-error behavior is not a template for uqu's precise
+store-access exceptions. See the official
+[pipeline manual](https://docs.openhwgroup.org/projects/cv32e40p-user-manual/en/latest/pipeline.html)
+and [LSU manual](https://docs.openhwgroup.org/projects/cv32e40p-user-manual/en/latest/load_store_unit.html).
+
+Default two-stage Ibex explicitly stalls loads and stores for at least one
+response-wait cycle. With `WritebackStage=1`, its RTL allows the instruction to
+leave ID/EX after request acceptance and waits for the response in WB. New
+memory requests are allowed in the cycle the previous response arrives; a
+next-cycle response therefore permits one-per-cycle throughput without a deep
+request queue. This latter throughput statement follows from the RTL, rather
+than the manual's two-stage timing table. See
+[the pipeline manual](https://ibex-core.readthedocs.io/en/latest/03_reference/pipeline_details.html),
+[ID-stage control](https://github.com/lowRISC/ibex/blob/master/rtl/ibex_id_stage.sv#L903)
+and [WB completion](https://github.com/lowRISC/ibex/blob/master/rtl/ibex_wb_stage.sv#L95).
+
+For uqu, the corresponding optimization is MEM request / WB response ownership:
+grant transfers the pending instruction to WB; response completion is distinct
+from request acceptance. The next MEM request may overlap a successful older
+response, with younger side effects blocked on an older fault. The existing
+registered-load-forwarding policy and response buffering under backpressure
+must be respected. This is a proposed follow-up, not the implementation measured
+in the sweep. A two-cycle bus transaction does not inherently require two
+cycles of exclusive MEM-stage occupancy.
+
 ## Reproduction and evidence
 
 ```sh
@@ -117,6 +237,8 @@ match the workspace.
 The 40 ns results remain under `build/investigations/forwarding-rv32imc/` and
 in their raw per-configuration implementation directories. They retain their
 failed qualification rather than being relabelled as successful slower runs.
+The three unfinished pilot points and the IHP jobs were stopped; IHP was
+removed from scope at the user's request. Cancelled runs are explicitly skipped.
 
 Rebuildable Verilator precompiled headers were removed only after their runs
 passed. Byte-identical finalized ODB snapshots may be hard-linked to conserve

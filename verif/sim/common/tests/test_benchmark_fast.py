@@ -8,6 +8,8 @@ import sys
 import tempfile
 import unittest
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import benchmark
 from benchmark_fast import read_memory, write_memory
@@ -33,17 +35,21 @@ class FastBenchmarkTests(unittest.TestCase):
                  0x00932423,  # sw x9,8(x6) (tohost)
                  0x0000006f]  # j .
         executable = str(Path(os.environ['UQU_FAST_NATIVE']).resolve())
+        configuration = Path(executable).parent.parent/'config.yml'
+        parameters = (yaml.safe_load(configuration.read_text()) if configuration.is_file() else
+                      dict(MUA_BRANCH_PREDICTOR='none', MUA_BTB='none'))
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            def execute(label, imem=1, dmem=1, limit=10000, instructions=None):
+            def execute(label, imem=1, dmem=1, limit=10000, instructions=None, stop_offset=28):
                 directory = root / label
                 directory.mkdir()
-                data = struct.pack('<12I', *(words if instructions is None else instructions))
+                program = words if instructions is None else instructions
+                data = struct.pack('<'+str(len(program))+'I', *program)
                 image = ELFImage(0x80000000, 0, (Segment(0x80000000, data, 512, 7),), {})
                 write_memory(image, directory / 'image.bin')
                 result = subprocess.run([executable, 'image.bin', str(limit),
                     str(image.entry), str(imem), str(dmem), str(0x80000108), str(image.entry),
-                    str(image.entry+28)], cwd=directory, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                    str(image.entry+stop_offset)], cwd=directory, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
                 return result, json.loads((directory / 'native.json').read_text()), directory
             durations = []
             for name, imem, dmem in [('base',1,1), ('repeat',1,1), ('if_slow',3,1), ('data_slow',1,3), ('both_slow',3,3)]:
@@ -54,7 +60,7 @@ class FastBenchmarkTests(unittest.TestCase):
                 self.assertEqual(record['stop']['cycle']-record['start']['cycle'],
                                  record['stop']['mcycle_low']-record['start']['mcycle_low'])
                 stats = bpu_statistics(record['bpu_start'], record['bpu_stop'],
-                    dict(MUA_BRANCH_PREDICTOR='none', MUA_BTB='none'),
+                    parameters,
                     record['stop']['retired']-record['start']['retired'])
                 self.assertEqual(stats['counts']['retired_instructions'], 7)
                 self.assertEqual(stats['counts']['control_flow_instructions'], 0)
@@ -63,6 +69,19 @@ class FastBenchmarkTests(unittest.TestCase):
             self.assertGreater(durations[2], durations[0])
             self.assertGreater(durations[3], durations[0])
             self.assertGreater(durations[4], max(durations[2:4]))
+            # A store grant can release a branch held in DE. Its cold target
+            # request must be sampled after the data grant, including when IF
+            # bypasses its redirect pointer in the same cycle. Skipped illegal
+            # words make capturing a pre-grant sequential address observable.
+            branch_program = words[:5] + [0x00738663, 0xffffffff, 0xffffffff,
+                0x00032403, 0x00741a63, 0x0083c4b3, 0xb0002573,
+                0x0014e493, 0x00932423, 0x0000006f]
+            for imem,dmem in ((1,1),(1,3),(3,1)):
+                result,record,directory = execute('redirect-'+str(imem)+'-'+str(dmem),
+                    imem,dmem,instructions=branch_program,stop_offset=44)
+                self.assertEqual(result.returncode,0,result.stdout)
+                self.assertEqual(record['status'],'passed')
+                self.assertEqual(read_memory(directory/'final-memory.bin')[0x80000100],42)
             failure = list(words)
             failure[9] = 0x00f06493  # ori x9,x0,15 -> software failure 7
             illegal = list(words)

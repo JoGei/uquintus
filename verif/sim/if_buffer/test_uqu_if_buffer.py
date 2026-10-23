@@ -12,7 +12,9 @@ from pyuvm import uvm_root, uvm_test
 class BufferTest(uvm_test):
     def build_phase(self):
         self.dut = cocotb.top
-        self.depth = json.loads(os.environ['UQU_COMPONENT_PARAMS'])['MUA_IF_BUFFER_WORDS']
+        params = json.loads(os.environ['UQU_COMPONENT_PARAMS'])
+        self.depth = params['MUA_IF_BUFFER_WORDS']
+        self.bypass = bool(params.get('MUA_REDIRECT_BYPASS',0) & 1)
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
         self.queue = deque()
         self.coverage = Counter()
@@ -27,11 +29,15 @@ class BufferTest(uvm_test):
             getattr(d,'rst_ni' if name=='rst_n' else name+'_i').value = value
         await Timer(1,units='ns')
         active = bool(i['rst_n'] and not i['flush'])
-        removing = bool(active and self.queue and i['pop'])
-        expected = dict(push_ready=int(active and (len(self.queue)<self.depth or removing)))
+        incoming = (i['push_addr']&0xFFFFFFFC,0 if i['push_error'] else i['push_data'],i['push_error'])
+        view = list(self.queue)
+        if active and self.bypass and i['push_valid'] and len(view)<2:
+            view.append(incoming)
+        removing = bool(active and view and i['pop'])
+        expected = dict(push_ready=int(active and (len(self.queue)<self.depth or bool(self.queue and i['pop']))))
         for index in range(2):
-            present = active and len(self.queue)>index
-            word = self.queue[index] if present else (0,0,0)
+            present = active and len(view)>index
+            word = view[index] if present else (0,0,0)
             expected.update({f'word{index}_valid':int(present),f'word{index}_addr':word[0],
                              f'word{index}_data':word[1],f'word{index}_error':word[2]})
         for name,value in expected.items():
@@ -42,11 +48,10 @@ class BufferTest(uvm_test):
         if not active or i['clear']:
             self.queue.clear()
         else:
+            if inserting:
+                self.queue.append(incoming)
             if removing:
                 self.queue.popleft()
-            if inserting:
-                self.queue.append((i['push_addr']&0xFFFFFFFC,
-                                   0 if i['push_error'] else i['push_data'],i['push_error']))
         assert len(self.queue)<=self.depth
         d.clk_i.value = 1
         await Timer(1,units='ns')
@@ -65,9 +70,9 @@ class DirectedTest(BufferTest):
     async def run_phase(self):
         self.raise_objection()
         await self.reset()
-        # Empty pop is ignored, even when a first word is inserted on that edge.
+        # Only the optional IF wrapper may consume a live first word directly.
         r = await self.push(0,pop=1)
-        assert not r['word0_valid']
+        assert r['word0_valid']==self.bypass
         await self.cycle(pop=1)
         await self.cycle(pop=1)
         for round_number in range(4):

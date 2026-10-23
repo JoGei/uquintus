@@ -22,6 +22,8 @@ TARGETS = ORFS.parent/'targets.yml'
 # Flow policy, independent of hardware parameters. Physical settings take effect
 # when the generated external-design configuration is used for placement.
 BUFFERING_SETTINGS = dict(ABC_AREA='0', REMOVE_ABC_BUFFERS='1', GPL_TIMING_DRIVEN='1')
+TIMING_REGIONS = ('IF','DE','EX','MEM','WB','CORE')
+TIMING_SCOPES = ('full','reg_to_reg','input_to_reg','reg_to_output','input_to_output')
 sys.path.insert(0, str(ROOT/'verif/sim/common'))
 from hw_config import load_configuration, parameters_for_component, write_header
 from component_runner import bender_include_dirs
@@ -196,10 +198,38 @@ def timing_summary(directory,stage,expected_period):
         raise ValueError('Timing period/frequency evidence disagrees')
     if not math.isclose(values['clock_period_ns'],expected_period,rel_tol=1e-5):
         raise ValueError('SDC clock period must match CLOCK_PERIOD_NS / --clock-period')
+    regions=dict(status='not_recorded')
+    allowed=set(TIMING_SCOPES)
+    if (folder/'regions.tsv').is_file():
+        rows=[line.split('\t') for line in (folder/'regions.tsv').read_text().splitlines()]
+        if not rows or rows[0] not in (['status','available'],['status','not_applicable']):
+            raise ValueError('Invalid stage register-region status')
+        regions=dict(status=rows[0][1])
+        if regions['status']=='available':
+            counts={}
+            for fields in rows[1:]:
+                if len(fields)!=2 or fields[0] not in TIMING_REGIONS or fields[0] in counts:
+                    raise ValueError('Invalid/duplicate stage register region')
+                counts[fields[0]]=int(fields[1])
+            if set(counts)!=set(TIMING_REGIONS) or min(counts.values())<0 or not sum(counts.values()):
+                raise ValueError('Incomplete/empty stage register inventory')
+            inventory={};observed=dict.fromkeys(TIMING_REGIONS,0)
+            for line in (folder/'register_regions.tsv').read_text().splitlines():
+                fields=line.split('\t')
+                if len(fields)!=3 or fields[0] not in counts or not fields[1] or fields[1] in inventory:
+                    raise ValueError('Invalid/duplicate stage register inventory entry')
+                inventory[fields[1]]=fields[0];observed[fields[0]]+=1
+            if observed!=counts: raise ValueError('Stage register counts disagree with inventory')
+            regions.update(register_cells=counts,policy='receiving_stage_inputs_and_local_state_v1',
+                           inventory='register_regions.tsv',shared_region='CORE: shared, unmatched or mixed aliases')
+            allowed.update('stage_'+r for r in TIMING_REGIONS)
+            allowed.update('stage_'+a+'_to_'+b for a in TIMING_REGIONS for b in TIMING_REGIONS)
+        elif len(rows)!=1:
+            raise ValueError('Non-core stage report must not claim register regions')
     paths={}
     for line in (folder/'paths.tsv').read_text().splitlines():
         fields=line.split('\t');scope,delay=fields[:2]
-        if scope not in ('full','reg_to_reg','input_to_reg','reg_to_output','input_to_output') or delay not in ('max','min'):
+        if scope not in allowed or delay not in ('max','min'):
             raise ValueError('Unknown timing path scope: '+line)
         label=scope+'_'+delay
         if label in paths: raise ValueError('Duplicate timing path scope: '+label)
@@ -208,14 +238,22 @@ def timing_summary(directory,stage,expected_period):
         elif len(fields)==5 and math.isfinite(float(fields[2])) and fields[3] and fields[4]:
             paths[label]=dict(status='timed',slack_ns=float(fields[2]),startpoint=fields[3],endpoint=fields[4])
         else: raise ValueError('Invalid timing path evidence: '+line)
-    if len(paths)!=10 or paths['full_max']['status']!='timed' or paths['full_min']['status']!='timed':
+    expected={scope+'_'+delay for scope in allowed for delay in ('max','min')}
+    if set(paths)!=expected or paths['full_max']['status']!='timed' or paths['full_min']['status']!='timed':
         raise ValueError('Incomplete constrained-path evidence')
     for delay,metric in (('max','setup_worst_slack'),('min','hold_worst_slack')):
         if not math.isclose(paths['full_'+delay]['slack_ns'],values[metric],abs_tol=1e-4):
             raise ValueError('Full path and global worst slack disagree')
-    summary=dict(stage=stage,clock=(folder/'clock.txt').read_text().strip(),metrics=values,paths=paths)
+    summary=dict(stage=stage,clock=(folder/'clock.txt').read_text().strip(),metrics=values,paths=paths,regions=regions)
     (folder/'summary.json').write_text(json.dumps(summary,indent=2)+'\n')
     return summary
+
+
+def scoped_timing_metrics(summary):
+    scopes=(*TIMING_SCOPES[1:],*('stage_'+r for r in TIMING_REGIONS))
+    return [dict(name=scope+'_'+label+'_worst_slack',value=path['slack_ns'],unit='ns')
+            for scope in scopes for delay,label in (('max','setup'),('min','hold'))
+            if (path:=summary['paths'].get(scope+'_'+delay,{})).get('status')=='timed']
 
 
 def placed_metrics(directory,modules):
@@ -446,8 +484,10 @@ def main():
         if not (results/'1_synth.odb').is_file(): raise ValueError('ORFS synthesis database missing')
         metrics,counts=mapped_metrics(reports/'uqu_stat.json',results/'uqu_mapped.json',manifest['module'])
         metrics += timing_metrics(directory/'logs'/args.platform/manifest['module']/'base/1_synth.json')
-        timing_summary(directory,'mapped_preplacement',args.clock_period)
-        record['timing_paths']=json.loads((directory/'timing/mapped_preplacement/summary.json').read_text())['paths']
+        summary=timing_summary(directory,'mapped_preplacement',args.clock_period)
+        record['timing_paths']=summary['paths']
+        record['timing_regions']=summary['regions']
+        metrics += scoped_timing_metrics(summary)
         (directory/'cells.json').write_text(json.dumps(counts,indent=2)+'\n')
         (directory/'mapped_metrics.json').write_text(json.dumps(metrics,indent=2)+'\n')
         if args.action=='impl':
@@ -463,17 +503,14 @@ def main():
                 raise ValueError('Post-placement timing-repair database missing')
             summary=timing_summary(directory,'placed_pre_cts',args.clock_period)
             record['timing_paths']=summary['paths']
+            record['timing_regions']=summary['regions']
             modules=json.loads((results/'uqu_mapped.json').read_text())['modules']
             metrics=placed_metrics(directory,modules)
             units=dict(minimum_clock_period='ns',estimated_fmax='MHz',setup_worst_slack='ns',
                        hold_worst_slack='ns',setup_total_negative_slack='ns',slew_violations='pins',
                        capacitance_violations='pins',fanout_violations='pins')
             metrics += [dict(name=k,value=summary['metrics'][k],unit=u) for k,u in units.items()]
-            for scope in ('reg_to_reg','input_to_reg','reg_to_output','input_to_output'):
-                for delay,label in (('max','setup'),('min','hold')):
-                    path=summary['paths'][scope+'_'+delay]
-                    if path['status']=='timed':
-                        metrics.append(dict(name=scope+'_'+label+'_worst_slack',value=path['slack_ns'],unit='ns'))
+            metrics += scoped_timing_metrics(summary)
             record['context'].update(stage='placed_pre_cts',sta_interconnect='placement_estimated',clock_model='ideal')
             record['metrics']=metrics
             checks=summary['metrics']

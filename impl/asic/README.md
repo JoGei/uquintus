@@ -224,6 +224,19 @@ cells. Both flows retain setup/hold reports for all constrained paths, internal
 register-to-register paths, and three interface path classes. Their endpoints
 and slacks appear in the HTML run page. Missing path classes are explicit;
 internal-only slacks are not converted into a replacement Fmax.
+
+Core runs also report internal setup/hold paths into IF, DE, EX, MEM and WB
+register regions, plus CORE for shared/unclassified state. An expandable
+launch-to-capture table exposes forwarding and control paths such as EX→DE
+and WB→IF. Parent-owned pipeline inputs belong to the receiving stage;
+these are register regions, not isolated combinational-stage budgets.
+`timing/<stage>/register_regions.tsv` records mapped cells/output nets and
+`regions.tsv` records their counts. Scoped `.rpt` files contain the full cell
+paths; `summary.json` and report metrics retain their worst slacks/endpoints.
+Empty or optimized-away regions have no constrained paths rather than zero
+slack. Standalone FPU tops mark pipeline regions not applicable. See the
+[region definitions](../../doc/uqu_spec.build.md#42-pipeline-register-region-timing-diagnostics).
+
 ORFS's raw report includes default-activity power estimates; this flow does not
 publish them as qualified power measurements. Physical timing, area, power,
 DRC/LVS and post-synthesis functional equivalence remain separate qualification.

@@ -126,6 +126,10 @@ def configuration_label(config):
         if config['MUA_BTB_IDATA_HWORDS']:
             btb += f"+idata-hw{config['MUA_BTB_IDATA_HWORDS']}"
     fields += [f"mua-bp:{predictor}", f"mua-btb:{btb}", f"mua-ifbuf:{config['MUA_IF_BUFFER_WORDS']}"]
+    if config['MUA_REDIRECT_BYPASS'] != 'none':
+        fields.append('mua-rb:'+'+'.join({'if_buffer':'ifbuf', 'redirect_request':'redirect',
+                                        'ifetch_result':'result'}[part]
+                                       for part in config['MUA_REDIRECT_BYPASS'].split('+')))
     if config["ISA_M"]:
         multiplier = {
             "iterative": "iter", "parallel": "para", "parallel+stages+2": "para+stages2",

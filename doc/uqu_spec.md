@@ -229,6 +229,7 @@ the ISA parameter `ISA_M` shall remain `0` in this milestone.
 | Pipeline | Single-issue, in-order IF/DE/EX/MEM/WB; base integer ALU operations complete in one EX execution cycle. |
 | Dependencies and control flow | `MUA_FORWARDING = 1`, `MUA_FORWARD_EX_TO_DE = 1`, `MUA_FORWARD_MEM_TO_DE = 1`, `MUA_FORWARD_MEM_TO_EX = 1`, and `MUA_FORWARD_WB_TO_EX = 1`; WB-to-DE bypass outside the register file, branch prediction `none`, branch/jump resolution in DE. |
 | Instruction-fetch buffer | `MUA_IF_BUFFER_WORDS = 2`; continue filling during downstream stalls subject to capacity and control-flow restrictions; one outstanding fetch request independently of depth. |
+| Redirect/refill bypass | `MUA_REDIRECT_BYPASS = none | if_buffer`, default `none`; IF-owned selection forwards registered fetch results around the word FIFO, including C32 second-word assembly. Redirect pointer and external-response registration remain intact. |
 | Register file | Default flip-flop backend with combinational DE reads. |
 | Hardening | `MUA_HARDENED = 0`; OBI parity/checksum support is a future implementation feature. |
 | Multiply/divide parameters | `MUA_MUL = iterative`, `MUA_DIV = iterative`, `MUA_MULDIV_ITERUNROLL = 8`; all explicitly set but inactive with `ISA_M = 0`. |

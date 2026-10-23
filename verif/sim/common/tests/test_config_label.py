@@ -179,6 +179,20 @@ class ConfigurationLabelTests(unittest.TestCase):
         self.assertNotIn('+idata', configuration_label(active))
         self.assertEqual(configuration_label(dict(self.base, MUA_BTB_IDATA_HWORDS=4)), BASE_LABEL)
 
+    def test_if_buffer_bypass_is_visible_when_enabled(self):
+        self.assertEqual(configuration_label(dict(self.base,MUA_REDIRECT_BYPASS='none')),BASE_LABEL)
+        self.assertEqual(configuration_label(dict(self.base,MUA_REDIRECT_BYPASS='if_buffer')),
+                         BASE_LABEL+'_mua-rb:ifbuf')
+        self.assertEqual(configuration_label(dict(self.base,MUA_REDIRECT_BYPASS='redirect_request')),
+                         BASE_LABEL+'_mua-rb:redirect')
+        self.assertEqual(configuration_label(dict(self.base,MUA_REDIRECT_BYPASS='if_buffer+redirect_request')),
+                         BASE_LABEL+'_mua-rb:ifbuf+redirect')
+        for mode,label in [('ifetch_result','result'),('if_buffer+ifetch_result','ifbuf+result'),
+                           ('redirect_request+ifetch_result','redirect+result'),
+                           ('if_buffer+redirect_request+ifetch_result','ifbuf+redirect+result')]:
+            self.assertEqual(configuration_label(dict(self.base,MUA_REDIRECT_BYPASS=mode)),
+                             BASE_LABEL+'_mua-rb:'+label)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,14 @@
 {
+  "MUA_REDIRECT_BYPASS": {
+    "none": {"value": 0, "macro": "UQU_REDIRECT_BYPASS_NONE"},
+    "if_buffer": {"value": 1, "macro": "UQU_REDIRECT_BYPASS_IF_BUFFER"},
+    "redirect_request": {"value": 2, "macro": "UQU_REDIRECT_BYPASS_REDIRECT_REQUEST"},
+    "if_buffer+redirect_request": {"value": 3, "macro": "UQU_REDIRECT_BYPASS_IF_BUFFER_REDIRECT_REQUEST"},
+    "ifetch_result": {"value": 4, "macro": "UQU_REDIRECT_BYPASS_IFETCH_RESULT"},
+    "if_buffer+ifetch_result": {"value": 5, "macro": "UQU_REDIRECT_BYPASS_IF_BUFFER_IFETCH_RESULT"},
+    "redirect_request+ifetch_result": {"value": 6, "macro": "UQU_REDIRECT_BYPASS_REDIRECT_REQUEST_IFETCH_RESULT"},
+    "if_buffer+redirect_request+ifetch_result": {"value": 7, "macro": "UQU_REDIRECT_BYPASS_IF_BUFFER_REDIRECT_REQUEST_IFETCH_RESULT"}
+  },
   "MUA_BRANCH_PREDICTOR": {
     "none": {"value": 0, "macro": "UQU_BP_NONE"},
     "static_not_taken": {"value": 1, "macro": "UQU_BP_STATIC_NOT_TAKEN"},

@@ -394,18 +394,23 @@ class CoreTest(uvm_test):
                 getattr(d, bus+'_rdata_i').value = pending[1]
                 getattr(d, bus+'_err_i').value = pending[2]
         await Timer(1, units='ns')
+        # Drive both independent grant decisions before sampling either bus.
+        # A data grant may release a DE branch and change the new IF request.
+        for bus in self.pending:
+            available = rst and (self.rng.randrange(3)!=0 if grant is None and self.random_wait else
+                                 (1 if grant is None else grant))
+            getattr(d, bus+'_gnt_i').value = int(available)
+        if self.coprocessor: self.coprocessor.drive(rst)
+        await Timer(1, units='ns')
         for bus in self.pending:
             req = self.signal(bus+'_req_o')
             fields = ('we','addr','wdata','be') if bus == 'dmem' else ('addr',)
             payload = tuple(self.signal(bus+'_'+f+'_o') for f in fields)
             if rst and self.held[bus] is not None:
                 assert req and payload == self.held[bus], f'{bus} request changed before grant'
-            take = rst and req and (self.rng.randrange(3)!=0 if grant is None and self.random_wait else (1 if grant is None else grant))
+            take = rst and req and self.signal(bus+'_gnt_i')
             grants[bus] = (take, payload)
-            getattr(d, bus+'_gnt_i').value = int(take)
             self.held[bus] = payload if rst and req and not take else None
-        if self.coprocessor: self.coprocessor.drive(rst)
-        await Timer(1, units='ns')
         o = {n:self.signal(n) for n in ('wb_retire','wb_exception_fire','wb_pc_q','wb_original_q',
                 'wb_we0','wb_waddr0','wb_wdata0','wb_cause','wb_tval','trap_valid','trap_pc','trap_cause',
                 'redirect_valid','redirect_addr','de_valid_q','ex_valid_q','mem_valid_q','wb_valid_q',

@@ -62,3 +62,4 @@ close $f
 set f [open $uqu_timing_dir/clock.txt w]
 puts $f [get_name $uqu_clock]
 close $f
+source [file dirname [info script]]/stage_paths.tcl

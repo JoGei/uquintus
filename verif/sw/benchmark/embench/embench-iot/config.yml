@@ -1,0 +1,122 @@
+schema_version: 2
+name: embench/embench-iot
+validator: embench
+sources:
+- support/beebsc.c
+port_sources:
+- uqu_port.c
+compiler_flags:
+- -O2
+- -g
+- -fno-common
+defines:
+  CPU_MHZ: 1
+  WARMUP_HEAT: 1
+profiles:
+  aha-mont64:
+    sources:
+    - src/aha-mont64/mont64.c
+    local_scale_factor: 423
+    arithmetic: integer
+  crc32:
+    sources:
+    - src/crc32/crc_32.c
+    local_scale_factor: 170
+    arithmetic: integer
+  cubic:
+    sources:
+    - src/cubic/basicmath_small.c
+    - src/cubic/libcubic.c
+    local_scale_factor: 10
+    arithmetic: software_float
+  edn:
+    sources:
+    - src/edn/libedn.c
+    local_scale_factor: 87
+    arithmetic: integer
+  huffbench:
+    sources:
+    - src/huffbench/libhuffbench.c
+    local_scale_factor: 11
+    arithmetic: integer
+  matmult-int:
+    sources:
+    - src/matmult-int/matmult-int.c
+    local_scale_factor: 46
+    arithmetic: integer
+  minver:
+    sources:
+    - src/minver/libminver.c
+    local_scale_factor: 555
+    arithmetic: software_float
+  nbody:
+    sources:
+    - src/nbody/nbody.c
+    local_scale_factor: 1
+    arithmetic: software_float
+  nettle-aes:
+    sources:
+    - src/nettle-aes/nettle-aes.c
+    local_scale_factor: 78
+    arithmetic: integer
+  nettle-sha256:
+    sources:
+    - src/nettle-sha256/nettle-sha256.c
+    local_scale_factor: 475
+    arithmetic: integer
+  nsichneu:
+    sources:
+    - src/nsichneu/libnsichneu.c
+    local_scale_factor: 1231
+    arithmetic: integer
+  picojpeg:
+    sources:
+    - src/picojpeg/libpicojpeg.c
+    - src/picojpeg/picojpeg_test.c
+    local_scale_factor: 6
+    arithmetic: integer
+  qrduino:
+    sources:
+    - src/qrduino/qrencode.c
+    - src/qrduino/qrframe.c
+    - src/qrduino/qrtest.c
+    local_scale_factor: 5
+    arithmetic: integer
+  sglib-combined:
+    sources:
+    - src/sglib-combined/combined.c
+    local_scale_factor: 29
+    arithmetic: integer
+  slre:
+    sources:
+    - src/slre/libslre.c
+    local_scale_factor: 110
+    arithmetic: integer
+  st:
+    sources:
+    - src/st/libst.c
+    local_scale_factor: 13
+    arithmetic: software_float
+  statemate:
+    sources:
+    - src/statemate/libstatemate.c
+    local_scale_factor: 1964
+    arithmetic: integer
+  ud:
+    sources:
+    - src/ud/libud.c
+    local_scale_factor: 1478
+    arithmetic: integer
+  wikisort:
+    sources:
+    - src/wikisort/libwikisort.c
+    local_scale_factor: 1
+    arithmetic: integer
+libraries:
+- m
+- c
+- gcc
+memory:
+  imem_latency: 1
+  dmem_latency: 1
+max_cycles: 200000000

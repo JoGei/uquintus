@@ -78,9 +78,15 @@ the loader/completion contract specified in
 `verif/sw/benchmark/<suite>/`. `BENCHMARK_MODE=fast` defaults to a compiled
 Verilator C++ driver; `BENCHMARK_MODE=checked` uses the cocotb/pyuvm ELF harness.
 These are execution/validation settings, not hardware parameters or simulator
-selectors. Both modes use the same memory/timing contract and final CRC checks;
+selectors. Both modes use the same memory/timing contract and final workload self-checks;
 their distinct scopes remain explicit in report metadata. See the
 [benchmark specification](uqu_spec.bench.md#3-rtl-workload-measurements).
+Use `BENCHMARK=embench/embench-iot` for the pinned 19-workload Embench 1.0
+suite and `BENCHMARK_PROFILE=all|<name>[,<name>...]` to select its workloads.
+For microarchitecture-only comparisons, `make benchmark-run
+BENCHMARK_REUSE_SUITE=<software-suite.json>` shall reuse the exact pinned
+executables after checking workload settings and software-visible hardware
+compatibility, recording the source suite and both parameter snapshots.
 
 ### 1.2. Pinned instruction suites and external compiler identity
 
@@ -418,6 +424,7 @@ joining combined selections and `_` separating fields. The optional enabled-only
 | Branch prediction | `_mua-bp:{none,stnt,bimodal+entries<N>}` | `MUA_BRANCH_PREDICTOR`: `none`, `static_not_taken` or `bimodal`. Include `MUA_BP_ENTRIES` only for bimodal mode. |
 | Branch target storage | `_mua-btb:{none,direct+entries<N>[+idata-hw<H>]}` | `MUA_BTB`, independent `MUA_BTB_ENTRIES` and halfword capacity `MUA_BTB_IDATA_HWORDS`; omit `+idata-hw` at zero. Use `none` when disabled or when prediction mode is `none`; omit inactive capacity. |
 | Instruction buffer | `_mua-ifbuf:<words>` | `MUA_IF_BUFFER_WORDS`. |
+| Redirect/refill bypass | `[_mua-rb:<policies>]` | Omit for `none`; otherwise join enabled policies in canonical order with `+`: `ifbuf` for `if_buffer`, `redirect` for `redirect_request`, `result` for `ifetch_result`. All eight selector values are supported, e.g. `mua-rb:ifbuf+redirect+result`. |
 | Multiplier | `[_mua-mul:{iter,para,para+stages2}]` | Present only for `ISA_M=1`; `MUA_MUL`: `iterative`, `parallel`, or `parallel+stages+2`. |
 | Divider | `[_mua-div:iter]` | Present only for `ISA_M=1`; the currently supported `MUA_DIV` choice is `iterative`. |
 | Shared iterative arithmetic | `[_mua-mdu:unroll<factor>]` | `MUA_MULDIV_ITERUNROLL`, when M is enabled and at least one MUL/DIV implementation is iterative. |
@@ -624,6 +631,44 @@ endpoints and scope, while retaining the full-interface result defined in the
 Detailed SRAM/coprocessor evaluation harnesses and constraints shall follow
 their selected integrations. These are implementation-flow settings and shall
 not become RTL `MUA_` parameters.
+
+### 4.2. Pipeline register-region timing diagnostics
+
+Mapped synthesis and post-placement timing repair shall additionally report
+worst setup and hold paths into the IF, DE, EX, MEM and WB register regions,
+plus a CORE region for shared or unclassified state. Each region's incoming
+summary shall consider all internal register launch points. Retain the worst
+path for every launch/capture region pair, including intra-region paths, so
+forwarding and control dependencies remain visible across stage boundaries.
+Each timed result shall include slack in ns, startpoint, endpoint and a detailed
+STA path report. An absent constrained path shall be `no_paths`, never zero
+slack or an inferred stage frequency. Existing full/interface path summaries
+and the full-path frequency reference shall remain unchanged.
+
+Regions shall describe register ownership, not claim to partition combinational
+logic into isolated stages. Parent-owned `de_*`, `ex_*`, `mem_*` and `wb_*`
+pipeline input registers belong to the receiving stage. Local sequential state
+under `u_if`, `u_de`, `u_ex`, `u_mem` and `u_wb` belongs to that stage; retained
+top-level `if_*` state belongs to IF. CORE includes core-owned architectural
+state such as the GPR file, centralized control/hazard state, unmatched mapped
+names and mixed-region aliases. Flattening/optimization can merge or lose
+names; retain the actual mapped register-cell/output-net inventory and counts
+so attribution can be audited. Do not preserve hierarchy or inhibit
+optimization solely to improve these diagnostic labels.
+
+The ORFS producer shall emit these diagnostics under each existing
+`timing/<flow-stage>/` directory: `regions.tsv`, `register_regions.tsv`, scoped
+entries in `paths.tsv`/`summary.json`, and `stage_<capture>_<max|min>.rpt` plus
+`stage_<launch>_to_<capture>_<max|min>.rpt`. Stage incoming slack metrics shall
+be available for configuration comparisons in both synthesis and implementation
+reports. The HTML run page shall display the region summaries and an expandable
+launch/capture table. Non-core tops shall mark the region report not applicable;
+historical records without it shall remain explicitly unrecorded.
+
+These queries shall not add path groups, false paths or multicycle exceptions,
+or change mapping/placement optimization. Slack comparisons shall retain the
+same clock, constraints, timing corner and interconnect model; preplacement and
+placed results remain separate observations.
 
 ## 5. Externally provisioned build environment
 

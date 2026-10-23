@@ -64,6 +64,7 @@ module uqu_ifetch_pmp_tb #(
         .mem_priv_m_i(mem_priv_m_i), .mem_allow_o(mem_allow_o)
     );
     uqu_ifetch u_ifetch (
+        .clear_i(1'b0), .replace_i(1'b0),
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(if_flush_i),
         .req_valid_i(if_valid_i), .req_ready_o(if_ready_o), .req_addr_i(if_addr_i),
         .req_access_fault_i(!if_allow_o), .request_permit_i(if_permit_i),

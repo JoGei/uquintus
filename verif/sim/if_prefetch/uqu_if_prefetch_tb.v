@@ -68,6 +68,7 @@ module uqu_if_prefetch_tb #(
     // The engine reserves its own registered completion slots before issuing.
     // Its result handshake backpressures safely when the word FIFO is full.
     uqu_ifetch u_ifetch (
+        .clear_i(1'b0), .replace_i(1'b0),
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
         .req_valid_i(fetch_valid), .req_ready_o(fetch_ready),
         .req_addr_i(fetch_addr_q), .req_access_fault_i(req_access_fault_i),

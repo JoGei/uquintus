@@ -150,6 +150,26 @@ class ComponentRunnerTests(unittest.TestCase):
         path.write_text(yaml.safe_dump(dict(config, ISA_ZFINX=0, MUA_FPU_DIVSQRT='pulp')))
         self.assertEqual(load_configuration(path, catalog)['MUA_FPU_DIVSQRT'], 'pulp')
 
+    def test_redirect_bypass_is_explicit_and_rejects_unimplemented_choices(self):
+        catalog=json.loads((ROOT/'config/selectors.json').read_text())
+        config=load_configuration(ROOT/'config/rv32i.yml',catalog)
+        path=self.directory/'bypass.yml'
+        for label,value in (('none',0),('if_buffer',1),('redirect_request',2),('if_buffer+redirect_request',3),
+                            ('ifetch_result',4),('if_buffer+ifetch_result',5),('redirect_request+ifetch_result',6),
+                            ('if_buffer+redirect_request+ifetch_result',7)):
+            path.write_text(yaml.safe_dump(dict(config,MUA_REDIRECT_BYPASS=label)))
+            checked=load_configuration(path,catalog)
+            self.assertEqual(parameters_for_component(checked,['MUA_REDIRECT_BYPASS'],catalog),
+                             dict(MUA_REDIRECT_BYPASS=value))
+        for choice in (0,1,True,'ifetch','redirect',None):
+            path.write_text(yaml.safe_dump(dict(config,MUA_REDIRECT_BYPASS=choice)))
+            with self.subTest(choice=choice),self.assertRaisesRegex(ValueError,'MUA_REDIRECT_BYPASS'):
+                load_configuration(path,catalog)
+        del config['MUA_REDIRECT_BYPASS']
+        path.write_text(yaml.safe_dump(config))
+        with self.assertRaisesRegex(ValueError,'missing=.*MUA_REDIRECT_BYPASS'):
+            load_configuration(path,catalog)
+
     def test_selector_mapping_and_generated_header_share_catalog(self):
         from hw_config import write_header
 

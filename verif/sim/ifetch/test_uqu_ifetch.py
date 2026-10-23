@@ -1,6 +1,7 @@
 """Independent word transactions, OBI timing, retained results and killed drains."""
 from collections import deque
 import os
+import json
 from pathlib import Path
 import random
 import sys
@@ -17,11 +18,12 @@ class IfetchTest(uvm_test):
     def build_phase(self):
         self.dut = cocotb.top
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
+        self.bypass = bool(json.loads(os.environ["UQU_COMPONENT_PARAMS"])["MUA_REDIRECT_BYPASS"] & 4)
         self.previous = None
         self.count = 0
 
     async def cycle(self, **changes):
-        i = dict(rst_n=1, flush=0, req_valid=0, req_addr=0, req_access_fault=0,
+        i = dict(rst_n=1, flush=0, clear=0, replace=0, req_valid=0, req_addr=0, req_access_fault=0,
                  request_permit=1, res_ready=0, imem_gnt=0, imem_rvalid=0,
                  imem_rdata=0, imem_err=1)
         i.update(changes)
@@ -43,7 +45,7 @@ class IfetchTest(uvm_test):
             old_i, old_o = self.previous
             if old_o['imem_req'] and not old_i['imem_gnt'] and i['rst_n']:
                 assert o['imem_req'] and o['imem_addr'] == old_o['imem_addr'], 'request withdrawn/replaced'
-            if old_o['res_valid'] and not old_i['res_ready'] and i['rst_n'] and not i['flush']:
+            if old_o['res_valid'] and not old_i['res_ready'] and not old_i['clear'] and i['rst_n'] and not i['flush']:
                 assert o['res_valid'] and self.result(o) == self.result(old_o), 'retained result changed'
         self.previous = i,o
         d.clk_i.value = 1
@@ -81,7 +83,9 @@ class IfetchTest(uvm_test):
             r = await self.cycle(imem_rdata=self.rng.getrandbits(32), imem_err=self.rng.randrange(2))
             assert r['busy'] and not r['res_valid'] and not r['imem_req']
         r = await self.cycle(imem_rvalid=1, imem_rdata=data, imem_err=int(error), flush=int(flush))
-        assert not r['res_valid'], 'combinational bus-response bypass'
+        if r['res_valid']:
+            assert self.bypass and not flush
+            assert (r['res_data'],r['res_error']) == (0 if error else data,int(error))
         assert r['busy'] and not r['imem_req']
 
     async def consume(self, expected, hold=0):
@@ -194,7 +198,7 @@ class StreamingTest(IfetchTest):
             raise AssertionError('stream did not drain')
         if not random_wait:
             assert grants[0] == accepts[0] == 0
-            assert results[0] == 2  # Next-cycle response, then registered delivery.
+            assert results[0] == (1 if self.bypass else 2)
             for name, events in [('accept', accepts), ('grant', grants), ('result', results)]:
                 assert len(events)==count and all(b-a==1 for a,b in zip(events,events[1:])), (name,events)
 
@@ -247,6 +251,145 @@ class PipelinedFlushTest(IfetchTest):
             else:
                 await self.reset()
             await self.operation(0x3000, data=0x55aa55aa)
+        self.drop_objection()
+
+
+class ClearTest(IfetchTest):
+    async def run_phase(self):
+        self.raise_objection()
+        for simultaneous,ready in ((False,0),(False,1),(True,0),(True,1)):
+            await self.reset()
+            await self.cycle(req_valid=1,req_addr=0x1000,imem_gnt=1)
+            await self.cycle(req_valid=1,req_addr=0x1004,imem_gnt=1,
+                             imem_rvalid=1,imem_rdata=0xAAAAAAAA,imem_err=0)
+            # The old registered head must remain visible while it requests
+            # a synchronous clear, including a concurrent later bus response.
+            r=await self.cycle(clear=1,res_ready=ready,req_valid=1,req_addr=0xDEAD0000,
+                               imem_gnt=1,imem_rvalid=int(simultaneous),
+                               imem_rdata=0xBBBBBBBB,imem_err=1)
+            assert r['res_valid'] and self.result(r)==completion(0x1000,0xAAAAAAAA)
+            assert not r['req_ready'] and not r['imem_req']
+            if not simultaneous:
+                await self.cycle(imem_rvalid=1,imem_rdata=MASK,imem_err=1)
+            r=await self.cycle()
+            assert not r['res_valid'] and not r['busy']
+            await self.operation(0x2000,data=0x12345678)
+        # A clear must also preserve an already presented, ungranted request.
+        await self.accept(0x3000)
+        r=await self.cycle(clear=1)
+        assert r['imem_req'] and r['imem_addr']==0x3000
+        await self.grant(0x3000,delay=3)
+        await self.respond(MASK,error=True)
+        r=await self.cycle()
+        assert not r['res_valid'] and not r['busy']
+        self.drop_objection()
+
+
+class ReplaceTest(IfetchTest):
+    async def run_phase(self):
+        self.raise_objection()
+        for local in (False,True):
+            for phase in ('idle','private','ungranted','grant','pending','response','result','full'):
+                for denied,error in ((False,False),(False,True),(True,False)):
+                    await self.reset()
+                    pending = None
+                    if phase != 'idle':
+                        await self.accept(0x1000,permit=phase!='private',
+                                          grant_high=phase in ('pending','response','result','full'))
+                        if phase in ('pending','response'):
+                            pending = 0x1000
+                        elif phase in ('result','full'):
+                            await self.respond(0x11111111)
+                            if phase == 'full':
+                                await self.cycle(req_valid=1,req_addr=0x1004,imem_gnt=1)
+                                await self.cycle(imem_rvalid=1,imem_rdata=0x22222222,imem_err=0)
+                    target = 0x8000
+                    r = await self.cycle(flush=int(not local),clear=int(local),replace=1,
+                        req_valid=1,req_addr=target,req_access_fault=int(denied),
+                        imem_gnt=int(phase!='ungranted'),imem_rvalid=int(phase=='response'),
+                        imem_rdata=0xDEADBEEF,imem_err=1)
+                    accepted = bool(r['req_ready'])
+                    assert accepted == (phase!='ungranted'), (phase,r)
+                    if phase=='response': pending=None
+                    if r['imem_req'] and phase!='ungranted': pending=r['imem_addr']
+                    seen = False
+                    for tick in range(32):
+                        returning = pending is not None and tick>=3
+                        old_pending = pending
+                        data = 0xCAFEBABE if pending==target else 0xDEADBEEF
+                        r = await self.cycle(req_valid=int(not accepted),req_addr=target,
+                            req_access_fault=int(denied),imem_gnt=int(tick>=3),
+                            imem_rvalid=int(returning),imem_rdata=data,
+                            imem_err=int(error if pending==target else True),res_ready=1)
+                        if r['res_valid']:
+                            assert self.result(r)==completion(target,0xCAFEBABE,denied,error), (phase,r)
+                            assert not seen, 'duplicate new-stream completion'
+                            seen=True
+                        if returning: pending=None
+                        if r['imem_req'] and tick>=3:
+                            assert pending is None, 'two granted outstanding requests'
+                            pending=r['imem_addr']
+                            assert old_pending!=target, 'duplicate target request'
+                        if not accepted and r['req_ready']: accepted=True
+                        if seen and not r['busy']: break
+                    assert seen and accepted and not r['busy'], (local,phase,denied,error,r)
+        self.drop_objection()
+
+
+class FallthroughTest(IfetchTest):
+    async def finish_live(self, address, data, error=False):
+        r=await self.cycle(imem_rvalid=1,imem_rdata=data,imem_err=int(error),res_ready=1)
+        assert bool(r['res_valid'])==self.bypass
+        if self.bypass:
+            assert self.result(r)==completion(address,data,error=error)
+            r=await self.cycle(res_ready=1,imem_rdata=MASK)
+            assert not r['res_valid'] and not r['busy'], 'live response enqueued twice'
+        else:
+            await self.consume(completion(address,data,error=error))
+
+    async def run_phase(self):
+        self.raise_objection()
+        for error in (False,True):
+            for ready in (False,True):
+                await self.reset()
+                await self.accept(0x1000,grant_high=True)
+                if ready:
+                    await self.finish_live(0x1000,0x12345678,error)
+                else:
+                    r=await self.cycle(imem_rvalid=1,imem_rdata=0x12345678,imem_err=int(error))
+                    assert bool(r['res_valid'])==self.bypass
+                    if self.bypass: assert self.result(r)==completion(0x1000,0x12345678,error=error)
+                    await self.consume(completion(0x1000,0x12345678,error=error),hold=4)
+        # A live newer response cannot overtake a stored head, even when that
+        # head is consumed now. The new word is stored for the following cycle.
+        await self.reset()
+        await self.accept(0x2000,grant_high=True)
+        await self.cycle(req_valid=1,req_addr=0x2004,imem_gnt=1,
+                         imem_rvalid=1,imem_rdata=0xAAAAAAAA,imem_err=0)
+        r=await self.cycle(imem_rvalid=1,imem_rdata=0xBBBBBBBB,imem_err=0,res_ready=1)
+        assert self.result(r)==completion(0x2000,0xAAAAAAAA)
+        await self.consume(completion(0x2004,0xBBBBBBBB),hold=4)
+        # Local clear must leave the old live word visible for prediction;
+        # neither consumer readiness nor old-response errors may leak it later.
+        for ready in (0,1):
+            await self.reset()
+            await self.accept(0x3000,grant_high=True)
+            r=await self.cycle(clear=1,replace=1,req_valid=1,req_addr=0x8000,
+                imem_gnt=1,imem_rvalid=1,imem_rdata=0xDEADBEEF,imem_err=1,res_ready=ready)
+            assert r['req_ready'] and r['imem_req'] and r['imem_addr']==0x8000
+            assert bool(r['res_valid'])==self.bypass
+            if self.bypass: assert self.result(r)==completion(0x3000,0,error=True)
+            await self.finish_live(0x8000,0xCAFEBABE)
+        await self.reset()
+        await self.accept(0x4000,grant_high=True)
+        r=await self.cycle(flush=1,imem_rvalid=1,imem_rdata=MASK,imem_err=1,res_ready=1)
+        assert not r['res_valid']
+        r=await self.cycle(res_ready=1)
+        assert not r['res_valid'] and not r['busy']
+        # Synthesized PMP denials remain registered and never touch OBI.
+        r=await self.cycle(req_valid=1,req_addr=0x5000,req_access_fault=1,res_ready=1)
+        assert r['req_ready'] and not r['res_valid'] and not r['imem_req']
+        await self.consume(completion(0x5000,0,denied=True))
         self.drop_objection()
 
 
@@ -333,3 +476,18 @@ async def streaming(_dut):
 @cocotb.test(timeout_time=1000,timeout_unit='us')
 async def pipelined_flush(_dut):
     await uvm_root().run_test(PipelinedFlushTest)
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def clear(_dut):
+    await uvm_root().run_test(ClearTest)
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def replace(_dut):
+    await uvm_root().run_test(ReplaceTest)
+
+
+@cocotb.test(timeout_time=1000,timeout_unit='us')
+async def fallthrough(_dut):
+    await uvm_root().run_test(FallthroughTest)

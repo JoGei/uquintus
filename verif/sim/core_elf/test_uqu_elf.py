@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from core.core_env import CoreTest, MASK
 from elf_image import completion_code, expected_traps, load_elf, validate_trap_sequence
 from interrupts import interrupt_plan, InterruptStimulus
-from benchmark_measure import BenchmarkWindow, coremark_result, read_log
+from benchmark_measure import BenchmarkWindow, benchmark_result, read_log
 from bpu_stats import unpack_snapshot, statistics as bpu_statistics
 
 
@@ -110,9 +110,7 @@ class ELFTest(CoreTest):
                 Path('bpu-stats.json').write_text(json.dumps(bpu, indent=2)+'\n')
                 log = read_log(self.image, self.model_memory)
                 Path('benchmark.log').write_text(log)
-                assert self.benchmark['validator'] == 'coremark', 'unsupported benchmark validator'
-                result = coremark_result(log, self.benchmark['profile'],
-                                        self.benchmark['iterations'], window['cycles'])
+                result = benchmark_result(log, self.benchmark, window['cycles'])
                 self.benchmark_evidence.update(window=window, result=result, bpu_statistics=bpu,
                                                memory=self.memory_timing)
             status = 'passed'

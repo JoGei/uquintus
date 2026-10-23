@@ -2,7 +2,8 @@
 
 [uqu_ifetch.v](../../../src/uquintus/uqu_ifetch.v) is the IF-owned, single-word
 OBI transaction engine. It has a combinational request bypass, a private holding register, one granted
-transaction, and two registered completion slots, independent of the
+transaction, and two completion slots with optional empty-queue response
+fall-through, independent of the
 fetched-word buffer, [instruction aligner](../if_aligner/README.md) and
 parent-owned IF/DE register.
 It implements no ISA decoding, PMP rules, CSR storage or redirect arbitration.
@@ -15,8 +16,9 @@ make test COMPONENT=ifetch_pmp CONFIG=rv32i_pmp
 ```
 
 Use `PYTHON=.venv/bin/python` for the repository environment. The
-[manifest](../../../config/sim/ifetch.yml) selects five cocotb/pyuvm suites.
-The leaf has no hardware parameters. `ISA_C` and the compressed-decode strategy
+[manifest](../../../config/sim/ifetch.yml) selects eight cocotb/pyuvm suites.
+`MUA_REDIRECT_BYPASS` enables result fall-through through bit 2; the other
+policies belong to the enclosing IF stage and do not alter this leaf. `ISA_C` and the compressed-decode strategy
 do not change its aligned 32-bit word interface.
 
 ## Request and protection contract
@@ -25,14 +27,16 @@ do not change its aligned 32-bit word interface.
 | --- | --- |
 | `clk_i`, `rst_ni` | Single clock, active-low synchronous reset of control state only. |
 | `flush_i` | Discard current work/results; finish any already presented bus transaction. |
+| `clear_i` | Synchronously discard old work/results without masking the current stored or live completion; used by an accepted IF prediction. Preserve presented requests and drain killed responses as for flush. |
+| `replace_i` | During flush/clear, `req_*` describes new-stream work eligible for concurrent acceptance; tie low for ordinary cancellation. |
 | `req_valid_i`, `req_ready_o` | Accept one word request on an active edge with both high; may be ready while busy. |
 | `req_addr_i[31:0]` | Byte address of the containing fetch word; bits 1:0 are ignored. |
 | `req_access_fault_i` | Completed external protection-denial decision for that aligned four-byte word, sampled at request acceptance. |
 | `request_permit_i` | Permission to start new external work; accepted work may wait privately for it. |
 | `busy_o` | Private request, transaction or retained-result storage occupied, including killed bus work draining. |
-| `res_valid_o`, `res_ready_i` | Transfer the registered word completion on an active edge with both high. |
+| `res_valid_o`, `res_ready_i` | Transfer the stored or configured live word completion on an active edge with both high. |
 | `res_addr_o[31:0]` | Captured aligned word address, qualified by result validity. |
-| `res_data_o[31:0]`, `res_error_o` | Registered word and combined protection/bus error; data is zero on error. Invalid results expose all-zero fields. |
+| `res_data_o[31:0]`, `res_error_o` | Stored or configured live word and combined protection/bus error; data is zero on error. Invalid results expose all-zero fields. |
 
 The **core owns one shared `uqu_pmp`**. The IF parent queries its IF
 port with `{req_addr_i[31:2],2'b00}`, size 2 (four bytes), execute permission and
@@ -84,10 +88,27 @@ There is no request-controlled idle-zero mask: idle payload is unspecified.
 Removing request capture from the fast path exposes address generation,
 protection and capacity/request qualification to interface timing constraints.
 
-Every live response is captured at the active edge regardless of consumer
-readiness. Result validity follows in the next cycle; there is no combinational
-bus-response bypass. Address/data/error remain stable until consumption or
-flush. Error is sampled only with response valid. The engine reserves one of its two completion slots before presenting each
+With `replace_i` on flush/clear, native acceptance and direct bus presentation
+may use the new target while old private work/results are canceled. Old
+presented requests remain stable through grant; a new request can queue on
+that grant edge but cannot share its bus transfer. Outstanding killed responses
+must drain, and an old response may overlap a new grant. Newly accepted requests
+and responses belong to the new stream, not the canceled one. Denials queue a
+registered error. The IF parent controls when replacement is safe for privilege
+and PMP updates. `clear_i` leaves the current stored or live head visible before
+the edge, preserving local prediction without a validity feedback loop.
+
+With `ifetch_result` disabled (default), every live response is captured at the
+edge, then becomes visible in the next cycle. With it enabled, a response may
+supply an empty result queue immediately. A consumed live result is not stored;
+a blocked one is captured once with its pending address/error and then held
+stable. Stored heads always have priority, including simultaneous pop/response.
+Bus errors zero data; invalid result fields are zero. PMP denials remain
+registered. Global flush/reset and killed ownership suppress live data; local
+clear leaves the current live head visible to avoid prediction feedback loops.
+No extra queue storage or outstanding transaction is introduced.
+
+The engine reserves one of its two completion slots before presenting each
 request. It can accept the next native address while the previous request is
 granted, and grant that queued request on the same edge that the older response
 returns. There is at most one granted transaction awaiting its response; a
@@ -96,8 +117,8 @@ validity participates in turnover, never response data. This creates a control
 path from `imem_rvalid_i` to request presentation that integration timing must cover.
 
 With continuous input/output readiness, permission, immediate grants and
-one-cycle responses, requests, grants and registered results sustain one word
-per cycle after startup. Initial latency includes bus response registration and result transfer,
+one-cycle responses, requests, grants and results sustain one word
+per cycle after startup. Initial latency depends on configured result and word delivery,
 with no mandatory request-capture cycle on the bypass path. Slow memory reduces throughput;
 full completion storage applies backpressure before starting another bus request.
 No response relies on a future consumer-ready promise.
@@ -147,6 +168,8 @@ have no reset; validity prevents their use until initialized.
   grant/response/consumer waits, mixed PMP denials and bus errors. The scoreboard
   checks ordering, data, bounded storage and at most one granted outstanding
   transaction.
+- `fallthrough`: live consumption without duplicates, blocked-result capture/retention, stored-head priority, local clear/new target overlap, global flush and registered PMP denials.
+- `replace`: 48 combinations of global/local invalidation, idle/private/held/granted/returning/full-result old work, new PMP denials and bus errors; check target ownership, configured completion latency and no duplicates.
 - `pipelined_flush`: registered, outstanding and queued words active together;
   pending/returning killed responses, held requests, full result storage, queued
   denials, new-target turnover and reset. The control suite also checks that
@@ -154,8 +177,9 @@ have no reset; validity prevents their use until initialized.
 
 The [shared-PMP fixture](../ifetch_pmp/README.md) connects one real core-owned
 checker to both real engines. Standalone and fixture lint use Verilog-2005.
-Payload storage is unreset; only control is reset. The registered-result
-contract and presented-request persistence remain unchanged. The [request-bypass characterization](../../../impl/asic/orfs/investigations/ifetch-request-bypass.md)
+Payload storage is unreset; only control is reset. The registered completion
+storage and presented-request persistence remain unchanged; selected empty-queue
+fall-through changes first-result latency. The [request-bypass characterization](../../../impl/asic/orfs/investigations/ifetch-request-bypass.md)
 records measured CPI/area/timing tradeoffs and their physical-flow limits.
 The [word buffer](../if_buffer/README.md) and
 [prefetch fixture](../if_prefetch/README.md) add real fetch/buffer/aligner

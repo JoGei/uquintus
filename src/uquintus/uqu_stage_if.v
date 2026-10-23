@@ -12,7 +12,8 @@ module uqu_stage_if #(
     parameter MUA_BTB = `UQU_BTB_NONE,
     parameter MUA_BTB_ENTRIES = 16,
     parameter MUA_BTB_IDATA_HWORDS = 0,
-    parameter MUA_IF_BUFFER_WORDS = 2
+    parameter MUA_IF_BUFFER_WORDS = 2,
+    parameter MUA_REDIRECT_BYPASS = `UQU_REDIRECT_BYPASS_NONE
 ) (
     input  wire        clk_i,
     input  wire        rst_ni,
@@ -20,6 +21,8 @@ module uqu_stage_if #(
     input  wire        flush_i,
     input  wire        redirect_valid_i,
     input  wire [31:0] redirect_addr_i,
+    // Accepted redirect uses unchanged privilege/PMP state (e.g. DE branch).
+    input  wire        redirect_request_permit_i,
     input  wire        fetch_enable_i,
     input  wire        request_permit_i,
     input  wire        branch_pending_i,
@@ -75,9 +78,9 @@ module uqu_stage_if #(
     wire branch_hold = (MUA_BRANCH_PREDICTOR == `UQU_BP_NONE) && branch_pending_i;
     wire fetch_ready;
     wire push_ready;
-    wire fetch_valid = active && fetch_enable_i && !branch_hold && !misaligned_o &&
+    wire sequential_fetch_valid = active && fetch_enable_i && !branch_hold && !misaligned_o &&
                        !candidate_fault && push_ready;
-    wire start_permit = fetch_enable_i && request_permit_i && !branch_hold &&
+    wire sequential_start_permit = fetch_enable_i && request_permit_i && !branch_hold &&
                         active && !candidate_fault && !misaligned_o;
     wire fetch_fire = fetch_valid && fetch_ready;
     wire result_valid;
@@ -112,6 +115,16 @@ module uqu_stage_if #(
     wire replay_fault = !replay_pmp_allow_i[0] || (replay_cross && !replay_pmp_allow_i[1]);
     wire replay_start = prediction_redirect && prediction_taken &&
                         (prediction_target == predicted_pc) && (idata_hwords != 0);
+    wire request_bypass = ((MUA_REDIRECT_BYPASS & `UQU_REDIRECT_BYPASS_REDIRECT_REQUEST) != 0);
+    wire [31:0] steering_addr = redirect_valid_i ? redirect_addr_i :
+                               replay_start ? idata_next_pc : predicted_pc;
+    wire steering_aligned = (ISA_C == 1) ? !steering_addr[0] : (steering_addr[1:0] == 2'b00);
+    wire redirect_request = rst_ni && request_bypass && request_permit_i && steering_aligned &&
+        ((redirect_valid_i && redirect_request_permit_i && !replay_recover) ||
+         (prediction_redirect && fetch_enable_i));
+    wire [31:0] fetch_addr = redirect_request ? {steering_addr[31:2],2'b00} : fetch_addr_q;
+    wire fetch_valid = redirect_request || (sequential_fetch_valid && !prediction_redirect);
+    wire start_permit = redirect_request || sequential_start_permit;
     assign replay_pmp_addr_o = replay_active ? {pc_q[31:2],2'b00} : 32'd0;
     assign replay_pmp_priv_m_o = replay_active && priv_m_i;
     assign selected_valid = replay_active ? active : fetched_valid;
@@ -144,20 +157,21 @@ module uqu_stage_if #(
     // This query is independent of allow. The engine samples the decision at
     // native acceptance, before any bus request, and retains it through waits.
     assign pmp_valid_o = fetch_fire;
-    assign pmp_addr_o = pmp_valid_o ? fetch_addr_q : 32'd0;
+    assign pmp_addr_o = pmp_valid_o ? fetch_addr : 32'd0;
     assign pmp_size_o = pmp_valid_o ? 2'd2 : 2'd0;
     assign pmp_priv_m_o = pmp_valid_o && priv_m_i;
 
-    uqu_ifetch u_ifetch (
-        .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(invalidate || prediction_redirect),
-        .req_valid_i(fetch_valid), .req_ready_o(fetch_ready), .req_addr_i(fetch_addr_q),
+    uqu_ifetch #(.MUA_REDIRECT_BYPASS(MUA_REDIRECT_BYPASS)) u_ifetch (
+        .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(invalidate), .clear_i(prediction_redirect), .replace_i(redirect_request),
+        .req_valid_i(fetch_valid), .req_ready_o(fetch_ready), .req_addr_i(fetch_addr),
         .req_access_fault_i(!pmp_allow_i), .request_permit_i(start_permit),
         .busy_o(fetch_busy_o), .res_valid_o(result_valid), .res_ready_i(push_ready),
         .res_addr_o(result_addr), .res_data_o(result_data), .res_error_o(result_error),
         .imem_req_o(imem_req_o), .imem_addr_o(imem_addr_o), .imem_gnt_i(imem_gnt_i),
         .imem_rvalid_i(imem_rvalid_i), .imem_rdata_i(imem_rdata_i), .imem_err_i(imem_err_i)
     );
-    uqu_if_buffer #(.MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)) u_buffer (
+    uqu_if_bypass #(.MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS),
+        .MUA_REDIRECT_BYPASS(MUA_REDIRECT_BYPASS)) u_bypass (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(invalidate),
         .clear_i(prediction_redirect),
         .push_valid_i(result_valid), .push_ready_o(push_ready),
@@ -225,7 +239,7 @@ module uqu_stage_if #(
             prediction_held_q <= 1'b0;
         end else if (redirect_valid_i) begin
             pc_q <= redirect_addr_i;
-            fetch_addr_q <= {redirect_addr_i[31:2],2'b00};
+            fetch_addr_q <= {redirect_addr_i[31:2],2'b00} + (fetch_fire ? 32'd4 : 32'd0);
             running_q <= 1'b1;
             fault_hold_q <= 1'b0;
             prediction_held_q <= 1'b0;
@@ -239,7 +253,8 @@ module uqu_stage_if #(
             prediction_held_q <= 1'b0;
         end else begin
             if (prediction_redirect) begin
-                fetch_addr_q <= replay_start ? {idata_next_pc[31:2],2'b00} : {predicted_pc[31:2],2'b00};
+                fetch_addr_q <= (replay_start ? {idata_next_pc[31:2],2'b00} : {predicted_pc[31:2],2'b00}) +
+                                (fetch_fire ? 32'd4 : 32'd0);
             end else if (fetch_fire) begin
                 fetch_addr_q <= fetch_addr_q + 32'd4;
             end

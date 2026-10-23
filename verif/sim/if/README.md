@@ -1,7 +1,8 @@
 # Instruction-fetch stage
 
 [uqu_stage_if.v](../../../src/uquintus/uqu_stage_if.v) combines the real
-[fetch engine](../ifetch/README.md), [word FIFO](../if_buffer/README.md),
+[fetch engine](../ifetch/README.md), [word-buffer policy](../if_bypass/README.md)
+owning the [word FIFO](../if_buffer/README.md),
 [aligner](../if_aligner/README.md) and optional IF decompressor. IF owns the
 instruction PC, sequential word-fetch pointer, run state and fault containment.
 The core parent owns IF/DE storage, current privilege, the shared PMP checker,
@@ -19,7 +20,7 @@ make lint COMPONENT=if CONFIG=rv32ic
 Use `PYTHON=.venv/bin/python` for the repository environment. The
 [manifest](../../../config/sim/if.yml) uses the shared runner. Parameters are
 `ISA_C`, `MUA_C_IMPL`, `MUA_C_DECOMPRESS_STAGE`, `MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES`, `MUA_BTB_IDATA_HWORDS` and
-`MUA_IF_BUFFER_WORDS`. Defaults follow the hardware configuration catalog.
+`MUA_IF_BUFFER_WORDS` and `MUA_REDIRECT_BYPASS`. Defaults follow the hardware configuration catalog.
 The canonical predictor encodings are `none=0` / `UQU_BP_NONE`,
 `static_not_taken=1` / `UQU_BP_STATIC_NOT_TAKEN` and `bimodal=2` /
 `UQU_BP_BIMODAL`, generated from
@@ -33,6 +34,7 @@ The canonical predictor encodings are `none=0` / `UQU_BP_NONE`,
 | `flush_i` | Clear buffered/candidate state, cancel private work or drain presented work, and stop until a redirect. No redirect address is sampled for a plain flush. |
 | `redirect_valid_i`, `redirect_addr_i[31:0]` | An already accepted core event: invalidate the old stream and install the target PC and its aligned fetch address. A redirect restarts even with flush asserted. Reset has highest priority. Repeated redirects replace the pending target while old bus work drains. |
 | `fetch_enable_i` | Permit new native fetches and presentation of privately waiting requests. Does not suppress delivery of an already available instruction. |
+| `redirect_request_permit_i` | Authorize the configured same-cycle external target request using unchanged privilege/PMP state. Tie low for state-changing recovery; ordinary post-redirect fetching remains available. |
 | `request_permit_i` | Additional permission to present a private request on OBI. A native request can be accepted and checked by PMP while this is low. Local denial needs no bus permission. |
 | `branch_pending_i` | Core/DE reports a recognized unresolved control-flow instruction. In `none` mode, stop new native fetches and private presentation; `static_not_taken` continues sequential prefetch. Existing asserted OBI requests persist in both modes. |
 | `predictor_update_*_i` | Accepted nonfaulting DE instruction PC, control-flow/conditional classification, actual direction and branch target; train the IF-owned predictor once. |
@@ -57,7 +59,12 @@ retains results when the FIFO is full. `MUA_IF_BUFFER_WORDS` selects FIFO slots;
 up to three additional accepted words may reside in the engine. There remains
 at most one granted transaction awaiting a response. With immediate grants,
 one-cycle responses and continuous delivery, the frontend sustains one word
-per cycle after startup; the FIFO retains its registered, no-empty-bypass contract.
+per cycle after startup. The FIFO retains its registered contract; the IF-owned
+wrapper optionally forwards its completion input around storage when
+`MUA_REDIRECT_BYPASS` includes `if_buffer`. The input is registered by default,
+or live from OBI when `ifetch_result` is also selected. It also supplies a live second word when
+needed for crossing C32 assembly. A held or partially consumed input is stored;
+a fully consumed live head is not stored and delivered twice.
 
 Reset clears control, samples boot PC and establishes inactive bus/output
 handshakes. FIFO and fetch payload storage remains unreset. Reset may abandon
@@ -167,9 +174,40 @@ compressed strategies and one-halfword/non-power-of-two capacities.
 
 
 The fetch engine bypasses an empty request slot, allowing immediate OBI grant
-on a fresh request. The redirect target remains registered in IF. With no stale
-transaction, immediate grants and next-cycle responses, `fresh_fetch_latency`
-checks target grant in cycle 1 and IF/DE availability in cycle 4 after redirect,
-including a compressed halfword target. Response slots and word FIFO remain
-registered. `idata_latency` checks the corresponding shorter refill behind replay;
-throughput remains one fetched word per cycle after startup.
+on a fresh request. `MUA_REDIRECT_BYPASS` independently combines word-FIFO
+fall-through, same-cycle target admission and live-result forwarding:
+
+| Selection | Grant cycle | One-word target available |
+| --- | --- | --- |
+| `none` (default) | 1 | 4 |
+| `if_buffer` | 1 | 3 |
+| `redirect_request` | 0 | 3 |
+| `if_buffer+redirect_request` | 0 | 2 |
+| `ifetch_result` | 1 | 3 |
+| `if_buffer+ifetch_result` | 1 | 2 |
+| `redirect_request+ifetch_result` | 0 | 2 |
+| `if_buffer+redirect_request+ifetch_result` | 0 | 1 |
+
+The accepted redirect is cycle 0. This assumes immediate grants, next-cycle
+responses, an empty frontend and unchanged privilege/PMP; crossing C32 targets
+add one cycle. Result storage remains registered; `ifetch_result` forwards a
+live response around it only when empty, consuming or capturing it exactly once. `fresh_fetch_latency` checks
+these cases, and `idata_latency` checks refill behind replay. Throughput remains
+one fetched word per cycle after startup.
+
+`redirect_request_permit_i` authorizes an external same-cycle target using
+current privilege/PMP. It is independent of the canceled stream's fetch enable;
+`request_permit_i` still applies. The core grants this only to accepted DE
+corrections. State-changing WB/trap redirects fall back to the registered route.
+Accepted IF predictions may request the target or replay continuation immediately.
+Target alignment and core-owned PMP checks precede bus presentation. A private
+old request may be replaced, a presented one must keep its address through
+grant, and killed responses drain. A bypassed native acceptance advances the
+fetch pointer once, even when grant is delayed.
+
+`ifetch_result` never forwards killed responses or overtakes stored completions.
+A stalled live response is captured and held; global flush masks it immediately,
+whereas local prediction clear leaves the current live token visible until the
+edge. Both data bypasses expose memory data through alignment/decompression and
+prediction before IF/DE; combining request bypass also affects the outgoing
+request timing path. These policies add no instruction queue or pipeline stage.

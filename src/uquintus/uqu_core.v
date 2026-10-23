@@ -31,6 +31,7 @@ module uqu_core #(
     parameter MUA_BTB_IDATA_HWORDS = 0,
     parameter MUA_REGFILE_IMPL = `UQU_RF_FF,
     parameter MUA_IF_BUFFER_WORDS = 2,
+    parameter MUA_REDIRECT_BYPASS = `UQU_REDIRECT_BYPASS_NONE,
     parameter MUA_HARDENED = 0,
     parameter MUA_MUL = `UQU_MUL_ITERATIVE,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
@@ -269,10 +270,13 @@ module uqu_core #(
     uqu_stage_if #(
         .ISA_C(ISA_C), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .MUA_BRANCH_PREDICTOR(MUA_BRANCH_PREDICTOR), .MUA_BP_ENTRIES(MUA_BP_ENTRIES),
-        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_HWORDS(MUA_BTB_IDATA_HWORDS), .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS)
+        .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_HWORDS(MUA_BTB_IDATA_HWORDS),
+        .MUA_IF_BUFFER_WORDS(MUA_IF_BUFFER_WORDS), .MUA_REDIRECT_BYPASS(MUA_REDIRECT_BYPASS)
     ) u_if (
         .clk_i(clk_i), .rst_ni(rst_ni), .boot_addr_i(boot_addr_i), .flush_i(if_flush),
-        .redirect_valid_i(redirect_valid), .redirect_addr_i(redirect_addr), .fetch_enable_i(fetch_enable),
+        .redirect_valid_i(redirect_valid), .redirect_addr_i(redirect_addr),
+        .redirect_request_permit_i(de_fire && de_redirect && !de_exception &&
+            !wb_redirect && !predictor_invalidate && !trap_valid), .fetch_enable_i(fetch_enable),
         .request_permit_i(1'b1), .branch_pending_i(de_control_flow), .permit_i(if_permit),
         .predictor_invalidate_i(predictor_invalidate),
         .predictor_update_valid_i(de_fire && !de_exception), .predictor_update_pc_i(de_pc_q),

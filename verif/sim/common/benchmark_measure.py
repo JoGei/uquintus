@@ -1,4 +1,4 @@
-"""ELF-bound benchmark windows and strict cycle-only CoreMark validation."""
+"""ELF-bound benchmark windows and strict cycle-only workload validation."""
 import re
 
 
@@ -92,6 +92,30 @@ def coremark_result(text, profile, iterations, cycles):
     return dict(profile=profile, iterations=iterations, crc=fields,
                 validation='passed', official_score=False,
                 duration_warning=warning, cycles_per_iteration=cycles / iterations)
+
+
+def benchmark_result(text, benchmark, cycles):
+    """Validate the suite's evidence independently of software completion."""
+    if benchmark['validator'] == 'coremark':
+        return coremark_result(text, benchmark['profile'], benchmark['iterations'], cycles)
+    if benchmark['validator'] != 'embench':
+        raise ValueError('unsupported benchmark validator')
+    expected = {
+        'Embench workload': benchmark['profile'],
+        'Iterations': str(benchmark['iterations']),
+        'Local scale': str(benchmark['local_scale_factor']),
+        'Workload scale': str(benchmark['workload_scale']),
+        'Warmup': str(benchmark['warmup_heat']),
+        'Verified': '1',
+        'Cycles': str(cycles),
+    }
+    if text != ''.join(f'{name}: {value}\n' for name, value in expected.items()):
+        raise ValueError('Embench self-check/workload/timing output differs from requested measurement')
+    return dict(profile=benchmark['profile'], iterations=benchmark['iterations'],
+                validation='passed', verification='upstream verify_benchmark returned 1',
+                official_score=False, arithmetic=benchmark['arithmetic'],
+                local_scale_factor=benchmark['local_scale_factor'],
+                cycles_per_iteration=cycles / benchmark['iterations'])
 
 
 def read_log(image, memory):

@@ -96,7 +96,7 @@ class IfStageTest(uvm_test):
                     exception_tval=original if illegal else 0)
 
     async def cycle(self, grant=None, respond=None, **changes):
-        i = dict(rst_n=1,boot_addr=0x1000,flush=0,redirect_valid=0,redirect_addr=0,
+        i = dict(rst_n=1,boot_addr=0x1000,flush=0,redirect_valid=0,redirect_addr=0,redirect_request_permit=1,
                  fetch_enable=1,request_permit=1,branch_pending=0,permit=1,ready=0,priv_m=1,
                  predictor_invalidate=0,predictor_update_valid=0,predictor_update_pc=0,
                  predictor_update_control_flow=0,predictor_update_conditional=0,
@@ -154,6 +154,10 @@ class IfStageTest(uvm_test):
         assert o['misaligned']==int(bool(misaligned))
         if i['rst_n']:
             assert o['pc']==self.pc,(o,self.pc)
+        if self.params['MUA_REDIRECT_BYPASS'] & 4 and returning and not invalidate:
+            _,epoch,address,_,_ = self.response
+            if epoch==self.epoch:
+                self.complete.add(address)
         expected = self.token() if active and not misaligned else None
         if o['valid']:
             assert active and i['permit'] and expected is not None,('invalid/early delivery',o,expected)
@@ -175,10 +179,21 @@ class IfStageTest(uvm_test):
         replay_start = bool(prediction_redirect and prefix and prediction['target']==predicted_pc)
         pop = transfer and not self.replay and not o['exception_valid'] and (self.pc&~3)!=(o['next_pc']&~3)
         if o['pmp_valid']:
-            assert active and not misaligned and i['fetch_enable']
-            assert self.params['MUA_BRANCH_PREDICTOR']!=0 or not i['branch_pending']
-            assert self.credits-int(pop)<self.depth+3
-            assert o['pmp_addr']==self.fetch_addr and o['pmp_size']==2
+            if invalidate or prediction_redirect:
+                assert self.params['MUA_REDIRECT_BYPASS'] & 2
+                assert i['request_permit']
+                assert (i['redirect_valid'] and i['redirect_request_permit'] and not recover or
+                        prediction_redirect and i['fetch_enable'])
+                target = i['redirect_addr'] if i['redirect_valid'] else predicted_pc + (
+                    sum(map(self.predictor.length,prefix)) if replay_start else 0)
+                assert target % (2 if self.c else 4) == 0
+                assert o['pmp_addr']==(target&MASK)&~3
+            else:
+                assert active and not misaligned and i['fetch_enable']
+                assert self.params['MUA_BRANCH_PREDICTOR']!=0 or not i['branch_pending']
+                assert self.credits-int(pop)<self.depth+3
+                assert o['pmp_addr']==self.fetch_addr
+            assert o['pmp_size']==2
             assert o['pmp_priv_m']==i['priv_m']
             assert not o['exception_valid'],'fetch started past visible contained fault'
         else:
@@ -190,7 +205,7 @@ class IfStageTest(uvm_test):
             self.complete.clear()
             self.credits = 0
             self.fault_hold = False
-            self.bus_owners = deque(list(self.bus_owners)[:1] if req else [])
+            self.bus_owners = deque(list(self.bus_owners)[:1] if self.previous_bus is not None else [])
             if not i['rst_n']:
                 self.pc = i['boot_addr']
                 self.fetch_addr = self.pc&~3
@@ -210,7 +225,7 @@ class IfStageTest(uvm_test):
                 self.live.clear()
                 self.complete.clear()
                 self.credits = 0
-                self.bus_owners = deque(list(self.bus_owners)[:1] if req else [])
+                self.bus_owners = deque(list(self.bus_owners)[:1] if self.previous_bus is not None else [])
                 self.replay = prefix if replay_start else []
                 continuation = predicted_pc + (sum(map(self.predictor.length,prefix)) if replay_start else 0)
                 self.fetch_addr = (continuation&MASK)&~3
@@ -228,23 +243,23 @@ class IfStageTest(uvm_test):
                 else:
                     self.delivered.append((self.pc,o['original_instr'],o['compressed'],o['instr']))
                     self.pc = predicted_pc
-            if o['pmp_valid']:
-                address = o['pmp_addr']
-                self.accepted.append(address)
-                self.live[address] = self.memory(address),int(not allowed or address in self.errors)
-                self.credits += 1
-                self.fetch_addr = (address+4)&MASK
-                if allowed:
-                    self.bus_owners.append((self.epoch,address,self.memory(address),int(address in self.errors)))
-                else:
-                    self.complete.add(address)
+        if o['pmp_valid']:
+            address = o['pmp_addr']
+            self.accepted.append(address)
+            self.live[address] = self.memory(address),int(not allowed or address in self.errors)
+            self.credits += 1
+            self.fetch_addr = (address+4)&MASK
+            if allowed:
+                self.bus_owners.append((self.epoch,address,self.memory(address),int(address in self.errors)))
+            else:
+                self.complete.add(address)
         assert 0<=self.credits<=self.depth+3
         if not i['rst_n']:
             self.response = None
         else:
             if returning:
                 _,epoch,address,_,_ = self.response
-                if epoch==self.epoch:
+                if epoch==self.epoch and address in self.live:
                     self.complete.add(address)
                 self.response = None
             elif self.response is not None and self.response[0]>0:

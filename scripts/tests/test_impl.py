@@ -60,6 +60,9 @@ class ImplementationTests(unittest.TestCase):
             self.assertEqual(summary['metrics']['hold_worst_slack'],-0.1)
             self.assertEqual(summary['metrics']['slew_violations'],2)
             self.assertEqual(summary['paths']['full_max']['startpoint'],'boot_addr_i[0]')
+            self.assertEqual(summary['regions']['status'],'not_recorded')
+            (folder/'regions.tsv').write_text('status\tnot_applicable\n')
+            self.assertEqual(flow.timing_summary(root,'placed_pre_cts',20)['regions']['status'],'not_applicable')
             with self.assertRaisesRegex(ValueError,'clock period'):
                 flow.timing_summary(root,'placed_pre_cts',10)
             for changed in [lines[:-1],[line.replace('full\tmax\t4','full\tmax\t3') for line in lines],
@@ -85,6 +88,39 @@ class ImplementationTests(unittest.TestCase):
             self.assertEqual(json.loads((folder/'cells.json').read_text())['gate'],3)
             (folder/'placement_violations.txt').write_text('1\n')
             with self.assertRaises(ValueError): flow.placed_metrics(root,modules)
+
+    def test_stage_paths_require_complete_scopes_and_auditable_register_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);folder=root/'timing/mapped_preplacement';folder.mkdir(parents=True)
+            values=dict(clock_period_ns=20,minimum_clock_period=16,estimated_fmax=62.5,
+                        setup_worst_slack=4,hold_worst_slack=0.1,setup_total_negative_slack=0,
+                        slew_violations=0,capacitance_violations=0,fanout_violations=0)
+            (folder/'metrics.tsv').write_text(''.join(f'{k}\t{v}\n' for k,v in values.items()))
+            (folder/'clock.txt').write_text('core_clk\n')
+            (folder/'regions.tsv').write_text('status\tavailable\n'+
+                ''.join(f'{r}\t{int(r in ("IF","DE"))}\n' for r in flow.TIMING_REGIONS))
+            inventory=folder/'register_regions.tsv'
+            inventory.write_text('IF\tu_pc\tu_if.pc_q\nDE\tu_de\tde_pc_q\n')
+            scopes=[*flow.TIMING_SCOPES,*('stage_'+r for r in flow.TIMING_REGIONS),
+                    *('stage_'+a+'_to_'+b for a in flow.TIMING_REGIONS for b in flow.TIMING_REGIONS)]
+            lines=[]
+            for scope in scopes:
+                for delay,slack in (('max',4),('min',0.1)):
+                    lines.append(f'{scope}\t{delay}\t{slack}\tu_pc/Q\tu_de/D' if scope in
+                                 ('full','stage_DE','stage_IF_to_DE') else f'{scope}\t{delay}\tno_paths')
+            paths=folder/'paths.tsv';paths.write_text('\n'.join(lines)+'\n')
+            summary=flow.timing_summary(root,'mapped_preplacement',20)
+            self.assertEqual(summary['regions']['register_cells']['IF'],1)
+            self.assertEqual(summary['paths']['stage_IF_to_DE_max']['slack_ns'],4)
+            self.assertEqual(summary['paths']['stage_WB_max']['status'],'no_paths')
+            metrics=flow.scoped_timing_metrics(summary)
+            self.assertEqual(metrics[0]['name'],'stage_DE_setup_worst_slack')
+            self.assertNotIn('stage_WB_setup_worst_slack',[m['name'] for m in metrics])
+            paths.write_text('\n'.join(lines[:-1])+'\n')
+            with self.assertRaisesRegex(ValueError,'Incomplete'): flow.timing_summary(root,'mapped_preplacement',20)
+            paths.write_text('\n'.join(lines)+'\n')
+            inventory.write_text('IF\tu_pc\tu_if.pc_q\n')
+            with self.assertRaisesRegex(ValueError,'counts disagree'): flow.timing_summary(root,'mapped_preplacement',20)
 
 
 if __name__=='__main__': unittest.main()

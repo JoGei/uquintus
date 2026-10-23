@@ -211,6 +211,7 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_BTB_IDATA_HWORDS` | Halfwords of payload per target entry, `0` through `2048`; zero disables payload/fill/replay state. Must be even without C. C automatically packs original encodings; retained instruction count varies. Inactive without prediction and BTB. | `0` |
 | `MUA_REGFILE_IMPL` | `ff`: flip-flop storage; `latch`: latch storage. | `ff` |
 | `MUA_IF_BUFFER_WORDS` | Integer capacity of at least `2` in 32-bit fetch words; non-power-of-two capacities supported. | `2` |
+| `MUA_REDIRECT_BYPASS` | `none` or canonical `+` combinations of `if_buffer`, `redirect_request`, and `ifetch_result`: independently select word-FIFO fall-through, same-cycle target requests, and empty-result-queue response fall-through. All eight choices are defined in Section 15.4. | `none` |
 | `MUA_HARDENED` | `0`: no OBI parity/checksum generation/checking requirement; `1`: planned hardened implementation including OBI parity/checksum generation and checking on both ports; enabled setting unsupported until implemented. | `0` |
 | `MUA_MUL` | `parallel`, `parallel+stages+2`, or `iterative`; iterative unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
 | `MUA_DIV` | `iterative`; unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
@@ -3101,7 +3102,7 @@ The [decompressor/strategy guide](../verif/sim/decompressor/README.md),
 `src/uquintus/uqu_ifetch.v` is the IF-owned, read-only word transaction engine.
 Its [component guide](../verif/sim/ifetch/README.md) defines exact ports and
 timing. It owns a private request holding register with a combinational bypass,
-one granted transaction and two registered completion slots, not the prefetch buffer, instruction aligner or
+one granted transaction and two completion slots with optional empty-queue fall-through, not the prefetch buffer, instruction aligner or
 core-parent IF/DE register. It has no ISA, prediction,
 PMP or compressed-decode parameters.
 
@@ -3128,7 +3129,8 @@ acceptance remains distinct from OBI grant and from instruction retirement.
 This aligns imem and dmem request presentation: both support combinational
 request/grant and retain stalled payloads through ordinary flush. IF keeps its
 registered redirect/fetch pointer, registered response slots and downstream word
-FIFO. The idle imem address is unspecified and shall not be forced to zero by
+FIFO. Section 15.4 optionally bypasses the redirect pointer and word storage,
+and optionally forwards an arriving response around an empty result queue. The idle imem address is unspecified and shall not be forced to zero by
 request masking. Interface timing shall account for the new combinational
 address/protection/request path.
 
@@ -3140,7 +3142,8 @@ shall be reserved, grant/response waits shall have no timeout, and each response
 shall be captured regardless of consumer readiness. `res_valid_o`, aligned
 `res_addr_o`, `res_data_o` and `res_error_o` shall retain the completion until
 consumed or discarded. Bus errors shall be sampled only with response valid;
-there shall be no combinational response-data bypass. Data shall be zero on
+response-data fall-through shall be enabled only by the `ifetch_result` policy
+in Section 15.4. Data shall be zero on
 an error, and all result fields zero while invalid.
 
 Flush shall cancel private permission waits or retained results, but an already
@@ -3252,22 +3255,129 @@ This supersedes the initial implicit single-slot reservation scheme.
 
 The response of one granted transaction may overlap the next request's grant
 on the same edge, preserving the limit of one granted transaction awaiting a
-response. Both completion slots shall be registered; there shall be no external
-response-data bypass. Under immediate grants, one-cycle responses, permission
+response. Completion storage shall remain registered; `ifetch_result` may
+forward a live response only when that storage is empty. Under immediate grants, one-cycle responses, permission
 and continuous delivery, IF shall sustain one fetched word per cycle after
 startup. Initial fetch latency and variable-latency memory behavior remain
 separate from this throughput requirement. A response-valid-to-request control
 path is permitted for turnover and shall be covered by integration timing.
 
-For an empty frontend immediately after a redirect, with permission, immediate
-grant, a next-cycle response and no stale transaction to drain, the target
-request shall be granted in cycle 1 after the redirect. Response capture occurs
-in cycle 2, transfer into the word FIFO in cycle 3, and a one-word instruction
-is available for IF/DE acceptance in cycle 4. This removes one cycle relative
-to mandatory request capture. A crossing 32-bit compressed-mode instruction may
-need another word; memory stalls and old-path draining can extend refill.
+`MUA_REDIRECT_BYPASS` shall select these independently combinable policies:
+
+| YAML selector | RTL encoding | Word-FIFO bypass | Same-cycle redirect request | Result bypass |
+| --- | --- | --- | --- | --- |
+| `none` | 0 | Disabled | Disabled | Disabled |
+| `if_buffer` | 1 | Enabled | Disabled | Disabled |
+| `redirect_request` | 2 | Disabled | Enabled | Disabled |
+| `if_buffer+redirect_request` | 3 | Enabled | Enabled | Disabled |
+| `ifetch_result` | 4 | Disabled | Disabled | Enabled |
+| `if_buffer+ifetch_result` | 5 | Enabled | Disabled | Enabled |
+| `redirect_request+ifetch_result` | 6 | Disabled | Enabled | Enabled |
+| `if_buffer+redirect_request+ifetch_result` | 7 | Enabled | Enabled | Enabled |
+
+Default to `none` and reject other values. Numeric encodings and Verilog macros
+shall come from the shared selector catalog. Bit 0 enables the word bypass,
+bit 1 the request bypass, and bit 2 the result bypass. Canonical YAML ordering
+is `if_buffer`, then `redirect_request`, then `ifetch_result`; absent policies
+are omitted. Modes 4–7 enable the result bypass independently of the other two.
+The IF-owned `uqu_if_bypass` shall wrap the unchanged FIFO; its policy bit
+exposes an ifetch completion directly
+when the first word window is empty. With exactly one stored word, the incoming
+completion may also supply the second window for a crossing RV32C instruction.
+The word-delivery policy shall be independent of C and predictor settings and
+apply to every eligible gap including boot/refill.
+
+A live head consumed on the current edge shall not also be inserted into the
+FIFO. A live head that is not fully consumed shall be retained with its
+address/data/error, including a low-half C instruction or a downstream stall.
+A live second word shall be stored even when the old head is removed, retaining
+its remaining halfword after a crossing instruction. Input readiness shall
+remain the FIFO's capacity/qualified-pop handshake; bypass must not overrun a
+full queue. Reset/global flush shall mask live outputs, while synchronous
+prediction clear shall allow the transferring token to remain visible before
+discarding old stream state at the edge. Error words shall expose zero data.
+The wrapper shall add no sequential state or FIFO slots.
+
+The fetch engine shall distinguish global `flush_i`, which immediately masks
+result validity, from local synchronous `clear_i`, which cancels
+old work at the edge while leaving the current stored or live result visible.
+IF shall assert that clear for an accepted predicted redirect. This breaks a
+potential valid→prediction→flush→valid combinational loop when the instruction
+uses a live word window. Both invalidations shall preserve presented requests
+through grant and discard killed responses; reset shall retain highest priority.
+With `ifetch_result` enabled, an arriving response from the live, non-killed
+pending transaction shall supply result validity, address, data and error in the
+same cycle when the registered result queue is empty. It shall not overtake a
+stored head, even when that head is popped now. A live result consumed on the
+edge shall not be stored or advance queue pointers; a blocked live result shall
+be captured once and remain stable until consumption. Bus errors shall zero
+data. PMP-generated denials remain registered and shall never touch OBI.
+
+Global flush/reset shall suppress live validity, and killed old responses shall
+never be offered. Local clear shall not combinationally mask a live head: that
+head may cause its own prediction clear. At the edge, clear cancels old storage
+and responses while `replace_i` separately identifies new-stream requests.
+An old live response may be consumed/discarded while a new target is granted on
+the same edge, preserving generation ownership and one outstanding transaction.
+Reservation/count updates shall subtract only stored pops and enqueue only
+responses not consumed live. Backpressure shall never require holding OBI's
+unbackpressurable response externally or add result storage slots.
+
+With `redirect_request` enabled, IF shall offer the aligned target during an
+accepted redirect, rather than waiting for the fetch pointer's register edge.
+Local accepted IF predictions use their predicted target, or the aligned
+continuation following an available replay prefix. External redirects require
+`redirect_request_permit_i` from the parent. The core shall assert it only for
+accepted DE corrections with unchanged privilege/PMP state, excluding older
+WB recovery, traps and predictor invalidation. Trap, MRET, FENCE.I and PMP-write
+recovery retain the registered route, so new state is visible before the check.
+An accepted external redirect authorizes the replacement independently of the
+old stream's `fetch_enable_i`; `request_permit_i` and target alignment still
+apply. Misaligned targets shall produce the normal contained alignment fault,
+without issuing a target-word request on this path.
+
+The core-owned PMP shall check the replacement word with current fetch privilege
+before bus presentation. `uqu_ifetch.replace_i`, together with flush/clear,
+identifies `req_*` as new-stream work: cancel private old requests and old
+completions, but never replace an old presented request before grant. An old
+request granted on the redirect edge may free the holding slot for the new
+request; its response must drain before the new bus transaction. A granted old
+response may overlap a new target grant. A new ungranted request must retain
+its address and protection decision through later redirects. Denied targets
+shall queue registered errors and never assert a bus request. The fetch pointer
+advances past a bypassed target only on native acceptance, avoiding duplicate
+requests; if the slot is unavailable, normal post-redirect fetching retries it.
+
+For an empty frontend, unchanged privilege/PMP, immediate grants, next-cycle
+responses and no old transaction to drain, count the accepted redirect as cycle
+0. Measured one-word target availability at IF/DE is:
+
+| Policy | Target grant | Response arrival | Target available |
+| --- | --- | --- | --- |
+| `none` | 1 | 2 | 4 |
+| `if_buffer` | 1 | 2 | 3 |
+| `redirect_request` | 0 | 1 | 3 |
+| `if_buffer+redirect_request` | 0 | 1 | 2 |
+| `ifetch_result` | 1 | 2 | 3 |
+| `if_buffer+ifetch_result` | 1 | 2 | 2 |
+| `redirect_request+ifetch_result` | 0 | 1 | 2 |
+| `if_buffer+redirect_request+ifetch_result` | 0 | 1 | 1 |
+
+A crossing C32 target needs the second word and adds one cycle under continuous
+next-cycle responses. Compressed halfword targets do not. Memory waits, an old
+presented request, or a state-changing redirect can extend these timings.
+The request bypass adds a path through DE resolution/target selection, PMP and
+OBI request qualification. This requires mapped and physical timing assessment;
+it does not promise unchanged frequency. With result bypass alone, the live
+external response terminates at the registered word FIFO. Combining result and
+word bypasses extends that input path through alignment, optional decompression
+and prediction to IF/DE; adding request bypass may extend control to a new OBI
+request. IF/DE remains an architectural pipeline boundary in every mode.
 BTB replay may hide some or all refill latency, so its halfword budget should
 be measured again rather than reduced unconditionally.
+The [result-bypass study](../impl/asic/orfs/investigations/ifetch-result-bypass.md)
+records all-eight-mode verification, same-ELF cycle/CPI comparisons and mapped
+timing with the final response bypass.
 The [request-bypass study](../impl/asic/orfs/investigations/ifetch-request-bypass.md)
 records the controlled RV32IMC comparison and Sky130 halfword-budget results.
 
@@ -3300,29 +3410,31 @@ PMP remains the one core-owned checker.
 
 `src/uquintus/uqu_stage_if.v` shall own the frontend instruction PC, sequential
 word-fetch pointer, run state, fault-delivery containment and instances of
-`uqu_ifetch`, `uqu_if_buffer`, `uqu_if_aligner`, `uqu_bpu` and, when selected, the IF
+`uqu_ifetch`, `uqu_if_bypass` (owning `uqu_if_buffer`), `uqu_if_aligner`, `uqu_bpu` and, when selected, the IF
 decompressor. It shall not own the IF/DE register, current privilege, PMP state
 or checker, global event arbitration, architectural trap entry or DE branch
 execution. The [stage guide](../verif/sim/if/README.md) defines exact ports and
 tests. Its parameters shall be `ISA_C`, both compressed strategy selectors,
 `MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES`,
-`MUA_BTB_IDATA_HWORDS` and `MUA_IF_BUFFER_WORDS`. Optional `uqu_if_replay`
+`MUA_BTB_IDATA_HWORDS`, `MUA_IF_BUFFER_WORDS` and `MUA_REDIRECT_BYPASS`. Optional `uqu_if_replay`
 provides the protected cached instruction source defined in Section 5.2.
 
 Each active reset edge shall establish a running frontend at the aligned
 `boot_addr_i` under the core boot contract. Later boot-input changes shall not
 redirect it. An accepted `redirect_valid_i` shall immediately suppress old
-delivery and new native acceptance, invalidate the buffer/fetch engine and
+delivery and old-stream native acceptance, invalidate the buffer/fetch engine and
 install `redirect_addr_i` as the instruction PC with its containing word as
-the fetch pointer. Repeated redirects shall replace that target while old bus
+the fetch pointer (advanced by four if its new-stream request was accepted
+on that edge under Section 15.4). Repeated redirects shall replace that target while old bus
 work drains. A plain `flush_i` shall invalidate and stop until a redirect, so
 it cannot resume an unspecified old stream. Reset shall take priority over
 redirect, redirect over plain flush, and all over ordinary transfers. A
 presented request shall still retain its address through grant and drain under
 Section 15.2; replacement native acceptance shall wait for engine readiness.
 
-`fetch_enable_i` shall control new native acceptance and presentation of private
-requests, independently of downstream readiness. `request_permit_i` shall add
+`fetch_enable_i` shall control ordinary new native acceptance and presentation of private
+requests, independently of downstream readiness. An explicitly authorized
+external redirect-request bypass is the Section 15.4 exception. `request_permit_i` shall add
 private bus-presentation permission, without preventing native PMP denial.
 Neither shall retract a presented request. In `none` mode, `branch_pending_i`
 shall likewise stop new requests/private presentation for a recognized unresolved

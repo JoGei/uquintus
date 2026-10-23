@@ -1,10 +1,14 @@
 top_module: uqu_ifetch
 bender_target: ifetch
 test_module: test_uqu_ifetch
-parameters: []
+parameters:
+  - MUA_REDIRECT_BYPASS
 tests:
   - directed
   - randomized
   - control
   - streaming
   - pipelined_flush
+  - clear
+  - replace
+  - fallthrough

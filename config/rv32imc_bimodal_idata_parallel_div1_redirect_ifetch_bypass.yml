@@ -1,0 +1,46 @@
+# RV32IMC: BP16/BTB16, six packed halfwords per target, IF decompression.
+# Dedicated single-cycle parallel MUL; iterative DIV with no unrolling.
+# DIV executes two setup, 32 iteration and one completion cycles.
+# Compile-time integration identity; single-hart systems use zero.
+HART_ID: 0
+ISA_E: 0
+ISA_M: 1
+ISA_C: 1
+ISA_ZFINX: 0
+ISA_F: 0
+ISA_A: 0
+ISA_UMODE: 1
+ISA_ZIFENCEI: 0
+ISA_PMP: 0
+MUA_FORWARDING: 1
+MUA_FORWARD_EX_TO_DE: 1
+MUA_FORWARD_MEM_TO_DE: 1
+MUA_FORWARD_MEM_TO_EX: 1
+MUA_FORWARD_WB_TO_EX: 1
+MUA_DE_OPERAND_RETENTION: 0
+MUA_C_IMPL: decompress
+MUA_C_DECOMPRESS_STAGE: if
+MUA_BRANCH_PREDICTOR: bimodal
+MUA_BP_ENTRIES: 16
+MUA_BTB: direct_mapped
+MUA_BTB_ENTRIES: 16
+MUA_BTB_IDATA_HWORDS: 6
+MUA_REGFILE_IMPL: ff
+MUA_IF_BUFFER_WORDS: 2
+MUA_REDIRECT_BYPASS: redirect_request+ifetch_result
+MUA_HARDENED: 0
+MUA_MUL: parallel
+MUA_DIV: iterative
+MUA_MULDIV_ITERUNROLL: 1
+XIF: 0
+XIF_NUM_RS: 3
+XIF_DUALWRITE: 0
+DEBUG: 0
+
+# FPU implementation settings (inactive when ISA_ZFINX=0).
+MUA_FPU_PIPE_REGS_FMA: 2
+MUA_FPU_PIPE_REGS_DIVSQRT: 0
+MUA_FPU_PIPE_REGS_NONCOMP: 0
+MUA_FPU_PIPE_REGS_CONV: 1
+MUA_FPU_PIPE_CONFIG: distributed
+MUA_FPU_DIVSQRT: th32

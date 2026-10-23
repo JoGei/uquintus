@@ -11,6 +11,7 @@ parameters:
   - MUA_BTB_IDATA_HWORDS
   - MUA_BTB_ENTRIES
   - MUA_IF_BUFFER_WORDS
+  - MUA_REDIRECT_BYPASS
 tests:
   - stream
   - control

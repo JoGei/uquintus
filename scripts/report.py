@@ -200,6 +200,7 @@ def normalize(path, build, root, hashes):
         raise ValueError('comparison context must be an object')
     digest(context)  # Reject non-finite/non-JSON comparison keys before grouping.
     timing_paths=raw.get('timing_paths')
+    timing_regions=raw.get('timing_regions',{})
     # Flow artifacts may be produced incrementally; older records need not
     # duplicate the scoped paths already retained in their stage summary.
     if timing_paths is None and native and context.get('stage') in ('mapped_preplacement','placed_pre_cts'):
@@ -209,6 +210,7 @@ def normalize(path, build, root, hashes):
             if observation.get('stage')!=context['stage']:
                 raise ValueError('Timing artifact stage disagrees with run context')
             timing_paths=observation.get('paths')
+            timing_regions=observation.get('regions',{})
     if timing_paths is None: timing_paths={}
     if not isinstance(timing_paths,dict): raise ValueError('timing_paths must be an object')
     for scope,timing_path in timing_paths.items():
@@ -218,6 +220,12 @@ def normalize(path, build, root, hashes):
                 not math.isfinite(timing_path['slack_ns']) or any(not isinstance(timing_path.get(k),str) or not timing_path[k]
                 for k in ('startpoint','endpoint'))):
             raise ValueError('Timed paths require finite slack_ns and nonempty endpoints')
+    if not isinstance(timing_regions,dict): raise ValueError('timing_regions must be an object')
+    if timing_regions.get('status')=='available':
+        counts=timing_regions.get('register_cells',{})
+        if (not isinstance(counts,dict) or set(counts)!=set(('IF','DE','EX','MEM','WB','CORE')) or
+                any(type(n) is not int or n<0 for n in counts.values()) or not sum(counts.values())):
+            raise ValueError('Invalid stage register counts')
     metrics = raw.get('metrics', []) if native else []
     if not isinstance(metrics, list):
         raise ValueError('metrics must be a list')
@@ -243,7 +251,8 @@ def normalize(path, build, root, hashes):
         'selection': raw.get('selection', raw.get('test', path.parent.name)),
         'seed': raw.get('seed'), 'timestamp': timestamp, 'time': utc(timestamp),
         'time_basis': time_basis, 'source': rel, 'context': context,
-        'metrics': list(metrics), 'timing_paths':timing_paths, 'cases': [], 'notes': [], 'artifacts': [],
+        'metrics': list(metrics), 'timing_paths':timing_paths, 'timing_regions':timing_regions,
+        'cases': [], 'notes': [], 'artifacts': [],
         'revision': raw.get('revision'),
         'tools': {k: raw[k] for k in ('simulator', 'bender', 'compiler', 'compiler_info', 'host_compiler', 'upstream', 'packages', 'reference') if k in raw},
         'workload': raw.get('workload', raw.get('elf', {}).get('sha256')),
@@ -336,9 +345,9 @@ def normalize(path, build, root, hashes):
                 record['notes'].append('Invalid BPU measurement evidence: ' + str(error))
         record['notes'].append('Cycle-only RTL benchmark; no official benchmark score or silicon execution time is claimed.')
         if context.get('execution_mode') == 'fast':
-            record['notes'].append('Fast native execution: workload CRC, completion, trap/watchdog and timer-window checks; no per-instruction ISA/RVFI checking.')
+            record['notes'].append('Fast native execution: workload self-check, completion, trap/watchdog and timer-window checks; no per-instruction ISA/RVFI checking.')
         elif context.get('execution_mode') == 'checked':
-            record['notes'].append('Checked execution: instruction oracle, RVFI, per-edge counters and workload CRC checks.')
+            record['notes'].append('Checked execution: instruction oracle, RVFI, per-edge counters and workload self-checks.')
     offload = path.parent / 'xif-agent.json'
     if offload.is_file():
         evidence = read_json(offload)
@@ -591,17 +600,39 @@ Component-only experiments remain available on the component regression and run-
         labels=dict(full='All constrained paths',reg_to_reg='Internal: register to register',
                     input_to_reg='Interface: input to register',reg_to_output='Interface: register to output',
                     input_to_output='Interface: input to output')
+        regions=('IF','DE','EX','MEM','WB','CORE')
+        labels.update({'stage_'+region:'Internal: capture in '+region for region in regions})
+        stage_rows=[]
+        timing_artifacts={a['path']:a.get('href') for a in r['artifacts']}
         for scope,path in r['timing_paths'].items():
             name,_,delay=scope.rpartition('_')
             check={'max':'Setup','min':'Hold'}.get(delay,delay)
+            detail=timing_artifacts.get(f'timing/{r["context"].get("stage","")}/{scope}.rpt')
+            check_html=f'<a href="../{esc(detail)}">{esc(check)}</a>' if detail else esc(check)
             if path['status']=='timed':
                 cells=f'<td>{esc(path["startpoint"])}</td><td>{esc(path["endpoint"])}</td><td>{path["slack_ns"]:.6g}</td>'
             else: cells='<td colspan="3">No constrained paths</td>'
-            timing_rows.append(f'<tr><td>{esc(labels.get(name,name))}</td><td>{esc(check)}</td>{cells}</tr>')
+            row=f'<tr><td>{esc(labels.get(name,name))}</td><td>{check_html}</td>{cells}</tr>'
+            if name.startswith('stage_') and '_to_' in name:
+                launch,capture=name.removeprefix('stage_').split('_to_',1)
+                stage_rows.append(row.replace(esc(name),esc(launch+' → '+capture),1))
+            else:
+                timing_rows.append(row)
         timing=('''<h2>Critical timing paths</h2><p>Slacks use the recorded constraints and stage.
 Internal paths are a diagnostic; the full-interface result remains the frequency reference.</p>
 <div class="table-scroll"><table><thead><tr><th>Scope</th><th>Check</th><th>Startpoint</th><th>Endpoint</th><th>Slack (ns)</th></tr></thead>
 <tbody>'''+''.join(timing_rows)+'</tbody></table></div>') if timing_rows else ''
+        if stage_rows:
+            counts=r['timing_regions'].get('register_cells',{})
+            inventory=', '.join(f'{region}: {counts[region]}' for region in regions if region in counts)
+            timing+='''<h2>Pipeline register regions</h2><p>Stage rows above select internal paths ending in that region,
+from any register. Parent-owned pipeline input registers belong to their receiving stage;
+local state follows the stage instance. CORE includes shared state, unmatched names and mixed aliases.
+These endpoint regions do not partition combinational logic: forwarding and control can cross stages.
+No timing exceptions or optimization groups are added.</p><p>Register-cell inventory: '''+esc(inventory)+'''</p>
+<details><summary>Launch → capture paths: setup and hold, including intra-region paths</summary>
+<div class="table-scroll"><table><thead><tr><th>Register regions</th><th>Check</th><th>Startpoint</th><th>Endpoint</th><th>Slack (ns)</th></tr></thead>
+<tbody>'''+''.join(stage_rows)+'''</tbody></table></div></details>'''
         bpu = bpu_section(r.get('bpu_statistics'))
         artifacts = ''.join(f'<li>{esc(a["path"])} · {a["bytes"]:,} bytes · ' +
                             (f'<a href="../{a["href"]}">open artifact</a>' if 'href' in a else esc(a.get('omitted', 'not bundled'))) + '</li>' for a in r['artifacts'])

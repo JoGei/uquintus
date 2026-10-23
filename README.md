@@ -32,7 +32,7 @@ flowchart TB
             direction LR
             subgraph IF["IF · fetch"]
                 direction TB
-                FETCH["Fetch engine<br/>Word FIFO · aligner"]
+                FETCH["Fetch engine · optional request/result bypass<br/>Word FIFO · optional bypass · aligner"]
                 C_IF["Optional C expansion<br/>IF placement"]
                 BP["Optional direction predictor<br/>Bimodal · 2-bit counters"]
                 BTB["Optional branch target buffer<br/>Direct mapped · optional instruction data"]
@@ -192,6 +192,7 @@ destination; the secondary waits for register-file visibility. See the
 | Core XIF lifetime control | [uqu_xif_ctrl.v](src/uquintus/uqu_xif_ctrl.v) | [ID reservation, cleanup and core tests](verif/sim/xif_ctrl/README.md) |
 | Instruction-fetch stage | [uqu_stage_if.v](src/uquintus/uqu_stage_if.v) | [IF interface and tests](verif/sim/if/README.md) |
 | Instruction-word fetch engine | [uqu_ifetch.v](src/uquintus/uqu_ifetch.v) | [Ifetch interface and tests](verif/sim/ifetch/README.md) |
+| IF word-buffer bypass policy | [uqu_if_bypass.v](src/uquintus/uqu_if_bypass.v) | [Configurable word delivery and tests](verif/sim/if_bypass/README.md) |
 | Instruction selection and alignment | [uqu_if_aligner.v](src/uquintus/uqu_if_aligner.v) | [Aligner interface and tests](verif/sim/if_aligner/README.md) |
 | Fetched-word buffer | [uqu_if_buffer.v](src/uquintus/uqu_if_buffer.v) | [Buffer interface and tests](verif/sim/if_buffer/README.md) |
 | Compressed-instruction expander | [uqu_decompressor.v](src/uquintus/uqu_decompressor.v) | [Decompressor interface and tests](verif/sim/decompressor/README.md) |
@@ -312,26 +313,34 @@ Compiler discovery uses `RISCV_CC`, `$RISCV/bin` or `PATH`; GCC/Clang identity,
 version and effective target are recorded in reports. Use `RISCV_TESTS` for a
 partial selection and `CONFIG=rv32im`/`rv32ic` for implemented M/C cases.
 
-The [benchmark ports](verif/sw/benchmark/README.md) initially provide CoreMark
-with both standard seed profiles, pinned source archives and no submodules:
+The [benchmark ports](verif/sw/benchmark/README.md) provide CoreMark's two seed
+profiles and all 19 Embench-IoT 1.0 workloads, with pinned archives and no submodules:
 
 ```sh
 make benchmark-fetch
 make benchmark CONFIG=rv32i
+make benchmark-fetch BENCHMARK=embench/embench-iot
+make benchmark BENCHMARK=embench/embench-iot CONFIG=rv32imc_bimodal_idata_unroll32
 make report
 ```
 
 Ports and software/memory settings live in `verif/sw/benchmark/<suite>/`.
-The default one-iteration runs validate CRCs and report workload cycles,
+The default runs validate workload self-checks and report workload cycles,
 instructions, CPI and footprint using deterministic memory timing. They are
-cycle-only RTL measurements; official CoreMark scores are not claimed. See the
+cycle-only RTL measurements; official benchmark scores are not claimed. See the
 [CoreMark guide](verif/sw/benchmark/coremark/README.md) for compiler requirements,
-measurement boundaries and artifacts.
+measurement boundaries and artifacts, and the
+[Embench guide](verif/sw/benchmark/embench/embench-iot/README.md) for full suite
+coverage, software floating-point execution and the RV32IMC BP16/BTB16/H6 preset
+with fully unrolled iterative MUL/DIV.
 
 Benchmarks default to `BENCHMARK_MODE=fast`, a native Verilator C++ driver
 without cocotb/pyuvm, VPI or instruction tracing during execution. Use
 `BENCHMARK_MODE=checked` for the full instruction/RVFI/counter verification path.
-Both modes validate the workload CRCs and preserve the same memory/timer contract.
+Both modes validate the workload self-checks and preserve the same memory/timer contract.
+Optional `BENCHMARK_TRACE=1` retains fast-mode retirement records for
+[prediction diagnostics](verif/sw/benchmark/embench/embench-iot/README.md#prediction-diagnostics),
+including first-kernel versus steady-state history reuse and finite table models.
 
 Compressed decoding uses `MUA_C_IMPL: decompress | decode_compressed` and, for
 decompression, `MUA_C_DECOMPRESS_STAGE: if | de`. The three `rv32ic*` profiles

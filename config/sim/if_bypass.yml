@@ -1,0 +1,11 @@
+top_module: uqu_if_bypass
+bender_target: if_bypass
+test_module: test_uqu_if_bypass
+parameters:
+  - MUA_IF_BUFFER_WORDS
+  - MUA_REDIRECT_BYPASS
+tests:
+  - directed
+  - randomized
+  - control
+  - live_words

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "name": "embench-iot",
+  "release": "embench-1.0",
+  "repository": "https://github.com/embench/embench-iot",
+  "revision": "0466a18e4f6b47e19598d7c6ba72916d54b68f65",
+  "archive_url": "https://codeload.github.com/embench/embench-iot/tar.gz/0466a18e4f6b47e19598d7c6ba72916d54b68f65",
+  "archive_sha256": "d836bb4afc47bccc5195fd00faa0f1f2f1b608211df74c35aa7985469e3c17f6",
+  "exclude_paths": [
+    "config/native/chips/default"
+  ]
+}

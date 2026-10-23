@@ -28,6 +28,8 @@ BENCHMARK ?= coremark
 BENCHMARK_PROFILE ?= all
 BENCHMARK_ARCHIVE ?=
 BENCHMARK_MODE ?= fast
+BENCHMARK_REUSE_SUITE ?=
+BENCHMARK_TRACE ?= 0
 
 .PHONY: help test sim lint synth impl sw benchmark-fetch benchmark-build benchmark-run benchmark riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests config-label report test-report test-runner clean
 
@@ -47,9 +49,12 @@ help:
 	@echo 'make test COMPONENT=core_elf ELF=<path> [CONFIG=rv32i] [MAX_CYCLES=100000]'
 	@echo 'make riscv-tests-fetch [RISCV_TESTS_ARCHIVE=<offline-tar.gz>]'
 	@echo 'make riscv-tests [CONFIG=rv32i] [RISCV_TESTS=all|rv32ui-p-add,...]'
-	@echo 'make benchmark-fetch [BENCHMARK=coremark] [BENCHMARK_ARCHIVE=<offline-tar.gz>]'
+	@echo 'make benchmark-fetch [BENCHMARK=coremark|embench/embench-iot] [BENCHMARK_ARCHIVE=<offline-tar.gz>]'
 	@echo 'make benchmark [CONFIG=rv32i] [BENCHMARK=coremark] [BENCHMARK_PROFILE=all|performance|validation]'
 	@echo '               [BENCHMARK_MODE=fast|checked] [JOBS=4]; fast uses a native Verilator driver.'
+	@echo 'Embench: BENCHMARK=embench/embench-iot BENCHMARK_PROFILE=all|<workload>[,<workload>...]'
+	@echo 'Use benchmark-run BENCHMARK_REUSE_SUITE=<built-suite.json> to hold ELFs fixed across MUA changes.'
+	@echo 'BENCHMARK_TRACE=1 optionally retains fast-mode retirement records for prediction diagnostics.'
 	@echo 'Benchmark settings/ports: verif/sw/benchmark/<name>/; compiler and simulator supplied externally.'
 	@echo 'Add REFERENCE=spike to ELF tests or riscv-tests for differential checking.'
 	@echo 'make sw SW=traps  # Declared exceptions, MRET and optional M/U transitions'
@@ -91,7 +96,8 @@ benchmark benchmark-run:
 	$(PYTHON) verif/sim/common/benchmark.py run --benchmark "$(BENCHMARK)" --config "$(CONFIG)" \
 		--profile "$(BENCHMARK_PROFILE)" --sim "$(SIM)" --bender "$(BENDER)" --seed "$(SEED)" \
 		--waves "$(WAVES)" --reference "$(REFERENCE)" --spike "$(SPIKE)" $(if $(ELF),--elf "$(ELF)") \
-		--mode "$(BENCHMARK_MODE)" --jobs "$(JOBS)"
+		--mode "$(BENCHMARK_MODE)" --jobs "$(JOBS)" --retire-trace "$(BENCHMARK_TRACE)" \
+		$(if $(BENCHMARK_REUSE_SUITE),--reuse-suite "$(BENCHMARK_REUSE_SUITE)")
 
 synth impl:
 ifeq ($(ASIC_FLOW),orfs)

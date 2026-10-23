@@ -42,9 +42,12 @@ sources:
       - target: pipeline_ctrl_test
         files:
           - verif/sim/pipeline_ctrl_parent/uqu_pipeline_ctrl_tb.v
-      - target: any(if_buffer, if, if_pipeline_test, if_prefetch_test, rtl, core_test)
+      - target: any(if_buffer, if_bypass, if, if_pipeline_test, if_prefetch_test, rtl, core_test)
         files:
           - src/uquintus/uqu_if_buffer.v
+      - target: any(if_bypass, if, if_pipeline_test, if_prefetch_test, rtl, core_test)
+        files:
+          - src/uquintus/uqu_if_bypass.v
       - target: any(if_aligner, if, if_pipeline_test, if_prefetch_test, rtl, core_test)
         files:
           - src/uquintus/uqu_if_aligner.v

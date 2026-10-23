@@ -151,5 +151,45 @@ class BenchmarkTests(unittest.TestCase):
                     patch('component_runner.main', side_effect=execute):
                 with self.assertRaisesRegex(RuntimeError, 'performance'): benchmark.run('coremark', 'test', mode='checked')
                 self.assertEqual(calls, ['coremark-performance', 'coremark-validation'])
+                execution = json.loads(next((root / 'build/uquintus-test/verilator/benchmark/coremark').glob(
+                    'suite-*/suite-results.json')).read_text())
+                self.assertEqual(execution['status'], 'failed')
+                self.assertTrue(execution['full_suite_selected'])
+                self.assertEqual([(r['profile'], r['status']) for r in execution['results']],
+                                 [('performance', 'failed'), ('validation', 'passed')])
                 path.write_text(json.dumps(dict(suite, settings={})))
                 with self.assertRaisesRegex(ValueError, 'stale'): benchmark.run('coremark', 'test', mode='checked')
+
+    def test_reused_suite_allows_only_microarchitecture_changes_and_matching_workloads(self):
+        _, settings, lock = benchmark.settings('coremark')
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / 'original-suite.json'
+            elf = root / 'program.elf'
+            elf.write_bytes(b'fixture')
+            built = dict(ISA_M=1, MUA_MUL='iterative', MUA_MULDIV_ITERUNROLL=32)
+            selected = dict(built, MUA_MUL='parallel', MUA_MULDIV_ITERUNROLL=1)
+            suite = dict(status='passed', parameters=built, settings=settings, upstream=lock,
+                         programs=[dict(profile=p, path=str(elf), sha256=benchmark.sha(elf))
+                                   for p in settings['profiles']])
+            path.write_text(json.dumps(suite))
+            with patch.object(benchmark, 'ROOT', root), \
+                    patch.object(benchmark, 'hardware', return_value=(root / 'new.yml', selected)), \
+                    patch.object(benchmark, 'settings', return_value=(None, settings, lock)), \
+                    patch('component_runner.main', return_value=root / 'run') as execute:
+                benchmark.run('coremark', 'new', mode='checked', reuse_suite=path)
+                self.assertEqual(execute.call_count, 2)
+                self.assertTrue(all(str(elf) in call.args[0] for call in execute.call_args_list))
+                evidence = json.loads(next((root / 'build/uquintus-new/verilator/benchmark/coremark').glob(
+                    'suite-*/suite-results.json')).read_text())
+                self.assertEqual(evidence['reused_software_suite'], str(path))
+                self.assertEqual(evidence['software_parameters'], built)
+                selected['ISA_M'] = 0
+                with self.assertRaisesRegex(ValueError, 'stale'):
+                    benchmark.run('coremark', 'new', mode='checked', reuse_suite=path)
+                selected['ISA_M'] = 1
+                path.write_text(json.dumps(dict(suite, settings={})))
+                with self.assertRaisesRegex(ValueError, 'stale'):
+                    benchmark.run('coremark', 'new', mode='checked', reuse_suite=path)
+                with self.assertRaisesRegex(ValueError, 'mutually exclusive'):
+                    benchmark.run('coremark', 'new', mode='checked', reuse_suite=path, elf=elf)

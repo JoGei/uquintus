@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 
 import yaml
 
-from benchmark_measure import BenchmarkWindow, coremark_result, marker_addresses, read_log, software_compatible
+from benchmark_measure import BenchmarkWindow, benchmark_result, marker_addresses, read_log, software_compatible
 from component_runner import (HDL_LANGUAGE_ARGS, bender_include_dirs, bender_source_options,
                               command_output, load_component, order_control_files, simulator_build_key)
 from elf_image import load_elf, expected_traps
@@ -62,7 +62,7 @@ def read_memory(path):
     return memory
 
 
-def run_fast(program, config_path, config, *, bender='bender', simulator='verilator', seed=1, shared_build=None, jobs=4):
+def run_fast(program, config_path, config, *, bender='bender', simulator='verilator', seed=1, shared_build=None, jobs=4, retire_trace=False):
     program = Path(program).resolve()
     image = load_elf(program)
     image.validate_core(config)
@@ -119,12 +119,15 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
                    ROOT / 'verif/sim/common/elf_image.py']:
         inputs[str(source.relative_to(ROOT)) if source.is_relative_to(ROOT) else str(source)] = sha(source)
     inputs['verif/sim/common/bpu_stats.py'] = sha(ROOT / 'verif/sim/common/bpu_stats.py')
+    if retire_trace:
+        inputs['verif/sim/common/benchmark_prediction.py'] = sha(ROOT / 'verif/sim/common/benchmark_prediction.py')
     if config['ISA_ZFINX']:
         inputs['Bender.lock'] = sha(ROOT / 'Bender.lock')
         shutil.copyfile(ROOT / 'Bender.lock', directory / 'Bender.lock')
     context = dict(benchmark=benchmark, memory=dict(benchmark['memory'], grants='immediate',
         fence_ack='immediate', ports='independent', response_errors='none'), execution_mode='fast',
-        validation_scope='workload_crc_completion_traps_watchdog_and_timer_window',
+        validation_scope=('workload_crc_completion_traps_watchdog_and_timer_window' if benchmark['validator'] == 'coremark'
+                          else 'upstream_self_check_completion_traps_watchdog_and_timer_window'),
         family=software['compiler_info']['family'], version=software['compiler_info']['version'],
         march=software['compiler_info']['march'], abi=software['compiler_info']['abi'],
         suite_revision=software['upstream']['revision'],
@@ -135,15 +138,20 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
         compiler=software['compiler'], compiler_info=software['compiler_info'], upstream=software['upstream'],
         simulator=simulator_info, host_compiler=compiler, bender=command_output([bender, '--version']),
         source_sha256=inputs, input_scope='RTL, headers, software/runtime, native harness and measurement adapter',
-        workload=sha(program), metrics=[], results_file='results.xml', required_tests=['workload_crc'],
+        workload=sha(program), metrics=[], results_file='results.xml', required_tests=[
+            'workload_crc' if benchmark['validator'] == 'coremark' else 'workload_self_check'],
         started_at=datetime.now(timezone.utc).isoformat(),
         artifacts=['benchmark.json', 'benchmark.log', 'bpu-stats.json', 'native.json', 'native.log', 'execution.json',
                    'build.log', 'sources.f', 'bender_sources.json', 'software-build.json', 'config.yml',
                    'program-image.bin', 'final-memory.bin'])
     report_path = directory / 'report.json'
+    if retire_trace:
+        record['diagnostic_retirement_trace'] = dict(file='retire.bin', format='UQUTRC01',
+            record='little-endian uint32 cycle, pc, original instruction bytes', scope='whole execution including startup/warmup')
+        record['artifacts'].append('retire.bin')
     report_path.write_text(json.dumps(record, indent=2)+'\n')
     xml = ET.Element('testsuites')
-    case = ET.SubElement(ET.SubElement(xml, 'testsuite', name='benchmark-fast'), 'testcase', name='workload_crc')
+    case = ET.SubElement(ET.SubElement(xml, 'testsuite', name='benchmark-fast'), 'testcase', name=record['required_tests'][0])
     evidence = dict(schema_version=1, status='failed', mode='fast')
     print('Artifacts:', directory, flush=True)
     started = time.monotonic()
@@ -173,6 +181,8 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
         memory = benchmark['memory']
         command = [str(executable), 'program-image.bin', str(benchmark['max_cycles']), str(image.entry),
             str(memory['imem_latency']), str(memory['dmem_latency']), str(image.tohost), str(start_pc), str(stop_pc)]
+        if retire_trace:
+            command.append('retire.bin')
         record['command'] = command
         before = time.monotonic()
         result = subprocess.run(command, cwd=directory, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -184,6 +194,9 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
         (directory / 'execution.json').write_text(json.dumps(native, indent=2)+'\n')
         if result.returncode or native.get('status') != 'passed':
             raise RuntimeError(native.get('detail') or 'native simulation failed; see native.log')
+        if retire_trace:
+            from benchmark_prediction import validate_trace
+            record['diagnostic_retirement_trace'].update(validate_trace(directory / 'retire.bin', native))
         window = BenchmarkWindow(image)
         window.start, window.stop = native['start'], native['stop']
         measured = window.finish()
@@ -191,7 +204,7 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
         (directory / 'bpu-stats.json').write_text(json.dumps(bpu, indent=2)+'\n')
         log = read_log(image, read_memory(directory / 'final-memory.bin'))
         (directory / 'benchmark.log').write_text(log)
-        validated = coremark_result(log, benchmark['profile'], benchmark['iterations'], measured['cycles'])
+        validated = benchmark_result(log, benchmark, measured['cycles'])
         evidence.update(status='passed', window=measured, result=validated, memory=memory,
                         validation_scope=context['validation_scope'], bpu_statistics=bpu)
         record['metrics'] = [dict(name=name, value=value, unit=unit) for name, value, unit in (
@@ -205,6 +218,7 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
     except BaseException as error:
         record.update(status='failed', detail=str(error))
         evidence.update(status='failed', detail=str(error))
+        error.run_dir = directory
         ET.SubElement(case, 'failure', message=str(error)).text = str(error)
         raise
     finally:

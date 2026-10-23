@@ -17,6 +17,11 @@ def load_lock(path):
             not re.fullmatch(r'[0-9a-f]{64}', lock.get('archive_sha256', '')) or
             not lock.get('archive_url', '').startswith('https://')):
         raise ValueError('invalid pinned archive lock')
+    excluded = lock.get('exclude_paths', [])
+    if (not isinstance(excluded, list) or any(
+            not isinstance(p, str) or not p or Path(p).is_absolute() or '..' in Path(p).parts
+            for p in excluded) or len(set(excluded)) != len(excluded)):
+        raise ValueError('invalid pinned archive exclusions')
     return lock
 
 
@@ -55,12 +60,21 @@ def fetch(cache, lock, archive_path=None):
         if hashlib.sha256(archive.read_bytes()).hexdigest() != lock['archive_sha256']:
             raise ValueError('source archive SHA-256 does not match lock.json')
         with tarfile.open(archive, 'r:gz') as source:
+            excluded, seen, members = set(lock.get('exclude_paths', [])), set(), []
             for member in source.getmembers():
                 parts = Path(member.name).parts
-                if (not parts or parts[0] != prefix or '..' in parts or
-                        not (member.isdir() or member.isfile())):
+                if not parts or parts[0] != prefix or '..' in parts:
                     raise ValueError('unexpected archive path/link')
-            source.extractall(directory, filter='data')
+                relative = Path(*parts[1:]).as_posix()
+                if relative in excluded:
+                    seen.add(relative)
+                    continue
+                if not (member.isdir() or member.isfile()):
+                    raise ValueError('unexpected archive path/link')
+                members.append(member)
+            if seen != excluded:
+                raise ValueError('pinned archive exclusions do not match archive')
+            source.extractall(directory, members=members, filter='data')
         extracted = directory / prefix
         inventory = {p.relative_to(extracted).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                      for p in extracted.rglob('*') if p.is_file()}

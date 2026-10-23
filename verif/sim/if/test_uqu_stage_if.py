@@ -123,7 +123,7 @@ class FaultsTest(IfStageTest):
             assert not o['valid'] and not o['pmp_valid']
         # Privilege is supplied by the core; denial is latched at acceptance.
         self.deny_user = True
-        await self.cycle(redirect_valid=1,redirect_addr=0x2000)
+        await self.cycle(redirect_valid=1,redirect_addr=0x2000,redirect_request_permit=0)
         o = await self.cycle(priv_m=0,request_permit=0)
         assert o['pmp_valid'] and not o['pmp_priv_m']
         await self.until(lambda o:bool(o['valid']),priv_m=1)
@@ -321,6 +321,7 @@ class IdataTest(IfStageTest):
     async def visit(self, branch):
         await self.cycle(redirect_valid=1,redirect_addr=branch,grant=1)
         await self.until(lambda o: bool(o['valid']),grant=1)
+        self.visit_accept_index = len(self.accepted)
         o = await self.cycle(ready=1,grant=1)
         assert o['pc'] == branch and o['predicted_next_pc'] != o['next_pc']
         return await self.cycle(grant=1)
@@ -343,7 +344,7 @@ class IdataTest(IfStageTest):
         o = await self.visit(0x1000)
         assert o['valid'] and o['pc']==target, 'warm target must be available next cycle'
         before=len(self.delivered)
-        accepted_before=len(self.accepted)
+        accepted_before=self.visit_accept_index
         # Stalled replay must stay stable even when its BTB owner is replaced.
         alias = 0x1000+self.predictor.capacity*self.predictor.alignment
         for _ in range(5):
@@ -355,7 +356,7 @@ class IdataTest(IfStageTest):
         else: raise AssertionError('replay/continuation did not finish')
         assert self.delivered[before:] == expected
         continuation = expected[depth][0]&~3
-        assert self.accepted[accepted_before-1] == continuation, self.accepted[accepted_before-1:]
+        assert self.accepted[accepted_before] == continuation, self.accepted[accepted_before:]
         # A new visit learns the displaced branch again. Replays themselves
         # may refill missing slots, and an external recovery retains the prefix.
         await self.seed_prefix(0x1000,target,values)
@@ -434,7 +435,8 @@ class IdataLatencyTest(IdataTest):
             if o['valid']: times.append(tick)
             if len(times)==depth+4: break
         assert times[:depth]==list(range(1,depth+1)), times
-        assert times[depth]==max(4,depth+1), times
+        first_fetch=4 - bool(self.params['MUA_REDIRECT_BYPASS'] & 1) - bool(self.params['MUA_REDIRECT_BYPASS'] & 2) - bool(self.params['MUA_REDIRECT_BYPASS'] & 4)
+        assert times[depth]==max(first_fetch,depth+1), times
         self.drop_objection()
 
 
@@ -448,15 +450,44 @@ class FreshFetchLatencyTest(IfStageTest):
         self.raise_objection()
         self.response_latency = 1
         # No stale bus work and no target replay: test the actual cold refill.
-        for target in ((0x8000,0x9002) if self.c else (0x8000,0x9000)):
+        cases=[(0x8000,False),(0x9002 if self.c else 0x9000,False)]
+        if self.c:
+            cases.append((0xA002,True))
+        first_fetch=4 - bool(self.params['MUA_REDIRECT_BYPASS'] & 1) - bool(self.params['MUA_REDIRECT_BYPASS'] & 2) - bool(self.params['MUA_REDIRECT_BYPASS'] & 4)
+        for target,crossing in cases:
+            if crossing:
+                self.put(target,[(0x00000013,4)]*8)
             await self.reset()
-            await self.cycle(redirect_valid=1,redirect_addr=target,fetch_enable=0,grant=1)
-            for tick in range(1,5):
+            initial = await self.cycle(redirect_valid=1,redirect_addr=target,fetch_enable=0,grant=1)
+            fast = bool(self.params['MUA_REDIRECT_BYPASS'] & 2)
+            assert bool(initial['imem_req']) == fast
+            if fast:
+                assert initial['imem_addr'] == target&~3
+            expected_tick=first_fetch+int(crossing)
+            for tick in range(1,expected_tick+1):
                 o = await self.cycle(grant=1,ready=1)
-                if tick==1:
+                if tick==1 and not fast:
                     assert o['imem_req'] and o['imem_addr']==target&~3
-                assert bool(o['valid']) == (tick==4), (tick,o)
+                assert bool(o['valid']) == (tick==expected_tick), (tick,o,expected_tick)
             assert self.delivered[-1][0] == target
+        # State-changing redirects may explicitly deny the fast path. The
+        # target must use post-edge privilege, never the old M-mode allowance.
+        await self.reset()
+        self.deny_user = True
+        o = await self.cycle(redirect_valid=1,redirect_addr=0xB000,
+                             redirect_request_permit=0,grant=1)
+        assert not o['pmp_valid'] and not o['imem_req']
+        o = await self.cycle(priv_m=0,grant=1,ready=1)
+        assert o['pmp_valid'] and not o['pmp_priv_m'] and not o['imem_req']
+        await self.until(lambda o: bool(o['valid']),priv_m=0,grant=1,ready=1)
+        assert self.faults[-1]==(0xB000,1,0xB000)
+        self.deny_user = False
+        await self.reset()
+        o = await self.cycle(redirect_valid=1,redirect_addr=0xC000,
+                             request_permit=0,fetch_enable=0,grant=1)
+        assert not o['imem_req'] and not o['pmp_valid']
+        await self.until(lambda o: bool(o['valid']),ready=1,grant=1)
+        assert self.delivered[-1][0]==0xC000
         self.drop_objection()
 
 

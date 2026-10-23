@@ -1,8 +1,9 @@
 # uquintus Benchmarking and PPA Measurement
 
-**Status:** Minimum-period definition agreed; CoreMark cycle-only RTL integration
-implemented with native fast and fully checked modes. Wider workload coverage
-remains open. Pareto-profile naming and initial objectives are agreed;
+**Status:** Minimum-period definition agreed; CoreMark and all 19 Embench-IoT
+1.0 workloads integrated with the shared native fast/checked execution flow.
+Initial RV32IMC Embench native measurements pass. Pareto-profile naming and
+initial objectives are agreed;
 configuration search and selection are deferred.
 
 [Specification index](uqu_spec.md) · [Build](uqu_spec.build.md) · [Interfaces](uqu_spec.interfaces.md)
@@ -153,7 +154,8 @@ completion/response, unexpected-trap, watchdog, enabled-counter and timer-window
 checks. Python may prepare the ELF memory image and validate results afterward.
 `BENCHMARK_MODE=checked` shall retain the existing instruction oracle, RVFI,
 CSR and per-edge counter checks. Both modes shall validate the final workload
-CRCs; a fast pass shall not be represented as per-instruction ISA verification.
+checks (CoreMark CRCs or the upstream Embench verifier); a fast pass shall not
+be represented as per-instruction ISA verification.
 Seed profile selection (`performance`/`validation`) is independent of run mode.
 
 Both modes shall implement the same active memory transaction schedule, store
@@ -169,7 +171,11 @@ flags/ISA/ABI and runtime identity, ELF/source hashes, configuration and the
 measurement boundary. Random memory wait regressions remain verification tests.
 The initial environment grants immediately, responds after a configurable
 positive integer number of cycles (one by default) and acknowledges fences
-immediately. These conditions do not imply a physical memory implementation.
+immediately. Both grants and response inputs shall settle before either
+accepted request/address is sampled: a data grant may release DE and steer a
+same-cycle instruction request. Remeasure every comparison baseline when this
+memory-agent behavior changes, retaining its source hash in the run report.
+These conditions do not imply a physical memory implementation.
 
 Time the interval between retirement of the labeled `mcycle` reads in
 `start_time()` and `stop_time()`: `(start, stop]`. Count cycles and retired
@@ -195,8 +201,8 @@ estimated_execution_time [ns] = workload_cycles * T_min [ns]
 This combines an RTL measurement with an implementation estimate, rather than
 a measured silicon result. Predictor comparisons should first hold the ISA,
 compiler, executable and memory model constant, then assess cycle savings
-alongside implementation area and `T_min`. A broader suite such as Embench and
-predictor PPA evaluation remain follow-ups.
+alongside implementation area and `T_min`. The Embench-IoT port below extends
+workload coverage; normalized reference-suite selection remains open.
 
 ### 3.1. Passive branch-prediction statistics
 
@@ -261,6 +267,63 @@ The [RV32IMC forwarding study](../impl/asic/orfs/investigations/forwarding-rv32i
 holds BP16/BTB16/H6, IF decompression and a parallel multiplier fixed while
 adding WB-to-DE, WB-to-EX, MEM-to-EX, MEM-to-DE and EX-to-DE bypasses in sequence.
 Broader workloads remain to be measured.
+
+### 3.2. Embench-IoT workloads
+
+The [Embench-IoT port](../verif/sw/benchmark/embench/embench-iot/README.md)
+shall pin stable Embench 1.0 and explicitly cover every upstream workload and
+translation unit. Builds shall check manifest completeness and unchanged
+local repeat counts against the verified source tree. Fetch upstream sources
+only through the existing explicit archive flow, retaining license notices.
+
+The initial preset `rv32imc_bimodal_idata_unroll32` shall use RV32IMC, full
+forwarding, IF decompression, a 16-entry bimodal predictor, a 16-entry BTB with
+six packed instruction halfwords per entry, iterative MUL and DIV, and a
+shared unroll factor of 32. This shall not replace other hardware presets or
+assign a Greek-letter profile.
+
+Run one timed upstream `benchmark()` call after initialization and one warmup
+invocation. Retain upstream `CPU_MHZ=1` workload scaling and each kernel's
+`LOCAL_SCALE_FACTOR`; the scale shall not imply an operating frequency.
+Exclude initialization, warmup, result verification and logging from the timed
+window; include timer-call overhead under Section 3's retirement convention.
+Use the unchanged upstream verifier and require its return value to equal
+exactly 1. Treat unverified, failing, incomplete and watchdog runs as failures.
+
+All 19 workloads shall be attempted in a full suite. On RV32IMC, `cubic`,
+`minver`, `nbody` and `st` use software floating-point runtime routines; report
+that execution policy explicitly and keep their aggregates separate from the
+15 integer workloads. Use externally supplied real RV32 C/math/compiler
+runtime libraries and retain their identities and hashes. Upstream dummy
+libraries shall not establish correctness.
+
+Both native and checked execution shall validate RAM-log workload identity,
+scale, warmup, verification and software-cycle output against the independent
+timer window. Retain per-workload report artifacts and an explicit suite
+selection/completion manifest. A partial run shall not claim full coverage;
+a failed required workload shall not disappear from suite aggregation.
+Report cycles, instructions, CPI, footprint and passive BPU statistics without
+claiming an official Embench speed/size score. Normalized suite cycle ratios
+require a separately declared matching reference.
+
+Prediction investigations shall preserve those standard warmed measurements
+and report additional diagnostics separately. An empty predictor at the timer
+boundary does not imply cold execution throughout a window containing many
+kernel repetitions. Distinguish first kernel visits, steady repetitions and
+loop-exit behavior where the execution trace permits reliable boundaries.
+State whether startup history is retained or model state is explicitly empty.
+Measured subwindow CPI shall identify its exact retirement boundaries and
+incoming-transition costs; it shall not replace the standard timer window.
+
+Optional fast-mode retirement traces shall retain original instruction bytes,
+PCs and retirement cycles across startup, warmup and measurement, with count,
+window-marker and checksum validation. The offline architectural-path model
+shall compare finite direction/target capacities as well as unlimited history,
+expose differences from measured RTL at its real capacity, and identify omitted
+speculation and instruction-data fill timing. Unlimited history is a diagnostic
+upper bound on history reuse, not evidence of perfect direction prediction,
+successful replay or counterfactual CPI. Hardware selection still requires
+cycle-accurate runs across the declared workload suite and physical metrics.
 
 ## 4. Pareto-optimal configuration profiles
 
@@ -400,5 +463,5 @@ identify an immutable hardware implementation.
 | ID | Decision | Rationale | Status |
 | --- | --- | --- | --- |
 | D-307 | Define `T_min` as the setup-derived minimum period of one implemented netlist under an explicit timing context, with `estimated_fmax [MHz] = 1000 / T_min [ns]`. Retain path/interface scope, stage, corner, constraints and non-setup qualification separately. | Make PPA and benchmark frequency claims reproducible without confusing a target clock, positive margin or an optimistic timing subset with a qualified operating limit. | Agreed; definition documented; initial benchmark integration implemented separately |
-| D-313 | Place benchmark ports/configurations in `verif/sw/benchmark/<suite>/`; start with pinned, unmodified CoreMark workloads, both standard seed profiles, deterministic memory timing, independently checked workload windows and native report artifacts. | Establish reproducible cycle measurements before implementing dynamic branch prediction, while reusing ELF/RVFI correctness checks for baseline qualification. | Implemented; broader suites and official-score qualification remain open |
+| D-313 | Place benchmark ports/configurations in `verif/sw/benchmark/<suite>/`; start with pinned, unmodified CoreMark workloads, both standard seed profiles, deterministic memory timing, independently checked workload windows and native report artifacts. | Establish reproducible cycle measurements before implementing dynamic branch prediction, while reusing ELF/RVFI correctness checks for baseline qualification. | Implemented; extended to all 19 Embench 1.0 workloads; official-score qualification remains open |
 | D-314 | Default benchmarks to a native Verilator fast mode with final CRC and lightweight execution/timing checks; retain explicit cocotb/pyuvm checked mode and identify both scopes in reports. Require matching cycles/instructions on identical backend qualification inputs. | Remove per-cycle verification overhead from performance sweeps while retaining a path for architectural checking and diagnosis. | Implemented; both initial RV32I CoreMark profiles match checked baselines exactly |

@@ -127,6 +127,7 @@ struct BpuSnapshot {
 
 int main(int argc, char **argv) {
     Memory memory;
+    std::ofstream retirement_trace;
     uint64_t cycles = 0, retired = 0;
     Point start, stop;
     BpuSnapshot bpu_start, bpu_stop;
@@ -136,7 +137,12 @@ int main(int argc, char **argv) {
     context->commandArgs(argc, argv);
     auto dut = std::make_unique<Vuqu_benchmark_tb>(context.get());
     try {
-        require(argc == 9, "expected image, watchdog, boot, imem/dmem latency, tohost, start/stop PC");
+        require(argc == 9 || argc == 10, "expected image, watchdog, boot, imem/dmem latency, tohost, start/stop PC, optional retirement trace");
+        if (argc == 10) {
+            retirement_trace.open(argv[9], std::ios::binary);
+            require(bool(retirement_trace), "cannot open diagnostic retirement trace");
+            retirement_trace.write("UQUTRC01", 8);
+        }
         memory.load(argv[1]);
         uint64_t limit = std::stoull(argv[2], nullptr, 0);
         uint32_t boot = uint32_t(std::stoull(argv[3], nullptr, 0));
@@ -165,12 +171,15 @@ int main(int argc, char **argv) {
             if (returning[0]) { dut->imem_rdata_i = pending[0].data; dut->imem_err_i = 0; }
             if (returning[1]) { dut->dmem_rdata_i = pending[1].data; dut->dmem_err_i = 0; }
             eval();
+            // Availability is an independent input. Grant both buses before
+            // sampling requests: a data grant can release DE and redirect IF
+            // combinationally. Capturing the earlier address reads wrong code.
+            dut->imem_gnt_i = dut->dmem_gnt_i = !reset;
+            eval();
             Request request[2] = {
                 {bool(!reset && dut->imem_req_o), false, dut->imem_addr_o, 0, 0, 0},
                 {bool(!reset && dut->dmem_req_o), bool(dut->dmem_we_o), dut->dmem_addr_o,
                  dut->dmem_wdata_o, dut->dmem_be_o, dut->dmem_pc_o}};
-            dut->imem_gnt_i = request[0].valid; dut->dmem_gnt_i = request[1].valid;
-            eval();
             if (!reset) {
                 if (dut->trap_o) throw std::runtime_error("unexpected trap at PC " + std::to_string(dut->trap_pc_o) +
                         " cause " + std::to_string(dut->trap_cause_o));
@@ -199,6 +208,13 @@ int main(int argc, char **argv) {
                 if (dut->retire_o) {
                     ++retired;
                     uint32_t pc = dut->retire_pc_o;
+                    if (retirement_trace.is_open()) {
+                        // Observation only: include startup/warmup so offline
+                        // models can distinguish first visits from steady state.
+                        write32(retirement_trace, uint32_t(cycles));
+                        write32(retirement_trace, pc);
+                        write32(retirement_trace, memory.word(pc));
+                    }
                     if (pc == start_pc || pc == stop_pc) {
                         require(!(dut->mcountinhibit_o & 5), "benchmark counters inhibited");
                         Point point = {true, cycles, retired, dut->retire_data_o};
@@ -234,6 +250,10 @@ int main(int argc, char **argv) {
         require(stop.cycle > start.cycle && stop.cycle-start.cycle < (1ull << 32), "invalid benchmark duration");
         require(uint32_t(stop.value-start.value) == stop.cycle-start.cycle, "software/RTL cycle delta mismatch");
         require(stop.retired > start.retired, "empty benchmark instruction window");
+        if (retirement_trace.is_open()) {
+            retirement_trace.flush();
+            require(bool(retirement_trace), "cannot write diagnostic retirement trace");
+        }
     } catch (const std::exception &e) { detail = e.what(); }
     dut->final();
     memory.save("final-memory.bin");

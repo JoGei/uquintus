@@ -336,6 +336,30 @@ class ReportTests(unittest.TestCase):
         (path/'report.json').write_text(json.dumps(raw))
         self.assertTrue(report.collect(self.build,self.root)['issues'])
 
+    def test_stage_region_paths_show_forwarding_pairs_and_inventory(self):
+        path=self.native(context={'stage':'mapped_preplacement'})
+        raw=report.read_json(path/'report.json')
+        raw['timing_regions']=dict(status='available',register_cells=dict(IF=2,DE=1,EX=1,MEM=1,WB=1,CORE=3))
+        raw['timing_paths']={
+            'stage_DE_max':dict(status='timed',slack_ns=2.5,startpoint='ex_result/Q',endpoint='de_pc/D'),
+            'stage_EX_to_DE_max':dict(status='timed',slack_ns=2.5,startpoint='ex_result/Q',endpoint='de_pc/D'),
+            'stage_WB_to_IF_min':dict(status='no_paths')}
+        detail='timing/mapped_preplacement/stage_EX_to_DE_max.rpt'
+        (path/detail).parent.mkdir(parents=True)
+        (path/detail).write_text('Detailed EX forwarding path\n')
+        raw['artifacts']=[detail]
+        (path/'report.json').write_text(json.dumps(raw))
+        output=self.build/'report'
+        data=report.generate(self.build,output,self.root)
+        self.assertFalse(data['issues'])
+        html=(output/'runs'/f'{data["records"][0]["id"]}.html').read_text()
+        for text in ('Internal: capture in DE','EX → DE','WB → IF','IF: 2','CORE: 3',
+                     'No constrained paths','receiving stage','ex_result/Q','2.5','stage_EX_to_DE_max.rpt">Setup</a>'):
+            self.assertIn(text,html)
+        raw['timing_regions']['register_cells']['EX']=-1
+        (path/'report.json').write_text(json.dumps(raw))
+        self.assertTrue(report.collect(self.build,self.root)['issues'])
+
     def test_artifacts_must_stay_inside_the_run_directory(self):
         path = self.native()
         raw = report.read_json(path / 'report.json')
