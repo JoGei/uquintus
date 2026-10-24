@@ -145,7 +145,11 @@ module uqu_stage_de #(
     wire xif_done, xif_accept, xif_bad, xif_clean;
     wire [1:0] xif_writeback;
     wire native_live = active && core_native && !pre_fault;
-    wire xif_sources = active && xif_candidate && !xif_done;
+    // Candidate source intent/addressing is independent of slot/control
+    // qualification. The parent hazard unit owns slot validity; DE transfer,
+    // redirects, faults and XIF handshakes remain qualified below.
+    wire native_sources = core_native && !pre_fault;
+    wire xif_sources = xif_candidate && !xif_done;
     wire [2:0] native_need_now = ((dec_branch != `UQU_BR_NONE) ||
                                 (dec_wb_kind == `UQU_WB_CSR)) ? dec_rs_used : 3'd0;
     wire now_ready = ((rs_ready_i & rs_need_now_o) == rs_need_now_o);
@@ -174,13 +178,13 @@ module uqu_stage_de #(
     assign native_o = active && core_native;
     // Source intent never depends on the comparison result or live XIF response:
     // parent hazard/readiness feedback and XIF requests must remain acyclic.
-    assign rs_used_o = native_live ? dec_rs_used : xif_sources ?
+    assign rs_used_o = native_sources ? dec_rs_used : xif_sources ?
                        ((XIF_NUM_RS == 3) ? 3'b111 : 3'b011) : 3'd0;
-    assign rs_need_now_o = native_live ? native_need_now : xif_sources ? rs_used_o : 3'd0;
-    assign rs_ex_used_o = native_live && (dec_fu != `UQU_FU_PASS) ? dec_rs_used : 3'd0;
-    assign rs0_addr_o = native_live ? dec_rs0 : xif_sources ? instr_i[19:15] : 5'd0;
-    assign rs1_addr_o = native_live ? dec_rs1 : xif_sources ? instr_i[24:20] : 5'd0;
-    assign rs2_addr_o = native_live ? dec_rs2 : xif_sources && (XIF_NUM_RS == 3) ? instr_i[11:7] : 5'd0;
+    assign rs_need_now_o = native_sources ? native_need_now : xif_sources ? rs_used_o : 3'd0;
+    assign rs_ex_used_o = native_sources && (dec_fu != `UQU_FU_PASS) ? dec_rs_used : 3'd0;
+    assign rs0_addr_o = native_sources ? dec_rs0 : xif_sources ? instr_i[19:15] : 5'd0;
+    assign rs1_addr_o = native_sources ? dec_rs1 : xif_sources ? instr_i[24:20] : 5'd0;
+    assign rs2_addr_o = native_sources ? dec_rs2 : xif_sources && (XIF_NUM_RS == 3) ? instr_i[11:7] : 5'd0;
     assign rs_captured_o = rs_used_o & rs_ready_i;
     assign valid_o = active && permit_i && completed;
     assign ready_o = enabled && (!valid_i || de_fire);
@@ -195,7 +199,11 @@ module uqu_stage_de #(
     assign branch_resolve_o = de_fire && !fault && control_flow_o;
     assign branch_taken_o = branch_resolve_o && branch_taken;
     assign branch_target_o = control_flow_o ? branch_target : 32'd0;
-    assign next_pc_o = !active || fault ? pc_i : branch_next_pc;
+    // Misaligned/illegal branch candidates already select pc_i in u_branch.
+    // Other instruction faults retain the old PC fallback without introducing
+    // live flush, validity or source-readiness control into this data word.
+    assign next_pc_o = pre_fault || unknown_fault ||
+                       (core_native && (dec_system == `UQU_SYS_ECALL)) ? pc_i : branch_next_pc;
     assign fu_o = native_payload ? dec_fu : `UQU_FU_PASS;
     assign op_o = native_payload ? dec_op : 5'd0;
     assign a_sel_o = native_payload ? dec_a_sel : `UQU_A_ZERO;

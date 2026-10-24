@@ -1929,6 +1929,8 @@ The source values and per-source availability outputs shall be:
 | `ex_rs0_o`, `ex_rs1_o`, `ex_rs2_o` | 32 | Resolved EX source values for execution and store-data operand selection. |
 | `ex_rs_ready_o` | 3 | Current readiness for EX consumption. |
 
+DE source addresses/use masks and its next-PC candidate shall describe the parent-owned instruction independently of live reset, slot-valid, flush, permission and downstream-ready controls. Instruction-local legality/fetch faults and stored XIF lifecycle state may still affect those candidates. The hazard unit shall qualify slot occupancy and retention capture separately; unqualified candidate values shall authorize no execution, redirect or offload. Branch resolution, stage transfer and all architectural effects shall retain their existing valid/readiness/fault qualifications. This separation shall keep late WB fault/flush decisions out of candidate-address and next-PC arithmetic.
+
 Readiness shall be per source so branches, XIF source delivery and execution
 can apply their own actual use requirements. For DE, every used source marked
 need-now shall require current readiness; every other used native source shall

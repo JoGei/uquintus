@@ -53,13 +53,14 @@ class DEModel:
                  d['native'] and (d['illegal'] or restricted or d['fu'] == 2 and d['rm'] == 7 and rm > 4))
         offer = bool(self.p['XIF'] and not d['native'] and not early)
         native = bool(active and d['native'] and not early)
-        source_used = d['rs_used'] if native else (1 << self.p['XIF_NUM_RS'])-1 if active and offer and not self.issued else 0
-        need_now = source_used if not native or d['branch'] or d['wb_kind'] == 1 else 0
-        ex_used = d['rs_used'] if native and d['fu'] != 3 else 0
+        source_native = bool(d['native'] and not early)
+        source_used = d['rs_used'] if source_native else (1 << self.p['XIF_NUM_RS'])-1 if offer and not self.issued else 0
+        need_now = source_used if not source_native or d['branch'] or d['wb_kind'] == 1 else 0
+        ex_used = d['rs_used'] if source_native and d['fu'] != 3 else 0
         ready_now = i['rs_ready'] & need_now == need_now
         ready_ex = (i['rs_ready'] | i['rs_ex_guaranteed']) & ex_used == ex_used
-        addresses = [d['rs1'], d['rs2'], d['rs3']] if native else [0]*3
-        if active and offer and not self.issued:
+        addresses = [d['rs1'], d['rs2'], d['rs3']] if source_native else [0]*3
+        if offer and not self.issued:
             addresses = [(i['instr'] >> 15) & 31, (i['instr'] >> 20) & 31,
                          (i['instr'] >> 7) & 31 if self.p['XIF_NUM_RS'] == 3 else 0]
         sequential = (i['pc']+(2 if i['compressed'] and self.p['ISA_C'] else 4)) & MASK
@@ -108,7 +109,7 @@ class DEModel:
                  serialize=int(active and (fault or d['native'] and d['serialize'])),
                  control_flow=int(bool(native and d['branch'])), branch_resolve=int(resolve),
                  branch_taken=int(resolve and taken), branch_target=target if native and d['branch'] else 0,
-                 next_pc=i['pc'] if not active or fault else target if taken and not branch_bad else i['pc'] if branch_bad else sequential,
+                 next_pc=i['pc'] if early or unknown or d['native'] and d['system'] == 1 or branch_bad else target if taken else sequential,
                  fu=d['fu'] if n_payload else 3, op=d['op'] if n_payload else 0,
                  a_sel=d['a_sel'] if n_payload else 2, b_sel=d['b_sel'] if n_payload else 2,
                  imm=d['imm'] if n_payload else 0,

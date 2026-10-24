@@ -74,9 +74,9 @@ XIF slot 2 instead reads old rd. Hazard-resolved values arrive on
 Branches/JALR, register CSR sources and XIF operands require values in DE.
 Native EX consumers, including integer store data, may use current readiness
 or a proven future EX bypass. Unused sources do not block. Known exception
-tokens do not wait for computation operands. Source-use/address outputs do not
-depend on branch comparison outcomes or live XIF response fields, keeping
-hazard feedback and protocol signal dependencies acyclic.
+tokens do not wait for computation operands.
+
+Source-use/address outputs describe the retained instruction independently of live reset, slot-valid, flush, transfer-permission and downstream-ready controls. They do not depend on branch comparison outcomes or live XIF response fields, keeping hazard feedback and protocol signal dependencies acyclic. The parent qualifies hazard-slot occupancy and retention capture separately; nonzero source intent from an empty or flushed slot authorizes no action. Instruction-local fetch/decode/privilege faults still suppress source use.
 
 `rs_captured_o` identifies currently correct values. When admission relies on
 an EX guarantee, the parent must preserve that source's address/use and an
@@ -107,9 +107,9 @@ a result becomes available.
 `control_flow_o` identifies a live native branch/jump, allowing a prediction-
 disabled frontend to pause. `branch_resolve_o` occurs only on the instruction's
 accepted, permitted, nonfaulting DE transfer with required operands ready.
-It qualifies `branch_taken_o` and `next_pc_o`, including the successor for an
-untaken branch. The central controller decides whether frontend state needs a
-redirect, prediction repair or resume; DE owns no predictor/BTB or fetch state.
+It qualifies `branch_taken_o` and consumption of the next-PC candidate, including the successor for an untaken branch. `next_pc_o` itself describes the instruction independently of live reset/valid/flush/permit/ready controls; it need not equal `pc_i` for an empty or flushed slot. Instruction-local faults retain their PC fallback. A candidate never authorizes a redirect without `branch_resolve_o`.
+
+The central controller decides whether frontend state needs a redirect, prediction repair or resume; DE owns no predictor/BTB or fetch state.
 Holding DE must not repeatedly redirect. `branch_target_o` retains the computed
 target for a possible alignment fault, even when no successful resolution occurs.
 
@@ -182,7 +182,7 @@ and coprocessor inputs are ignored.
 
 ## Verification
 
-The six pyuvm/cocotb suites cover native classes/control payloads; all readiness
+The seven pyuvm/cocotb suites cover candidate-data stability under all combinations of live reset/valid/flush/permit/ready controls; native classes/control payloads; all readiness
 and guarantee masks for representative consumers; runtime privilege, rounding,
 fault priorities and transfer-qualified branches; XIF partial stable operands,
 acceptance/rejection, paired/E register cases, forced compressed offload and
@@ -207,3 +207,5 @@ The additional fourteen-profile strategy sweep covers IF expansion, DE
 expansion and direct C decoding with I, E+Zfinx and two-/three-source XIF,
 plus C-disabled inactive-selector cases. All six suites and lint run for every
 profile. The parent fixture also runs for all three C-enabled strategies.
+
+The structural regression in [test_de_candidate_contract.py](../common/tests/test_de_candidate_contract.py) elaborates 16 C-strategy, RV32E and XIF combinations with Yosys. Cutting sequential XIF state boundaries, it checks that candidate source fields and next-PC have no combinational dependency on live slot/handshake qualification or coprocessor responses. Run it with `.venv/bin/python -m unittest discover -s verif/sim/common/tests -p test_de_candidate_contract.py`; it skips when Yosys is unavailable.

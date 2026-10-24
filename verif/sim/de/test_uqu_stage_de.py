@@ -193,6 +193,33 @@ class ControlTest(DETest):
         self.drop_objection()
 
 
+class CandidatesTest(DETest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.reset()
+        fields = ('rs0_addr','rs1_addr','rs2_addr','rs_used','rs_need_now',
+                  'rs_ex_used','rs_captured','next_pc')
+        # Candidate values describe the latched encoding even when no action is
+        # permitted. Keep operand values/readiness and local XIF state fixed.
+        for encoding in (word(), word(0x23,rd=4,funct3=2), word(0x33,upper=1),
+                         0x00208463, 0x000080e7, 0x008000ef, 0x73, word(0x0b)):
+            baseline = await self.check(instr=encoding,rs0=0x12345678,rs1=7)
+            for rst,valid,flush,permit,ready in itertools.product(range(2),repeat=5):
+                result = await self.check(instr=encoding,rs0=0x12345678,rs1=7,
+                    rst_n=rst,valid=valid,flush=flush,permit=permit,ready=ready)
+                assert tuple(result[k] for k in fields) == tuple(baseline[k] for k in fields), encoding
+                if not (rst and valid and not flush and permit):
+                    assert not any(result[k] for k in ('valid','branch_resolve','branch_taken',
+                        'xif_issue_valid','xif_register_valid'))
+        self.report()
+        self.drop_objection()
+
+
+@cocotb.test()
+async def candidates(_dut):
+    await uvm_root().run_test(CandidatesTest)
+
+
 class XIFTest(DETest):
     async def run_phase(self):
         self.raise_objection()

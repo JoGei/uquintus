@@ -17,6 +17,7 @@ parameters:
   - XIF_DUALWRITE
   - DEBUG
 tests:
+  - candidates
   - native
   - hazards
   - compressed
