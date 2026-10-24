@@ -1,7 +1,7 @@
 # uquintus
 
 A configurable, single-issue, in-order RV32 RISC-V processor targeting open-source
-ASIC flows. The specification is in [doc/uqu_spec.md](doc/uqu_spec.md).
+ASIC flows. The specification is in [docs/uqu_spec.md](docs/uqu_spec.md).
 
 The [native processor core](verif/sim/core/README.md) connects all five stages
 with core-owned pipeline registers, hazards, PMP and control. Native execution
@@ -47,17 +47,19 @@ flowchart TB
                 DECODE ~~~ C_DE ~~~ ISSUE
             end
             DE_EX["DE / EX<br/>registers"]
-            subgraph EX["EX · execute"]
+            subgraph EX["EX1 · execute"]
                 direction TB
                 ALU["Integer ALU"]
                 ARITH["Shared add/sub slice<br/>ALU / MUL-DIV mux"]
-                MULDIV["Optional MUL / DIV<br/>Iterative slices"]
+                MULDIV["Optional MUL / DIV<br/>PP/Dadda compression or EX1 product<br/>Iterative baseline"]
                 FPU["Optional FPU<br/>Zfinx · scalar FP32"]
                 ALU ~~~ ARITH ~~~ MULDIV ~~~ FPU
             end
-            EX_MEM["EX / MEM<br/>registers"]
-            subgraph MEM["MEM · memory"]
+            EX_MEM["EX1 / MEM-EX2<br/>registers"]
+            subgraph MEM["MEM / EX2 · memory + execute"]
                 LSU["LSU request<br/>Validate · present · advance on grant"]
+                MUL_FINISH["Optional MUL/MAC finish<br/>Late C fusion · final BK-mapped addition"]
+                LSU ~~~ MUL_FINISH
             end
             MEM_WB["MEM / WB<br/>registers"]
             subgraph WB["WB · writeback"]
@@ -76,7 +78,7 @@ flowchart TB
             direction LR
             CTRL["Pipeline control<br/>Stalls · flushes · redirects · drains"]
             GPR["GPR file · FF or latch<br/>RV32I: 32 / RV32E: 16 registers"]
-            HAZARD["Hazards / forwarding<br/>DE / EX operand resolution"]
+            HAZARD["Hazards / forwarding<br/>DE / EX1 operands · late C in EX2"]
             PMP["Optional shared PMP<br/>Concurrent IF / MEM checks"]
             XIF["Optional XIF lifetime control<br/>IDs · kills · drain readiness"]
             CTRL ~~~ GPR ~~~ HAZARD ~~~ PMP ~~~ XIF
@@ -91,7 +93,7 @@ flowchart TB
     classDef boundary stroke:#8b5cf6,stroke-width:3px
     classDef external stroke:#6b7280
     class FETCH,DECODE,ALU,ARITH,LSU,COMMIT,CTRL,GPR,HAZARD base
-    class C_IF,C_DE,BP,BTB,ISSUE,MULDIV,FPU,RESULT,PMP,XIF optional
+    class C_IF,C_DE,BP,BTB,ISSUE,MULDIV,FPU,MUL_FINISH,RESULT,PMP,XIF optional
     class IF_DE,DE_EX,EX_MEM,MEM_WB boundary
     class IMEM,DMEM external
     style CORE stroke:#6b7280,stroke-width:2px
@@ -136,11 +138,13 @@ IF replays original encodings with live shared-PMP checks while prefetching the
 uncached continuation.
 
 The GPR file remains core-owned while serving DE reads and WB writes. Its
-third read port is enabled for three-source XIF or Zfinx.
+third read port is enabled for three-source XIF, Zfinx, or M with the canonical split MAC.
 `MUA_REGFILE_IMPL` selects FF/latch storage; `MUA_DE_OPERAND_RETENTION` selects
 optional retention inside the hazard unit. See the
-[configuration catalog](doc/uqu_spec.arch.md#2-isa-and-microarchitecture-configuration-parameters)
+[configuration catalog](docs/uqu_spec.arch.md#2-isa-and-microarchitecture-configuration-parameters)
 for all selectors and supported combinations.
+
+`MUA_MUL: dadda_mac` is the default: EX1 compresses the product, and MEM/EX2 inserts late C before final addition. `dadda` keeps product-only multiplication entirely in EX1; `iterative` retains the shared arithmetic baseline. Native MUL uses C=0; MAC remains an internal control without an assigned instruction encoding. See the [multiplier contract](docs/uqu_spec.mul.md) and [selection rationale](impl/asic/orfs/investigations/efficient-mul.md#decision).
 
 ### Forwarding paths
 
@@ -152,20 +156,21 @@ Orange dashed arrows are configurable bypasses, rather than additional stages.
 %%{init: {"flowchart": {"nodeSpacing": 20, "rankSpacing": 25, "padding": 10}, "themeVariables": {"fontSize": "14px"}}}%%
 flowchart LR
     DE["DE operands"] --> DE_EX["DE / EX"] --> EX["EX operands / result"]
-    EX --> EX_MEM["EX / MEM"] --> MEM["MEM result"] --> MEM_WB["MEM / WB"] --> WB["WB result"]
+    EX --> EX_MEM["EX / MEM"] --> MEM["MEM / EX2 result"] --> MEM_WB["MEM / WB"] --> WB["WB result"]
 
-    %% Bypass edges 6–10; keep linkStyle indices aligned with these routes.
+    %% Bypass edges 6–11; keep linkStyle indices aligned with these routes.
     EX -.->|"EX → DE"| DE
     MEM -.->|"MEM → DE"| DE
     WB -.->|"WB → DE"| DE
     MEM -.->|"MEM → EX"| EX
     WB -.->|"WB → EX"| EX
+    WB -.->|"late C → EX2"| MEM
 
     classDef stage stroke:#3b82f6,stroke-width:2px
     classDef boundary stroke:#8b5cf6,stroke-width:3px
     class DE,EX,MEM,WB stage
     class DE_EX,EX_MEM,MEM_WB boundary
-    linkStyle 6,7,8,9,10 stroke:#d97706,stroke-width:2px
+    linkStyle 6,7,8,9,10,11 stroke:#d97706,stroke-width:2px
 ```
 
 | Bypass | Enable |
@@ -175,13 +180,14 @@ flowchart LR
 | WB → DE | `MUA_FORWARDING` (no separate path selector) |
 | MEM → EX | `MUA_FORWARDING && MUA_FORWARD_MEM_TO_EX` |
 | WB → EX | `MUA_FORWARDING && MUA_FORWARD_WB_TO_EX` |
+| Registered WB → MEM/EX2 C | `MUA_FORWARDING`, for `dadda_mac` internal MAC only |
 
-All five routes default to enabled. A matching producer must have a valid,
+All five ordinary routes default to enabled. The late-C route is independent of the ordinary WB-to-EX selector. A matching producer must have a valid,
 forwardable result; otherwise the consumer waits or uses a proven EX-bypass
 guarantee. Load data becomes forwardable after registering a successful response.
 Store data is resolved in EX. Paired XIF results forward only the primary
 destination; the secondary waits for register-file visibility. See the
-[hazard contract](doc/uqu_spec.arch.md#4-configurable-operand-forwarding).
+[hazard contract](docs/uqu_spec.arch.md#4-configurable-operand-forwarding).
 
 Captured EX operands connect directly from the parent-owned registers. The
 core omits later EX bypass muxes when the configured DE routes require capture
@@ -198,6 +204,7 @@ word-buffer fall-through still exposes live instruction control paths. See the
 
 | Component | RTL | Verification guide |
 | --- | --- | --- |
+| Canonical split PP/Dadda/BK MUL/MAC | [uqu_daddamul_rows.v](src/uquintus/uqu_daddamul_rows.v), [uqu_mul_finish.v](src/uquintus/uqu_mul_finish.v) | [Product rows](verif/sim/daddamul_rows/README.md) / [late-C pipeline](verif/sim/mac_pipeline/README.md) |
 | Native processor core | [uqu_core.v](src/uquintus/uqu_core.v) | [Core interface and programs](verif/sim/core/README.md) |
 | Core pipeline control | [uqu_pipeline_ctrl.v](src/uquintus/uqu_pipeline_ctrl.v) | [Controller interface and tests](verif/sim/pipeline_ctrl/README.md) |
 | Core XIF lifetime control | [uqu_xif_ctrl.v](src/uquintus/uqu_xif_ctrl.v) | [ID reservation, cleanup and core tests](verif/sim/xif_ctrl/README.md) |
@@ -215,10 +222,10 @@ word-buffer fall-through still exposes live instruction control paths. See the
 | General-purpose register file | [uqu_gpregfile.v](src/uquintus/uqu_gpregfile.v) | [Register-file tests and interface](verif/sim/gpregfile/README.md) |
 | Architectural CSR register file | [uqu_csregfile.v](src/uquintus/uqu_csregfile.v) | [CSR interface and tests](verif/sim/csregfile/README.md) |
 | Load/store unit | [uqu_lsu.v](src/uquintus/uqu_lsu.v) | [LSU interface and tests](verif/sim/lsu/README.md) |
-| Memory stage | [uqu_stage_mem.v](src/uquintus/uqu_stage_mem.v) | [MEM interface and tests](verif/sim/mem/README.md) |
+| Memory / EX2 stage | [uqu_stage_mem.v](src/uquintus/uqu_stage_mem.v) | [MEM interface and tests](verif/sim/mem/README.md) |
 | Write-back stage | [uqu_stage_wb.v](src/uquintus/uqu_stage_wb.v) | [WB interface and tests](verif/sim/wb/README.md) |
 | Core-owned two-port PMP checker | [uqu_pmp.v](src/uquintus/uqu_pmp.v) | [PMP interface and tests](verif/sim/pmp/README.md) |
-| Execute stage | [uqu_stage_ex.v](src/uquintus/uqu_stage_ex.v) | [EX interface and tests](verif/sim/ex/README.md) |
+| EX1 stage | [uqu_stage_ex.v](src/uquintus/uqu_stage_ex.v) | [EX interface and tests](verif/sim/ex/README.md) |
 | Base integer ALU | [uqu_alu.v](src/uquintus/uqu_alu.v) | [ALU interface and tests](verif/sim/alu/README.md) |
 | Native scalar Zfinx FPU | [uqu_fpu.v](src/uquintus/uqu_fpu.v) | [FPU interface and tests](verif/sim/fpu/README.md) |
 | Structural single-cycle multiplier | [uqu_daddamul.v](src/uquintus/uqu_daddamul.v) | [Dadda interface, selection and tests](verif/sim/daddamul/README.md) |
@@ -228,7 +235,7 @@ word-buffer fall-through still exposes live instruction control paths. See the
 The [native Zfinx FPU adapter](src/uquintus/uqu_fpu.v) instantiates CVFPU/FPnew
 with scalar FP32 and 32-bit integer conversions. It supports all 22 decoded
 operations, five rounding modes, held results/flags and flush cancellation.
-FP state updates at WB retirement. The [interface contract](doc/uqu_spec.arch.md#331-fpu-adapter-interface)
+FP state updates at WB retirement. The [interface contract](docs/uqu_spec.arch.md#331-fpu-adapter-interface)
 and [FPU tests](verif/sim/fpu/README.md) describe the integration.
 
 `config/rv32i_zfinx.yml` enables it. Six `MUA_FPU_*` settings select internal
@@ -240,7 +247,7 @@ Verilog-2005 and imported IP retains SystemVerilog.
 Run `bender checkout` to prepare the exact dependencies recorded in `Bender.lock`.
 Integer-only runs select owned RTL; the runner includes imported HDL
 automatically when a declared dependency selector such as `ISA_ZFINX` is enabled. See the
-[dependency guide](doc/uqu_spec.build.md#13-pinned-cvfpu-dependency-without-git-submodules).
+[dependency guide](docs/uqu_spec.build.md#13-pinned-cvfpu-dependency-without-git-submodules).
 
 Provide Bender, Verilator, GNU Make, a C++ compiler, and the Python dependencies
 in `verif/requirements.txt` through your environment. Then run:
@@ -433,5 +440,5 @@ two controlled placed results. `make impl` now runs current RTL through placemen
 and timing repair, with scoped critical-path tables in the report. Supply
 `SDC=<file>` for caller-provided constraints; omit the reset-delay override in
 that case. CTS, routing and extracted power/timing remain open.
-The [benchmarking specification](doc/uqu_spec.bench.md) defines `T_min` and
+The [benchmarking specification](docs/uqu_spec.bench.md) defines `T_min` and
 estimated maximum frequency with their measurement assumptions.

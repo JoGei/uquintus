@@ -33,7 +33,7 @@ module uqu_core #(
     parameter MUA_IF_BUFFER_WORDS = 2,
     parameter MUA_REDIRECT_BYPASS = `UQU_REDIRECT_BYPASS_NONE,
     parameter MUA_HARDENED = 0,
-    parameter MUA_MUL = `UQU_MUL_ITERATIVE,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
     parameter MUA_MULDIV_ITERUNROLL = 8,
     parameter MUA_FPU_PIPE_REGS_FMA = 2,
@@ -141,6 +141,8 @@ module uqu_core #(
     reg [1:0] mem_pending_q;
     reg [2:0] mem_kind_q, mem_system_q, mem_op_q, mem_csr_op_q;
     reg [31:0] mem_data_q, mem_store_data_q, mem_csr_src_q;
+    wire [63:0] mem_mul_row_b;
+    wire mem_mul_phase2, mem_mul_high;
     reg [11:0] mem_csr_addr_q;
     reg [4:0] mem_fflags_q;
 
@@ -207,7 +209,17 @@ module uqu_core #(
     wire ex_exception, ex_fflags_valid;
     wire [4:0] ex_cause, ex_fflags;
     wire [31:0] ex_tval, ex_result, ex_store_data;
-    wire ex_operands_ready = ((ex_rs_ready & ex_used_q) == ex_used_q);
+    wire ex_result_available, ex_mul_phase2, ex_mul_high;
+    wire [63:0] ex_mul_row_a, ex_mul_row_b;
+    wire late_c_ex = (MUA_MUL == `UQU_MUL_DADDA_MAC) &&
+        (ex_fu_q == `UQU_FU_MULDIV) && (ex_op_q == `UQU_MDU_MAC);
+    wire late_c_de;
+    wire [2:0] ex_required = ex_used_q & (late_c_ex ? 3'b011 : 3'b111);
+    wire ex_operands_ready = ((ex_rs_ready & ex_required) == ex_required);
+    wire mem_mul_accumulate, mem_mul_addend_ready;
+    wire [31:0] mem_mul_addend, mem_c_payload;
+    wire [4:0] mem_c_addr;
+    wire mem_c_captured;
     wire [31:0] ex_a = (ex_a_sel_q == `UQU_A_PC) ? ex_pc_q :
                              (ex_a_sel_q == `UQU_A_RS1) ? ex_rs[0] : 32'd0;
     wire [31:0] ex_b = (ex_b_sel_q == `UQU_B_IMM) ? ex_imm_q :
@@ -237,7 +249,7 @@ module uqu_core #(
          ((wb_csr_addr_q >= 12'h3b0) && (wb_csr_addr_q <= 12'h3ef)));
     wire wb_redirect = wb_exception_fire || wb_mret || wb_pmp_recover;
     wire [31:0] wb_target = wb_exception_fire ? {mtvec[31:2],2'b00} : wb_mret ? mepc : wb_next_pc_q;
-    wire ex_forwardable = ex_complete && !ex_exception && !ex_lsu_q && (ex_kind_q == `UQU_WB_RESULT);
+    wire ex_forwardable = ex_result_available && !ex_exception && !ex_lsu_q && (ex_kind_q == `UQU_WB_RESULT);
     wire mem_forwardable = mem_complete && !mem_exception && !mem_lsu_q && (mem_kind_q == `UQU_WB_RESULT);
     // CSR instructions serialize younger admission through retirement. Their
     // read values reach younger consumers through the GPR file after that edge,
@@ -307,7 +319,7 @@ module uqu_core #(
         .imem_rvalid_i(imem_rvalid_i), .imem_rdata_i(imem_rdata_i), .imem_err_i(imem_err_i)
     );
     uqu_gpregfile #(
-        .ISA_E(ISA_E), .ISA_ZFINX(ISA_ZFINX), .XIF(XIF), .XIF_NUM_RS(XIF_NUM_RS),
+        .ISA_E(ISA_E), .ISA_M(ISA_M), .MUA_MUL(MUA_MUL), .ISA_ZFINX(ISA_ZFINX), .XIF(XIF), .XIF_NUM_RS(XIF_NUM_RS),
         .XIF_DUALWRITE(XIF_DUALWRITE), .MUA_REGFILE_IMPL(MUA_REGFILE_IMPL)
     ) u_gpr (
         .clk_i(clk_i), .rst_ni(rst_ni), .raddr0_i(de_rs_addr[0]), .raddr1_i(de_rs_addr[1]), .raddr2_i(de_rs_addr[2]),
@@ -315,7 +327,7 @@ module uqu_core #(
         .we0_i(wb_we0), .waddr0_i(wb_waddr0), .wdata0_i(wb_wdata0), .we1_i(wb_we1), .waddr1_i(wb_waddr1), .wdata1_i(wb_wdata1)
     );
     uqu_hazard #(
-        .ISA_E(ISA_E), .ISA_ZFINX(ISA_ZFINX), .XIF(XIF), .XIF_NUM_RS(XIF_NUM_RS), .XIF_DUALWRITE(XIF_DUALWRITE),
+        .ISA_E(ISA_E), .ISA_M(ISA_M), .MUA_MUL(MUA_MUL), .ISA_ZFINX(ISA_ZFINX), .XIF(XIF), .XIF_NUM_RS(XIF_NUM_RS), .XIF_DUALWRITE(XIF_DUALWRITE),
         .MUA_FORWARDING(MUA_FORWARDING), .MUA_FORWARD_EX_TO_DE(MUA_FORWARD_EX_TO_DE),
         .MUA_FORWARD_MEM_TO_DE(MUA_FORWARD_MEM_TO_DE), .MUA_FORWARD_MEM_TO_EX(MUA_FORWARD_MEM_TO_EX),
         .MUA_FORWARD_WB_TO_EX(MUA_FORWARD_WB_TO_EX), .MUA_DE_OPERAND_RETENTION(MUA_DE_OPERAND_RETENTION)
@@ -324,6 +336,12 @@ module uqu_core #(
         .de_rs0_addr_i(de_rs_addr[0]), .de_rs1_addr_i(de_rs_addr[1]), .de_rs2_addr_i(de_rs_addr[2]),
         .de_rs0_i(gpr_data[0]), .de_rs1_i(gpr_data[1]), .de_rs2_i(gpr_data[2]),
         .de_rs_used_i(de_used), .de_rs_need_now_i(de_need_now),
+        .de_late_c_i(late_c_de), .ex_late_c_i(late_c_ex),
+        .ex_primary_registered_i(!ex_lsu_q && (ex_kind_q == `UQU_WB_RESULT)),
+        .mem_primary_registered_i(!mem_lsu_q && (mem_kind_q == `UQU_WB_RESULT)),
+        .mem_late_c_i(mem_mul_accumulate), .mem_c_addr_i(mem_c_addr),
+        .mem_c_i(mem_c_payload), .mem_c_captured_i(mem_c_captured),
+        .mem_c_o(mem_mul_addend), .mem_c_ready_o(mem_mul_addend_ready),
         .de_rs0_o(de_rs[0]), .de_rs1_o(de_rs[1]), .de_rs2_o(de_rs[2]), .de_rs_ready_o(de_rs_ready), .de_rs_ex_guaranteed_o(de_guaranteed),
         .ex_valid_i(ex_valid_q), .ex_rs0_addr_i(ex_rs_addr_q[0]), .ex_rs1_addr_i(ex_rs_addr_q[1]), .ex_rs2_addr_i(ex_rs_addr_q[2]),
         .ex_rs0_i(ex_rs_data_q[0]), .ex_rs1_i(ex_rs_data_q[1]), .ex_rs2_i(ex_rs_data_q[2]),
@@ -337,7 +355,7 @@ module uqu_core #(
         .wb_result_available_i(wb_forwardable), .wb_result_forwardable_i(wb_forwardable), .wb_result_i(wb_forward_data), .wb_advance_i(wb_fire)
     );
     uqu_stage_de #(
-        .ISA_E(ISA_E), .ISA_M(ISA_M), .ISA_C(ISA_C), .ISA_ZFINX(ISA_ZFINX), .ISA_ZIFENCEI(ISA_ZIFENCEI),
+        .ISA_E(ISA_E), .ISA_M(ISA_M), .MUA_MUL(MUA_MUL), .ISA_C(ISA_C), .ISA_ZFINX(ISA_ZFINX), .ISA_ZIFENCEI(ISA_ZIFENCEI),
         .ISA_F(ISA_F), .ISA_A(ISA_A), .ISA_UMODE(ISA_UMODE), .MUA_C_IMPL(MUA_C_IMPL), .MUA_C_DECOMPRESS_STAGE(MUA_C_DECOMPRESS_STAGE),
         .XIF(XIF), .XIF_NUM_RS(XIF_NUM_RS), .XIF_DUALWRITE(XIF_DUALWRITE), .DEBUG(DEBUG)
     ) u_de (
@@ -348,7 +366,7 @@ module uqu_core #(
         .rs0_i(de_rs[0]), .rs1_i(de_rs[1]), .rs2_i(de_rs[2]), .rs_ready_i(de_rs_ready), .rs_ex_guaranteed_i(de_guaranteed),
         .rs0_addr_o(de_rs_addr[0]), .rs1_addr_o(de_rs_addr[1]), .rs2_addr_o(de_rs_addr[2]),
         .rs_used_o(de_used), .rs_need_now_o(de_need_now), .rs_ex_used_o(de_ex_used), .rs_captured_o(de_captured),
-        .native_o(), .fu_o(de_fu), .op_o(de_op), .a_sel_o(de_a_sel), .b_sel_o(de_b_sel), .imm_o(de_imm),
+        .native_o(), .late_c_o(late_c_de), .fu_o(de_fu), .op_o(de_op), .a_sel_o(de_a_sel), .b_sel_o(de_b_sel), .imm_o(de_imm),
         .a_o(), .b_o(), .c_o(), .rm_o(de_rm), .pass_data_o(de_pass), .store_data_o(),
         .rd_we_o(de_rd_we), .rd_o(de_rd), .rd1_o(de_rd1), .rd_pending_o(de_pending), .lsu_o(de_lsu), .mem_we_o(de_mem_we), .mem_op_o(de_mem_op),
         .wb_kind_o(de_kind), .system_o(de_system), .serialize_o(de_serialize), .csr_addr_o(de_csr_addr), .csr_op_o(de_csr_op),
@@ -378,15 +396,19 @@ module uqu_core #(
         .pass_data_i(ex_pass_q), .store_data_i(ex_rs[1]), .instr_i(ex_original_q),
         .exception_valid_i(ex_exception_q), .exception_cause_i(ex_cause_q), .exception_tval_i(ex_tval_q),
         .result_o(ex_result), .store_data_o(ex_store_data), .fflags_valid_o(ex_fflags_valid), .fflags_o(ex_fflags),
+        .result_available_o(ex_result_available), .mul_phase2_o(ex_mul_phase2), .mul_high_o(ex_mul_high),
+        .mul_row_a_o(ex_mul_row_a), .mul_row_b_o(ex_mul_row_b),
         .exception_valid_o(ex_exception), .exception_cause_o(ex_cause), .exception_tval_o(ex_tval)
     );
     wire lsu_res_valid, lsu_res_registered, lsu_res_exception, lsu_res_ready;
     wire [31:0] lsu_res_data, lsu_res_forward_data, lsu_res_tval;
     wire [4:0] lsu_res_cause;
     reg wb_lsu_q;
-    uqu_stage_mem u_mem (
+    uqu_stage_mem #(.ISA_M(ISA_M), .MUA_MUL(MUA_MUL)) u_mem (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(mem_flush), .valid_i(mem_valid_q), .ready_o(), .valid_o(mem_complete), .ready_i(mem_ready),
         .lsu_i(mem_lsu_q), .we_i(mem_we_q), .op_i(mem_op_q), .result_i(mem_data_q), .store_data_i(mem_store_data_q),
+        .mul_row_b_i(mem_mul_row_b), .mul_phase2_i(mem_mul_phase2), .mul_high_i(mem_mul_high),
+        .mul_accumulate_i(mem_mul_accumulate), .mul_addend_i(mem_mul_addend), .mul_addend_ready_i(mem_mul_addend_ready),
         .instr_i(mem_original_q), .priv_m_i(mem_effective_priv_m), .fflags_valid_i(mem_fflags_valid_q), .fflags_i(mem_fflags_q),
         .exception_valid_i(mem_exception_q), .exception_cause_i(mem_cause_q), .exception_tval_i(mem_tval_q), .request_permit_i(mem_request_permit),
         .lsu_res_ready_i(lsu_res_ready), .lsu_res_flush_i(1'b0),
@@ -522,8 +544,8 @@ module uqu_core #(
             mem_xif_id_q <= ex_xif_id_q;
             mem_rd_we_q <= ex_rd_we_q;
             mem_pending_q <= ex_pending_q;
-            mem_data_q <= ex_result;
-            mem_store_data_q <= ex_store_data;
+            mem_data_q <= ex_mul_phase2 ? ex_mul_row_a[31:0] : ex_result;
+            mem_store_data_q <= ex_mul_phase2 ? ex_mul_row_a[63:32] : ex_store_data;
             mem_lsu_q <= ex_lsu_q;
             mem_we_q <= ex_mem_we_q;
             mem_op_q <= ex_mem_op_q;
@@ -564,6 +586,60 @@ module uqu_core #(
             wb_tval_q <= mem_tval;
         end
     end
+    generate
+        if ((ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC)) begin : gen_mem_mul_payload
+            reg [63:0] row_b_q;
+            reg phase2_q, high_q;
+
+            assign mem_mul_row_b = row_b_q;
+            assign mem_mul_phase2 = phase2_q;
+            assign mem_mul_high = high_q;
+            always @(posedge clk_i) begin
+                if (rst_ni && mem_enable && mem_next_valid) begin
+                    phase2_q <= ex_mul_phase2 && !ex_exception;
+                    high_q <= ex_mul_high;
+                    if (ex_mul_phase2) row_b_q <= ex_mul_row_b;
+                end
+            end
+        end else begin : gen_no_mem_mul_payload
+            assign mem_mul_row_b = 64'd0;
+
+            assign mem_mul_phase2 = 1'b0;
+            assign mem_mul_high = 1'b0;
+        end
+    endgenerate
+    generate
+        if ((ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC)) begin : gen_late_c_payload
+            reg [31:0] c_q;
+            reg [4:0] addr_q;
+            reg captured_q, accumulate_q;
+            assign mem_c_payload = c_q;
+            assign mem_c_addr = addr_q;
+            assign mem_c_captured = captured_q;
+            assign mem_mul_accumulate = accumulate_q;
+            always @(posedge clk_i) begin
+                if (!rst_ni || mem_flush) begin
+                    captured_q <= 1'b0;
+                    accumulate_q <= 1'b0;
+                end else if (mem_enable) begin
+                    accumulate_q <= mem_next_valid && late_c_ex && !ex_exception;
+                    captured_q <= mem_next_valid && ex_rs_ready[2];
+                    if (mem_next_valid) begin
+                        c_q <= ex_rs[2];
+                        addr_q <= ex_rs_addr_q[2];
+                    end
+                end else if (mem_valid_q && accumulate_q && !captured_q && mem_mul_addend_ready) begin
+                    c_q <= mem_mul_addend;
+                    captured_q <= 1'b1;
+                end
+            end
+        end else begin : gen_no_late_c_payload
+            assign mem_c_payload = 32'd0;
+            assign mem_c_addr = 5'd0;
+            assign mem_c_captured = 1'b0;
+            assign mem_mul_accumulate = 1'b0;
+        end
+    endgenerate
     genvar source_idx;
     generate
         for (source_idx = 0; source_idx < 3; source_idx = source_idx + 1) begin : gen_ex_source
@@ -571,16 +647,18 @@ module uqu_core #(
             // register matching and result-readiness control off its word.
             // Without deferred admission, every used EX operand takes this
             // registered path and the later bypass muxes elaborate away.
-            assign ex_rs[source_idx] = EX_DEFERRED_OPERANDS && !ex_captured_q[source_idx] ?
+            localparam DEFERRED = EX_DEFERRED_OPERANDS ||
+                ((source_idx == 2) && (MUA_MUL == `UQU_MUL_DADDA_MAC));
+            assign ex_rs[source_idx] = DEFERRED && !ex_captured_q[source_idx] ?
                                       hazard_ex_rs[source_idx] : ex_rs_data_q[source_idx];
-            assign ex_rs_ready[source_idx] = EX_DEFERRED_OPERANDS ? hazard_ex_rs_ready[source_idx] :
+            assign ex_rs_ready[source_idx] = DEFERRED ? hazard_ex_rs_ready[source_idx] :
                                             (rst_ni && ex_valid_q && ex_used_q[source_idx]);
             always @(posedge clk_i) begin
                 if (rst_ni && !ex_flush) begin
                     if (ex_enable && ex_next_valid) begin
                         ex_rs_addr_q[source_idx] <= de_rs_addr[source_idx];
                         ex_rs_data_q[source_idx] <= de_rs[source_idx];
-                    end else if (EX_DEFERRED_OPERANDS && ex_valid_q && !ex_fire && ex_used_q[source_idx] &&
+                    end else if (DEFERRED && ex_valid_q && !ex_fire && ex_used_q[source_idx] &&
                                  !ex_captured_q[source_idx] && ex_rs_ready[source_idx]) begin
                         ex_rs_data_q[source_idx] <= ex_rs[source_idx];
                     end

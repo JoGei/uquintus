@@ -1,0 +1,7 @@
+top_module: uqu_daddamul_rows_tb
+bender_target: daddamul_rows
+test_module: test_uqu_daddamul_rows
+parameters: []
+tests:
+  - directed
+  - randomized

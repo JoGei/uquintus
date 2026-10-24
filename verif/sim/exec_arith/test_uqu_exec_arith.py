@@ -42,7 +42,7 @@ class ExecArithTest(uvm_test):
             return 1
         if op >= 4:
             return (2 + self.factor - 1) // self.factor + 32 // self.factor + 1
-        return {0: 1, 1: 2, 2: 32 // self.factor, 3: 1}[self.mul_mode]
+        return {2: 32 // self.factor, 3: 1}[self.mul_mode]
 
     def request(self, muldiv, op, a, b):
         self.dut.select_muldiv_i.value = muldiv
@@ -121,11 +121,17 @@ class MixedTest(ExecArithTest):
                     for op in range(8):
                         # Switch owners only after the prior result transfers.
                         await self.operation(0, list(ALU_OPS.values())[op], a, b)
-                        await self.operation(1, op, a, b, hold=self.rng.randrange(4))
+                        if self.mul_mode not in (13,) or op >= 4:
+                            await self.operation(1, op, a, b, hold=self.rng.randrange(4))
+                        else:
+                            self.request(1, op, a, b)
+                            await self.settle()
+                            assert self.outputs() == (0, 0, 0, 0), 'split MUL accepted by local divider'
+                            await self.edge()
                         await self.operation(0, 8, b, a, hold=self.rng.randrange(4))
             for _ in range(256):
                 muldiv = self.rng.randrange(2)
-                op = self.rng.randrange(8) if muldiv else self.rng.choice(list(ALU_OPS.values()))
+                op = self.rng.randrange(4 if self.mul_mode in (13,) else 0,8) if muldiv else self.rng.choice(list(ALU_OPS.values()))
                 await self.operation(muldiv, op, self.rng.getrandbits(32),
                                      self.rng.getrandbits(32), hold=self.rng.randrange(5))
         self.logger.info('Shared-parent mixed results: %d', self.checks)
@@ -140,6 +146,8 @@ class ControlTest(ExecArithTest):
             await self.disabled_muldiv()
         else:
             for muldiv, op in ((0, 2), (0, 13), (1, 0), (1, 1), (1, 4), (1, 6)):
+                if muldiv and op < 4 and self.mul_mode in (13,):
+                    continue  # Compression/cancellation belongs to the EX-stage tests.
                 latency = self.latency(muldiv, op)
                 for reset in (False, True):
                     # Include cancellation before acceptance, mid-compute,

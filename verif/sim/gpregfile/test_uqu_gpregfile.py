@@ -14,7 +14,7 @@ class GpRegfileTest(uvm_test):
         self.dut = cocotb.top
         self.params = json.loads(os.environ["UQU_COMPONENT_PARAMS"])
         self.num_regs = 16 if self.params["ISA_E"] else 32
-        self.read_third = bool(self.params["ISA_ZFINX"] or
+        self.read_third = bool((self.params["ISA_M"] and self.params["MUA_MUL"] == 13) or self.params["ISA_ZFINX"] or
                                (self.params["XIF"] and self.params["XIF_NUM_RS"] == 3))
         self.write_second = bool(self.params["XIF"] and self.params["XIF_DUALWRITE"])
         self.model = [None] * self.num_regs

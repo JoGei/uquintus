@@ -36,7 +36,9 @@ disabled-M exceptions in the randomized stream and pass-through cancellation
 in the drain scenario. The [standalone stage tests](../ex/README.md) additionally
 cover request uniqueness and precise execution latencies without boundary delay.
 
-All three MUL styles and unroll factors 1, 2, 4, 8, 16, and 32 can use these
+All supported MUL implementations and unroll factors 1, 2, 4, 8, 16, and 32 can use these
 tests through complete hardware profiles. The [shared EX model](../common/ex_model.py)
 uses mathematical ALU/MUL/DIV results and instruction-level expected outcomes,
 independently of the DUT's local tracking and pipeline-register implementation.
+
+For `dadda_mac`, the fixture reuses its result/store words for row A, captures row B plus phase/half tags, and finishes after the EX1/MEM-EX2 boundary with `uqu_mul_finish`. It carries C separately and inserts it in the finishing compressor. A 64-operation independent stream drains in `N+2` fixture cycles; random stalls retain all payload and identity. Native multiplication ignores C. This fixture supplies an already available C; the [MAC pipeline fixture](../mac_pipeline/README.md) separately verifies late readiness and registered WB→EX2 forwarding with real hazard and GPR blocks. Core regressions check LSU coexistence and older-fault cancellation. There is one fixed two-row cut.

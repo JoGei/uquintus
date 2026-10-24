@@ -150,3 +150,9 @@ central controller and the remaining stages. Its regressions add integrated
 execution coverage; these component tests isolate EX behavior. MEM/LSU and the
 CSR register file also have separate implementations and tests.
 The [WB stage](../wb/README.md) also has standalone and real-parent/GPR tests.
+
+## Canonical EX1 multiplication
+
+`MUA_MUL: dadda_mac` (default, value 13) compresses PP/Dadda A×B here and finishes in MEM/EX2. `mul_phase2_o`, `mul_high_o`, `mul_row_a_o[63:0]` and `mul_row_b_o[63:0]` identify the product-row payload. The parent owns its registers and the separately carried C. `valid_o` can report compression complete while `result_available_o=0`; rows are never GPR forwarding values. For other successful instructions, availability follows completion. WB retains retirement.
+
+Internal MAC control 8 requires A/B in EX1 and consumes C in MEM/EX2. Native MUL controls 0–3 ignore C and retain signedness/half semantics. The local MDU accepts only DIV/REM in this configuration. `dadda` instead finishes the product in EX1; `iterative` retains shared arithmetic. No decoder emits MAC yet. See the [multiplier contract](../../../docs/uqu_spec.mul.md) and [MAC pipeline fixture](../mac_pipeline/README.md).

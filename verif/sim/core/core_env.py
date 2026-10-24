@@ -427,6 +427,11 @@ class CoreTest(uvm_test):
         self.edge_o=o
         o.update({n:self.signal(n) for n in ('de_ex_used', 'de_captured',
             'de_guaranteed', 'ex_used_q', 'ex_captured_q')})
+        if self.params['MUA_MUL'] in (13,):
+            o.update({n:self.signal(n) for n in ('ex_mul_phase2', 'ex_result_available',
+                'ex_forwardable', 'ex_fire', 'ex_pc_q', 'mem_mul_phase2', 'mem_mul_high',
+                'mem_mul_row_b', 'mem_data_q', 'mem_store_data_q', 'mem_fire', 'mem_flush',
+                'mem_lsu_q', 'dmem_req_o', 'mem_pmp_valid')})
         if self.params['MUA_BRANCH_PREDICTOR'] != 0 and self.params['MUA_BTB'] != 0:
             o.update({n:self.signal(n) for n in ('de_fire','de_control_flow','de_branch_taken',
                 'de_next_pc','de_predicted_next_pc_q','de_redirect','predictor_invalidate')})

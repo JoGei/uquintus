@@ -7,6 +7,7 @@
 module uqu_stage_de #(
     parameter ISA_E = 0,
     parameter ISA_M = 0,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter ISA_C = 0,
     parameter MUA_C_IMPL = `UQU_C_IMPL_DECOMPRESS,
     parameter MUA_C_DECOMPRESS_STAGE = `UQU_C_DECOMPRESS_IF,
@@ -52,6 +53,7 @@ module uqu_stage_de #(
     output wire [2:0]                     rs_ex_used_o,
     output wire [2:0]                     rs_captured_o,
     output wire                           native_o,
+    output wire                           late_c_o,
     output wire [1:0]                     fu_o,
     output wire [4:0]                     op_o,
     output wire [1:0]                     a_sel_o,
@@ -204,6 +206,9 @@ module uqu_stage_de #(
     // live flush, validity or source-readiness control into this data word.
     assign next_pc_o = pre_fault || unknown_fault ||
                        (core_native && (dec_system == `UQU_SYS_ECALL)) ? pc_i : branch_next_pc;
+    // Operand-consumption metadata must not depend on operand readiness/faults.
+    assign late_c_o = (MUA_MUL == `UQU_MUL_DADDA_MAC) && native_sources &&
+        (dec_fu == `UQU_FU_MULDIV) && (dec_op == `UQU_MDU_MAC);
     assign fu_o = native_payload ? dec_fu : `UQU_FU_PASS;
     assign op_o = native_payload ? dec_op : 5'd0;
     assign a_sel_o = native_payload ? dec_a_sel : `UQU_A_ZERO;

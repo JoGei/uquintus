@@ -20,3 +20,4 @@ parameters:
 tests:
   - pipeline
   - drain_flush
+  - split_lifecycle

@@ -15,7 +15,7 @@ BOOLEAN_PARAMS = {
 }
 CHOICES = {
     "MUA_BRANCH_PREDICTOR": ("none", "static_not_taken", "bimodal"),
-    "MUA_MUL": ("parallel", "parallel+stages+2", "iterative", "dadda"),
+    "MUA_MUL": ("iterative", "dadda", "dadda_mac"),
     "MUA_DIV": ("iterative",),
     "MUA_MULDIV_ITERUNROLL": (1, 2, 4, 8, 16, 32),
     "XIF_NUM_RS": (2, 3),
@@ -131,9 +131,7 @@ def configuration_label(config):
                                         'ifetch_result':'result'}[part]
                                        for part in config['MUA_REDIRECT_BYPASS'].split('+')))
     if config["ISA_M"]:
-        multiplier = {
-            "iterative": "iter", "parallel": "para", "parallel+stages+2": "para+stages2", "dadda": "dadda",
-        }[config["MUA_MUL"]]
+        multiplier = {"iterative": "iter", "dadda": "dadda", "dadda_mac": "dadda-mac"}[config["MUA_MUL"]]
         divider = {"iterative": "iter"}[config["MUA_DIV"]]
         fields += [f"mua-mul:{multiplier}", f"mua-div:{divider}"]
         if config["MUA_MUL"] == "iterative" or config["MUA_DIV"] == "iterative":

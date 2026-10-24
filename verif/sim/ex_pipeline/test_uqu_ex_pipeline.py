@@ -12,7 +12,7 @@ from cocotb.triggers import Timer
 from pyuvm import uvm_root, uvm_test
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
-from ex_model import FU_MULDIV, FU_PASS, assert_outcome, cycles, outcome, random_token, token
+from ex_model import FU_MULDIV, FU_PASS, assert_outcome, cycles, outcome, random_token, token, split_multiply, MAC
 
 FIELDS = ('fu', 'op', 'a', 'b', 'c', 'muldiv_a', 'muldiv_b', 'rm', 'pass_data', 'store_data', 'instr',
           'exception_valid', 'exception_cause', 'exception_tval', 'pc', 'rd')
@@ -42,7 +42,10 @@ class PipelineTest(uvm_test):
         return tuple(int(getattr(self.dut, 'out_' + field + '_o').value) for field in OUTPUTS)
 
     def expected(self, payload):
-        return outcome(payload, self.params) + (payload['pc'], payload['instr'], payload['rd'])
+        result = outcome(payload, self.params)
+        if split_multiply(payload, self.params) and not result[4]:
+            result = (result[0], 0) + result[2:]  # Store word is reused as row A high.
+        return result + (payload['pc'], payload['instr'], payload['rd'])
 
     async def initialize(self):
         d = self.dut
@@ -100,6 +103,15 @@ class PipelineTest(uvm_test):
                           instr=0x10000000 | i, store_data=0x12340000 | i) for i in range(64)]
         elapsed = await self.stream(sequence)
         assert elapsed == len(sequence) + 2, 'unexpected added execution/pipeline cycle'
+        if self.params['ISA_M'] and self.params['MUA_MUL'] in (13,):
+            multiplies = [token(fu=FU_MULDIV, op=i % 4, muldiv_a=(0x87654321+i) & 0xffffffff,
+                muldiv_b=(0xfedcba98-i) & 0xffffffff, pc=0x2000+4*i, rd=i % 32) for i in range(64)]
+            assert await self.stream(multiplies) == len(multiplies)+2, 'split multiplier lost initiation throughput'
+        if self.params['ISA_M'] and self.params['MUA_MUL'] in (13,):
+            macs = [token(fu=FU_MULDIV, op=MAC, muldiv_a=(0x87654321+i) & 0xffffffff,
+                muldiv_b=(0xfedcba98-i) & 0xffffffff, c=(i*0x12345679) & 0xffffffff,
+                pc=0x2800+4*i, rd=i % 32) for i in range(64)]
+            assert await self.stream(macs) == len(macs)+2, 'MAC lost initiation throughput'
         payloads = [random_token(self.rng, i, self.params) for i in range(512)]
         await self.stream(payloads, random_stalls=True)
         # End with a bubble rather than a hidden duplicate of the last token.
@@ -206,3 +218,75 @@ async def pipeline(_dut):
 @cocotb.test(timeout_time=2, timeout_unit='ms')
 async def drain_flush(_dut):
     await uvm_root().run_test(DrainFlushTest)
+
+
+class SplitLifecycleTest(PipelineTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.initialize()
+        if not self.params['ISA_M'] or self.params['MUA_MUL'] not in (13,):
+            self.drop_objection()
+            return
+        d = self.dut
+        older = token(fu=FU_MULDIV,op=MAC if self.params['MUA_MUL'] in (13,) else 1,c=0xfedcba98,muldiv_a=0x80000000,muldiv_b=0xffffffff,pc=0x2000)
+        younger = token(fu=FU_MULDIV,op=MAC if self.params['MUA_MUL'] in (13,) else 0,c=0xabcdef01,muldiv_a=0x12345678,muldiv_b=0x87654321,pc=0x2004)
+        for payload in (older,younger):
+            self.drive(payload)
+            d.in_valid_i.value = 1
+            await self.settle()
+            assert int(d.in_ready_o.value)
+            await self.edge()
+        d.in_valid_i.value = 0
+        for _ in range(3):
+            await self.settle()
+            assert int(d.out_valid_o.value) and self.outputs() == self.expected(older)
+            assert int(d.ex_valid_o.value) and not int(d.ex_fire_o.value)
+            await self.edge()
+        # EX-only cancellation must leave the older registered rows intact.
+        d.flush_i.value = 1
+        await self.settle()
+        assert not int(d.ex_fire_o.value) and self.outputs() == self.expected(older)
+        await self.edge()
+        d.flush_i.value = 0
+        assert not int(d.ex_valid_o.value)
+        recovery = token(op=0,a=9,b=5,pc=0x3000)
+        self.drive(recovery)
+        d.in_valid_i.value = 1
+        await self.settle()
+        assert int(d.in_ready_o.value) and self.outputs() == self.expected(older)
+        await self.edge()
+        d.in_valid_i.value = 0
+        d.out_ready_i.value = 1
+        await self.settle()
+        assert self.outputs() == self.expected(older)
+        await self.edge()
+        await self.settle()
+        assert int(d.out_valid_o.value) and self.outputs() == self.expected(recovery)
+        await self.edge()
+        # Reset invalidates both phases; stale high-half metadata cannot retire.
+        d.out_ready_i.value = 0
+        for payload in (older,younger):
+            self.drive(payload)
+            d.in_valid_i.value = 1
+            await self.settle()
+            assert int(d.in_ready_o.value)
+            await self.edge()
+        d.in_valid_i.value = 0
+        await self.settle()
+        assert int(d.out_valid_o.value) and int(d.ex_valid_o.value)
+        d.rst_ni.value = 0
+        await self.settle()
+        assert not int(d.out_valid_o.value) and not int(d.ex_valid_o.value)
+        await self.edge()
+        d.rst_ni.value = 1
+        for _ in range(3):
+            await self.settle()
+            assert not int(d.out_valid_o.value) and not int(d.ex_valid_o.value)
+            await self.edge()
+        await self.stream([older,younger])
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=2, timeout_unit='ms')
+async def split_lifecycle(_dut):
+    await uvm_root().run_test(SplitLifecycleTest)

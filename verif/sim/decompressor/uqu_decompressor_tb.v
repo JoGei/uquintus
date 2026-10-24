@@ -136,7 +136,7 @@ module uqu_decompressor_tb #(
         .rs_need_now_o(),
         .rs_ex_used_o(),
         .rs_captured_o(),
-        .native_o(),
+        .native_o(), .late_c_o(),
         .fu_o(),
         .op_o(),
         .a_sel_o(),

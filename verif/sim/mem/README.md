@@ -60,3 +60,11 @@ Tests cover grant-cycle transfer, local fault priority, request permission and
 WB capacity, delayed grants/responses, response buffering, flags, variable
 latency and age-qualified cancellation. The parent fixture adds PC/destination
 identity, independent WB stalls and shared PMP under mixed randomized traffic.
+
+## MEM/EX2 multiply and late accumulation
+
+With `ISA_M=1` and canonical `MUA_MUL: dadda_mac`, this stage owns combinational `uqu_mul_finish`. `mul_phase2_i=1` interprets `{store_data_i,result_i}` as row A, `mul_row_b_i[63:0]` as row B, and `mul_high_i` as the half selector. The parent owns these registers. The fixed two-row interface has no cut, family or final-adder selector. A split token enables neither LSU/PMP requests nor FP flags. Other instructions retain their existing interpretation; an older unresolved WB response may backpressure this stage.
+
+`mul_accumulate_i`, `mul_addend_i[31:0]` and `mul_addend_ready_i` supply late C. The two product rows and zero-extended C enter a 3:2 compressor before one BK-mapped addition. MAC waits for C; native multiplication ignores it, and known exceptions drain without waiting. Candidate result data remains independent of fault/completion qualification. The core/hazard unit owns C storage, source identity and registered WB resolution.
+
+The `split` test checks arbitrary rows, carries, wrapping, both halves, backpressure and LSU exclusion. `late_mac` checks arbitrary addends, missing-C stalls, native C suppression, exception drain and flush. Parent/core tests check instruction ownership and recovery. See the [multiplier contract](../../../docs/uqu_spec.mul.md).

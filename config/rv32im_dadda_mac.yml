@@ -1,11 +1,10 @@
-# RV32IMC: BP16/BTB16, six packed halfwords per target, IF decompression.
-# Dedicated single-cycle parallel MUL; iterative DIV with no unrolling.
-# DIV executes two setup, 32 iteration and one completion cycles.
+# Canonical PP/Dadda/BK MUL/MAC: EX1 compression, late C and final addition in MEM/EX2.
+# Complete RV32IM configuration with EX partial-product/Dadda compression and MEM addition.
 # Compile-time integration identity; single-hart systems use zero.
 HART_ID: 0
 ISA_E: 0
 ISA_M: 1
-ISA_C: 1
+ISA_C: 0
 ISA_ZFINX: 0
 ISA_F: 0
 ISA_A: 0
@@ -20,18 +19,18 @@ MUA_FORWARD_WB_TO_EX: 1
 MUA_DE_OPERAND_RETENTION: 0
 MUA_C_IMPL: decompress
 MUA_C_DECOMPRESS_STAGE: if
-MUA_BRANCH_PREDICTOR: bimodal
+MUA_BRANCH_PREDICTOR: none
 MUA_BP_ENTRIES: 16
-MUA_BTB: direct_mapped
+MUA_BTB: none
 MUA_BTB_ENTRIES: 16
-MUA_BTB_IDATA_HWORDS: 6
+MUA_BTB_IDATA_HWORDS: 0
 MUA_REGFILE_IMPL: ff
 MUA_IF_BUFFER_WORDS: 2
 MUA_REDIRECT_BYPASS: none
 MUA_HARDENED: 0
-MUA_MUL: parallel
+MUA_MUL: dadda_mac
 MUA_DIV: iterative
-MUA_MULDIV_ITERUNROLL: 1
+MUA_MULDIV_ITERUNROLL: 8
 XIF: 0
 XIF_NUM_RS: 3
 XIF_DUALWRITE: 0

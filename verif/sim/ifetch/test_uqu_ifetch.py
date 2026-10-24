@@ -544,6 +544,16 @@ class ControlTest(IfetchTest):
                 await self.respond(0x55)
             await self.reset()
             await self.operation(0x6000,data=0xFEEDFACE)
+        # Cancellation without replacement retains an irrelevant idle address.
+        for local in (False, True):
+            await self.reset()
+            await self.accept(0x1400, permit=False)
+            r = await self.cycle(flush=int(not local), clear=int(local),
+                                 req_valid=1, req_addr=0xA000, request_permit=0)
+            assert not r['imem_req'] and not r['req_ready']
+            assert r['imem_addr'] == 0x1400
+            r = await self.cycle()
+            assert not r['busy'] and not r['res_valid']
         self.drop_objection()
 
 

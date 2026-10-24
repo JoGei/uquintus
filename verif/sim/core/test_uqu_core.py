@@ -22,6 +22,81 @@ def custom_word(rd=6, a=1, b=2, op=0):
     return b << 20 | a << 15 | op << 12 | rd << 7 | 0x0b
 
 
+class SplitMultiplyTest(CoreTest):
+    async def cycle(self, *args, **kwargs):
+        o = await super().cycle(*args, **kwargs)
+        if o['wb_exception_fire'] and o['wb_pc_q'] == self.fault_load_pc:
+            # Failed bus transactions do not retire. Remove this explicitly
+            # checked request before the ordinary successful-access scoreboard.
+            assert self.accesses and self.accesses[0][:3] == (self.fault_load_pc,0,0x2004)
+            self.accesses.pop(0)
+        if self.params['MUA_MUL'] not in (13,):
+            return o
+        if o['ex_valid_q'] and o['ex_mul_phase2']:
+            assert not o['ex_result_available'] and not o['ex_forwardable'], 'intermediate rows forwarded as EX result'
+            self.phase1 += bool(o['ex_fire'])
+        if o['mem_valid_q'] and o['mem_mul_phase2']:
+            assert not o['mem_lsu_q'] and not o['dmem_req_o'] and not o['mem_pmp_valid']
+        payload = tuple(o[n] for n in ('mem_pc_q', 'mem_data_q', 'mem_store_data_q',
+                                      'mem_mul_row_b', 'mem_mul_phase2', 'mem_mul_high'))
+        if self.held_mul is not None and not o['mem_flush']:
+            assert o['mem_valid_q'] and payload == self.held_mul, 'MEM lost held intermediate payload or identity'
+        self.held_mul = payload if o['mem_valid_q'] and o['mem_mul_phase2'] and not o['mem_fire'] and not o['mem_flush'] else None
+        self.held_cycles += self.held_mul is not None
+        self.killed += bool(o['mem_valid_q'] and o['mem_mul_phase2'] and o['mem_flush'])
+        return o
+
+    async def run_phase(self):
+        self.raise_objection()
+        self.phase1 = self.held_cycles = self.killed = 0
+        self.held_mul = None
+        self.fault_load_pc = -1
+        if not self.params['ISA_M']:
+            self.put(BOOT,[ins_i(1,0,7),ins_j(0,0)])
+            await self.reset()
+            await self.finish(BOOT+4)
+            self.drop_objection()
+            return
+        self.skip_handler()
+        program = self.setup_traps() + [ins_i(1,0,-1), 0x80000137, 0x00002437]
+        # Independent signedness variants can overlap; every finished value is
+        # checked by the retirement oracle and the RVFI trace against the ISA.
+        for _ in range(8):
+            program += [ins_r(3+op,1,2,op,1) for op in range(4)]
+        # Adjacent ALU, branch, store-data and multiply consumers. Overwrites
+        # must preserve youngest-writer priority despite an older pending MUL.
+        for op in range(4):
+            program += [ins_r(3,1,2,op,1), ins_r(4,3,1),
+                        ins_r(3,1,2,op,1), ins_b(3,0,8,1), ins_i(4,4,1),
+                        ins_r(3,1,2,op,1), ins_s(8,3,0), ins_i(5,8,0,2,3),
+                        ins_r(3,1,2,op,1), ins_i(3,0,7), ins_r(4,3,1),
+                        ins_r(3,1,2,op,1), ins_r(4,3,1,0,1)]
+        # A delayed/faulting older WB load must contain a younger MEM multiply.
+        bad_pc = BOOT+4*len(program)
+        self.fault_load_pc = bad_pc
+        program += [ins_i(10,8,4,2,3), ins_r(9,1,2,1,1), ins_r(4,9,1),
+                    ins_s(8,9,8)]
+        self.errors['dmem'].add(0x2004)
+        self.expected_faults[bad_pc] = (5,0x2004)
+        # Exercise the retained divider without an EX multiplier datapath.
+        program += [ins_r(3,2,1,op,1) for op in range(4,8)]
+        end = self.put(BOOT,program)
+        self.put(end,[ins_j(0,0)])
+        await self.reset()
+        await self.finish(end)
+        assert len(self.faults) == 1
+        if self.params['MUA_MUL'] in (13,):
+            assert self.phase1 >= 32 and self.held_cycles and self.killed, (self.phase1,self.held_cycles,self.killed)
+        self.logger.info('Split MUL: %d phase-one transfers, %d held MEM cycles, %d flushed MEM multiplies',
+                         self.phase1,self.held_cycles,self.killed)
+        self.drop_objection()
+
+
+@cocotb.test(timeout_time=1000, timeout_unit='us')
+async def mul_split(_dut):
+    await uvm_root().run_test('SplitMultiplyTest')
+
+
 class PredictionTest(CoreTest):
     async def cycle(self, *args, **kwargs):
         o = await super().cycle(*args, **kwargs)

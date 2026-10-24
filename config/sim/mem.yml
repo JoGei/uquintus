@@ -1,8 +1,12 @@
 top_module: uqu_stage_mem
 bender_target: mem
 test_module: test_uqu_stage_mem
-parameters: []
+parameters:
+  - ISA_M
+  - MUA_MUL
 tests:
+  - split
   - directed
   - randomized
   - control
+  - late_mac

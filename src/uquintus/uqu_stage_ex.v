@@ -7,7 +7,7 @@
 module uqu_stage_ex #(
     parameter ISA_M = 0,
     parameter ISA_ZFINX = 0,
-    parameter MUA_MUL = `UQU_MUL_ITERATIVE,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
     parameter MUA_MULDIV_ITERUNROLL = 8,
     parameter MUA_FPU_PIPE_REGS_FMA = 2,
@@ -41,6 +41,12 @@ module uqu_stage_ex #(
     input  wire [4:0]  exception_cause_i,
     input  wire [31:0] exception_tval_i,
     output wire [31:0] result_o,
+    // Phase-one completion is not a forwardable product in split mode.
+    output wire        result_available_o,
+    output wire        mul_phase2_o,
+    output wire        mul_high_o,
+    output wire [63:0] mul_row_a_o,
+    output wire [63:0] mul_row_b_o,
     output wire [31:0] store_data_o,
     output wire        fflags_valid_o,
     output wire [4:0]  fflags_o,
@@ -61,12 +67,15 @@ module uqu_stage_ex #(
     wire active = enabled && valid_i;
     wire alu_selected = (fu_i == FU_ALU);
     wire muldiv_selected = (fu_i == FU_MULDIV);
+    wire mac_selected = (op_i == `UQU_MDU_MAC) && (MUA_MUL == `UQU_MUL_DADDA_MAC);
+    wire split_mul_selected = (ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC) &&
+        muldiv_selected && ((op_i[4:2] == 3'b000) || mac_selected);
     wire fpu_selected = (fu_i == FU_FPU);
     wire pass_selected = (fu_i == FU_PASS);
     wire alu_op_valid = !op_i[4] && ((!op_i[3]) ||
                         (op_i[3:0] == `UQU_ALU_SUB) || (op_i[3:0] == `UQU_ALU_SRA));
     wire illegal_control = (alu_selected && !alu_op_valid) ||
-        (muldiv_selected && ((ISA_M == 0) || (op_i[4:3] != 2'b00))) ||
+        (muldiv_selected && ((ISA_M == 0) || ((op_i[4:3] != 2'b00) && !mac_selected))) ||
         (fpu_selected && ((ISA_ZFINX == 0) || ((op_i > `UQU_FPU_FCVT_S_WU) ||
          (((op_i <= `UQU_FPU_FNMADD_S) || (op_i >= `UQU_FPU_FCVT_W_S)) &&
           (rm_i > 3'd4)))));
@@ -105,7 +114,8 @@ module uqu_stage_ex #(
 
     // Empty DE/EX can be filled even when the downstream register is occupied.
     // An occupied slot is replaced only when its instruction transfers onward.
-    assign valid_o = active && (fault || (pass_selected && (operands_ready_i || issued_q)) ||
+    assign valid_o = active && (fault || (split_mul_selected && operands_ready_i) ||
+                               (pass_selected && (operands_ready_i || issued_q)) ||
                                (!fault && fu_res_valid));
     assign ready_o = enabled && (!valid_i || (valid_o && ready_i));
     assign exception_valid_o = valid_o && fault;
@@ -117,6 +127,22 @@ module uqu_stage_ex #(
     // Only qualified consumers may forward or transfer it.
     assign result_o = alu_selected ? alu_result : muldiv_selected ? muldiv_result :
         fpu_selected ? fpu_result : pass_data_i;
+    assign result_available_o = valid_o && !fault && !split_mul_selected;
+    assign mul_phase2_o = split_mul_selected;
+    assign mul_high_o = (op_i[1:0] != 2'b00);
+    generate
+        if ((ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC)) begin : gen_dadda_rows
+            uqu_daddamul_rows u_compress (
+                .a_i(muldiv_a_i), .b_i(muldiv_b_i),
+                .signed_a_i((op_i[1:0] == 2'b01) || (op_i[1:0] == 2'b10)),
+                .signed_b_i(op_i[1:0] == 2'b01),
+                .row_a_o(mul_row_a_o), .row_b_o(mul_row_b_o)
+            );
+        end else begin : gen_no_mul_rows
+            assign mul_row_a_o = 64'd0;
+            assign mul_row_b_o = 64'd0;
+        end
+    endgenerate
     assign store_data_o = store_data_i;
     assign fflags_valid_o = valid_o && !fault && fpu_selected;
     assign fflags_o = fflags_valid_o ? fpu_fflags : 5'd0;
@@ -147,7 +173,7 @@ module uqu_stage_ex #(
         .MUA_MULDIV_ITERUNROLL(MUA_MULDIV_ITERUNROLL)
     ) u_muldiv (
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
-        .req_valid_i(request_valid && muldiv_selected), .req_ready_o(muldiv_req_ready),
+        .req_valid_i(request_valid && muldiv_selected && !split_mul_selected), .req_ready_o(muldiv_req_ready),
         .req_op_i(op_i[2:0]), .req_a_i(muldiv_a_i), .req_b_i(muldiv_b_i),
         .res_valid_o(muldiv_res_valid), .res_ready_i(result_ready && muldiv_selected),
         .res_data_o(muldiv_result), .arith_use_o(muldiv_arith_use),

@@ -272,3 +272,62 @@ async def lifecycle(_dut):
 @cocotb.test(timeout_time=1000, timeout_unit='us')
 async def randomized(_dut):
     await uvm_root().run_test(RandomizedTest)
+
+
+@cocotb.test(timeout_time=1000, timeout_unit='us')
+async def late_c(dut):
+    """Only registered WB may supply deferred C, regardless of EX bypass flags."""
+    p = json.loads(os.environ['UQU_COMPONENT_PARAMS'])
+    async def drive(**changes):
+        values = dict(defaults(), **changes)
+        for name, value in values.items():
+            getattr(dut, 'rst_ni' if name == 'rst_n' else name+'_i').value = value
+        dut.clk_i.value = 0
+        await Timer(1, units='ns')
+    await drive(rst_n=0)
+    dut.clk_i.value = 1
+    await Timer(1, units='ns')
+    enabled = p['ISA_M'] and p['MUA_MUL'] == 13
+    if not enabled:
+        await drive(mem_late_c=1, mem_c_addr=3, mem_c_captured=1, mem_c=123)
+        assert not int(dut.mem_c_ready_o.value)
+        return
+    fw = p['MUA_FORWARDING']
+    # EX/MEM primary data producers permit late admission even when unfinished.
+    for stage in ('ex', 'mem'):
+        await drive(de_late_c=1, de_rs2_addr=3, **{stage+'_pending':1,
+            stage+'_rd0':3, stage+'_primary_registered':1, stage+'_result_available':0})
+        assert bool(int(dut.de_rs_ex_guaranteed_o.value) & 4) == bool(fw)
+        assert not int(dut.de_rs_ready_o.value) & 4
+        # Unsafe producer classes and dual-write secondary destinations block.
+        await drive(de_late_c=1, de_rs2_addr=3, **{stage+'_pending':1,
+            stage+'_rd0':3, stage+'_primary_registered':0})
+        assert not int(dut.de_rs_ex_guaranteed_o.value) & 4
+    # A matching MEM owner always blocks an older matching WB result.
+    await drive(ex_late_c=1, ex_rs2_addr=3, mem_pending=1, mem_rd0=3,
+        mem_result_available=1, mem_result_forwardable=1, mem_result=111,
+        wb_pending=1, wb_rd0=3, wb_result_available=1, wb_result_forwardable=1, wb_result=222)
+    assert not int(dut.ex_rs_ready_o.value) & 4
+    for registered in (0, 1):
+        await drive(ex_late_c=1, ex_rs2_addr=3, mem_late_c=1, mem_c_addr=3,
+            wb_pending=1, wb_rd0=3, wb_result_available=registered, wb_result_forwardable=1, wb_result=222)
+        assert bool(int(dut.ex_rs_ready_o.value) & 4) == bool(fw and registered)
+        assert bool(int(dut.mem_c_ready_o.value)) == bool(fw and registered)
+        if fw and registered:
+            assert int(dut.ex_rs2_o.value) == int(dut.mem_c_o.value) == 222
+    # Captured payload remains authoritative over a different current WB value.
+    await drive(mem_late_c=1, mem_c_addr=3, mem_c_captured=1, mem_c=0xaabbccdd,
+        wb_pending=1, wb_rd0=3, wb_result_available=1, wb_result_forwardable=1, wb_result=222)
+    assert int(dut.mem_c_ready_o.value) and int(dut.mem_c_o.value) == 0xaabbccdd
+    await drive(mem_late_c=1, mem_c_addr=0, mem_c=0xffffffff)
+    assert int(dut.mem_c_ready_o.value) and int(dut.mem_c_o.value) == 0
+    if p['XIF'] and p['XIF_DUALWRITE']:
+        await drive(de_late_c=1, de_rs2_addr=3, ex_pending=2, ex_rd1=3,
+                    ex_primary_registered=1, ex_result_available=1, ex_result_forwardable=1)
+        assert not int(dut.de_rs_ex_guaranteed_o.value) & 4
+        await drive(mem_late_c=1, mem_c_addr=3, wb_pending=2, wb_rd1=3,
+                    wb_result_available=1, wb_result_forwardable=1)
+        assert not int(dut.mem_c_ready_o.value)
+    # No match never authorizes the stale, uncaptured payload.
+    await drive(mem_late_c=1, mem_c_addr=3, mem_c=0xffffffff)
+    assert not int(dut.mem_c_ready_o.value)

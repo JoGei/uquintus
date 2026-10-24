@@ -47,6 +47,7 @@ parameters:
   - MUA_FPU_PIPE_CONFIG
   - MUA_FPU_DIVSQRT
 tests:
+  - mul_split
   - hart_id
   - csrs
   - integer

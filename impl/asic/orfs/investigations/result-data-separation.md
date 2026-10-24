@@ -82,7 +82,7 @@ not substitute for sequential ISA verification or timed hazard analysis.
 
 ## Physical measurement
 
-The earlier [matched comparison](daddamul-div1.md) records the pre-cleanup
+The earlier [matched comparison](efficient-mul.md#encoding-compression-and-final-addition) records the pre-cleanup
 circuits. Its area/period figures must not be reused as measurements of this
 RTL revision. No SDC exception, target relaxation or pipeline stage was added.
 

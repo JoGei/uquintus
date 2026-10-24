@@ -168,7 +168,7 @@ class BenchmarkTests(unittest.TestCase):
             elf = root / 'program.elf'
             elf.write_bytes(b'fixture')
             built = dict(ISA_M=1, MUA_MUL='iterative', MUA_MULDIV_ITERUNROLL=32)
-            selected = dict(built, MUA_MUL='parallel', MUA_MULDIV_ITERUNROLL=1)
+            selected = dict(built, MUA_MUL='dadda', MUA_MULDIV_ITERUNROLL=1)
             suite = dict(status='passed', parameters=built, settings=settings, upstream=lock,
                          programs=[dict(profile=p, path=str(elf), sha256=benchmark.sha(elf))
                                    for p in settings['profiles']])

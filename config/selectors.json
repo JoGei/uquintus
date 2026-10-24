@@ -27,10 +27,9 @@
     "de": {"value": 1, "macro": "UQU_C_DECOMPRESS_DE"}
   },
   "MUA_MUL": {
-    "parallel": {"value": 0, "macro": "UQU_MUL_PARALLEL"},
-    "parallel+stages+2": {"value": 1, "macro": "UQU_MUL_PARALLEL_2"},
     "iterative": {"value": 2, "macro": "UQU_MUL_ITERATIVE"},
-    "dadda": {"value": 3, "macro": "UQU_MUL_DADDA"}
+    "dadda": {"value": 3, "macro": "UQU_MUL_DADDA"},
+    "dadda_mac": {"value": 13, "macro": "UQU_MUL_DADDA_MAC"}
   },
   "MUA_DIV": {
     "iterative": {"value": 0, "macro": "UQU_DIV_ITERATIVE"}

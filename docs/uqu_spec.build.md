@@ -229,9 +229,9 @@ Enumerated hardware selectors shall use readable YAML labels. In particular,
 `MUA_BRANCH_PREDICTOR` shall use `none`, `static_not_taken` or `bimodal` for the currently
 defined choices, and `MUA_REGFILE_IMPL` shall use `ff` or `latch`. Their default
 YAML selections shall be `none` and `ff`, respectively. `MUA_MUL` shall use
-`parallel`, `parallel+stages+2`, `iterative`, or `dadda` as defined in [architecture, Section 3](uqu_spec.arch.md#3-classical-five-stage-pipeline).
-`MUA_DIV` shall use `iterative`. Both default YAML selections shall be
-`iterative`, sharing the iterative arithmetic chain. All hardware presets shall
+`dadda_mac` (default), `dadda`, or `iterative`, as defined in [architecture, Section 3](uqu_spec.arch.md#3-classical-five-stage-pipeline). MEM/EX2 is the canonical second execution region. The split has a fixed two-row payload; `MUA_MUL_SPLIT` and historical multiplier labels are rejected, without compatibility aliases.
+
+`MUA_DIV` shall use `iterative`. All hardware presets shall
 also explicitly set `MUA_BP_ENTRIES`, a power of two from 2 through 1024,
 defaulting to 16 and inactive outside bimodal mode. Independently select target
 storage with `MUA_BTB: none | direct_mapped` (default `none`) and explicit
@@ -269,7 +269,7 @@ shall validate the labels and translate them into integer RTL parameter values,
 using a consistent mapping across simulation, formal, and synthesis flows.
 Unknown or unsupported labels shall produce a clear configuration error.
 The register-file encodings are `ff = 0` and `latch = 1`. Multiplier encodings
-are `parallel = 0`, `parallel+stages+2 = 1`, and `iterative = 2`; divider
+are `iterative = 2`, `dadda = 3`, and `dadda_mac = 13`; removed encodings remain unused. Divider
 `iterative = 0`. Predictor encodings are `none = 0`, `static_not_taken = 1` and
 `bimodal = 2`.
 A single canonical selector
@@ -425,7 +425,7 @@ joining combined selections and `_` separating fields. The optional enabled-only
 | Branch target storage | `_mua-btb:{none,direct+entries<N>[+idata-hw<H>]}` | `MUA_BTB`, independent `MUA_BTB_ENTRIES` and halfword capacity `MUA_BTB_IDATA_HWORDS`; omit `+idata-hw` at zero. Use `none` when disabled or when prediction mode is `none`; omit inactive capacity. |
 | Instruction buffer | `_mua-ifbuf:<words>` | `MUA_IF_BUFFER_WORDS`. |
 | Redirect/refill bypass | `[_mua-rb:<policies>]` | Omit for `none`; otherwise join enabled policies in canonical order with `+`: `ifbuf` for `if_buffer`, `redirect` for `redirect_request`, `result` for `ifetch_result`. All eight selector values are supported, e.g. `mua-rb:ifbuf+redirect+result`. |
-| Multiplier | `[_mua-mul:{iter,para,para+stages2,dadda}]` | Present only for `ISA_M=1`; `MUA_MUL`: `iterative`, `parallel`, `parallel+stages+2`, or `dadda`. |
+| Multiplier | `[_mua-mul:{iter,dadda,dadda-mac}]` | Present only for `ISA_M=1`; `iterative`, EX1 product-only `dadda`, or canonical split `dadda_mac`. |
 | Divider | `[_mua-div:iter]` | Present only for `ISA_M=1`; the currently supported `MUA_DIV` choice is `iterative`. |
 | Shared iterative arithmetic | `[_mua-mdu:unroll<factor>]` | `MUA_MULDIV_ITERUNROLL`, when M is enabled and at least one MUL/DIV implementation is iterative. |
 | FPU implementation | `[_mua-fpu:<backend>+pipe-<placement>+fma<N>+divsqrt<N>+noncomp<N>+conv<N>]` | Present only for `ISA_ZFINX=1`; `MUA_FPU_DIVSQRT`, `MUA_FPU_PIPE_CONFIG`, then the four `MUA_FPU_PIPE_REGS_*` counts in the displayed order. Use the validated YAML labels for backend and placement. |
@@ -986,3 +986,5 @@ later decisions determine the active contract.
 | D-310 | Keep ABC wire-load estimates enabled in the qualified ORFS speed script, remove synthesis buffers before placement, and use timing-driven physical buffering. Record the resolved policy and script hash; retain estimates disabled for explicit experiments. | Preserve the measured baseline's setup advantage while allowing OpenROAD to replace synthesis buffering using placement parasitics. | Implemented policy and provenance; Section 4 and ASIC guide; full physical flow remains open |
 | D-311 | Keep the generic core SDC as a standalone evaluation profile; let concrete integrations supply constraints and the SoC own final timing. Defer detailed SRAM/XIF budgets until integration and report internal/interface paths separately. | Preserve useful standalone PPA evidence without assuming an unknown memory or coprocessor environment or counting external delay twice during SoC timing. | Implemented; Section 4.1; concrete SRAM/XIF integration profiles remain deferred |
 | D-312 | Add make impl through ORFS placement and post-placement timing repair, reusing RTL/configuration/provenance and optional supplied SDC. Retain physical cell/geometry evidence and scoped critical paths; require legality, setup/hold and electrical checks to pass. | Establish a reproducible current-core physical baseline before CTS/routing or RTL timing optimization. | Implemented; Section 4 and ASIC guide; initial qualification on IHP; CTS and routing remain open |
+
+The shipped `rv32im` and `rv32imc_bimodal_idata` baselines select `dadda_mac`; `rv32im_iterative` retains the explicit shared iterative baseline. `rv32im_dadda` and `rv32imc_bimodal_idata_dadda_div1` select EX1-only multiplication. Their `dadda_mac` counterparts preserve all other parameters for comparisons. Frontend bypass presets formerly named `parallel_div1_*` are now `dadda_div1_*`; historical build artifacts retain their original names and source fingerprints.

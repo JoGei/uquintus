@@ -1,5 +1,7 @@
 # Combinational Dadda multiplier
 
+The observation tables call this implementation **PartialProduct/Dadda/Brent–Kung** under the current Yosys flow: ordinary bitwise partial products with signed corrections, Dadda compression and a behavioral final `+` initially mapped to Brent–Kung. Subsequent synthesis and physical optimization may restructure that adder. `MUA_MUL: dadda` remains the selector. See the [controlled Wallace comparison](../../../impl/asic/orfs/investigations/efficient-mul.md#encoding-compression-and-final-addition).
+
 `src/uquintus/uqu_daddamul.v` computes one full 64-bit product from two 32-bit
 operands. `signed_a_i` and `signed_b_i` independently select two's-complement
 interpretation; they describe operand types, not the values of their sign bits.
@@ -13,7 +15,7 @@ heap through maximum column heights 28, 19, 13, 9, 6, 4, 3, 2. Each pass consume
 only the previous pass's dots. Carries are already placed at their actual
 weights. A final 64-bit `+` forms the product; no `*` operator chooses the tree.
 The signed correction construction is described in the
-[multiplier design notes](../../../doc/uqu_draft.mul.md).
+[multiplier design notes](../../../docs/uqu_spec.mul.md).
 
 ## Core selection
 
@@ -23,8 +25,8 @@ label to `UQU_MUL_DADDA=3`, preserving all existing selector encodings.
 The descriptive configuration label includes `mua-mul:dadda`.
 For a comparison with the recent RV32IMC setup, use
 `rv32imc_bimodal_idata_dadda_div1`: it changes only `MUA_MUL` relative to
-`rv32imc_bimodal_idata_parallel_div1`, keeping divider unroll factor 1.
-See the [controlled comparison](../../../impl/asic/orfs/investigations/daddamul-div1.md).
+`rv32imc_bimodal_idata_dadda_mac_div1`, keeping divider unroll factor 1.
+See the [controlled comparison](../../../impl/asic/orfs/investigations/efficient-mul.md#encoding-compression-and-final-addition).
 The simpler `rv32im_dadda` preset retains the default divider unroll factor 8
 and is a different hardware configuration.
 
@@ -44,12 +46,7 @@ Dadda unit does not use the shared ALU arithmetic slice. The iterative divider
 continues using that slice and the configured unroll factor; its timing is
 unchanged. With `ISA_M=0`, no Dadda arithmetic is instantiated.
 
-The default multiplier remains `iterative`. `parallel` still requests an
-inferred single-cycle `*`; `parallel+stages+2` still takes two blocking EX cycles.
-MEM remains the memory stage. The former split multiplier, cut parameter,
-parent wrapper and split-specific build targets are removed. An EX/MEM split
-is deferred; old split measurements are historical evidence, not timing for
-this combinational implementation.
+The default multiplier is `dadda_mac`, splitting PP/Dadda product rows across EX1 and MEM/EX2 with late C. This EX1-only `dadda` choice is product-only and retains lower native dependency latency; `iterative` is the shared arithmetic baseline. See the [selection record](../../../impl/asic/orfs/investigations/efficient-mul.md#decision).
 
 ## Verification and generation
 
@@ -83,5 +80,5 @@ normal builds consume that file without running Python generation:
 Generator tests verify dot preservation, no same-pass carry dependencies,
 weighted sums at every reduction, exhaustive small-width signed products and
 random RV32 cases. Mapped and placed **core** runs with `MUA_MUL: dadda` are the
-appropriate comparison against `parallel`; summing historical split-phase
+appropriate measurement of this EX1-only datapath; summing historical split-phase
 periods does not establish integrated timing.

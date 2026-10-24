@@ -1,9 +1,12 @@
 `default_nettype none
+`include "uqu_config.vh"
 
 // Core-owned operand resolution. Pipeline identity, movement and instruction-
 // specific result qualification are supplied by the parent, not decoded here.
 module uqu_hazard #(
     parameter ISA_E = 0,
+    parameter ISA_M = 0,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter ISA_ZFINX = 0,
     parameter XIF = 0,
     parameter XIF_NUM_RS = 3,
@@ -27,6 +30,18 @@ module uqu_hazard #(
     input  wire [31:0] de_rs2_i,
     input  wire [2:0]  de_rs_used_i,
     input  wire [2:0]  de_rs_need_now_i,
+    // Late C admission applies only to primary, registered result producers.
+    // Loads, CSRs and XIF results keep the ordinary conservative DE rule.
+    input  wire        de_late_c_i,
+    input  wire        ex_late_c_i,
+    input  wire        ex_primary_registered_i,
+    input  wire        mem_primary_registered_i,
+    input  wire        mem_late_c_i,
+    input  wire [4:0]  mem_c_addr_i,
+    input  wire [31:0] mem_c_i,
+    input  wire        mem_c_captured_i,
+    output wire [31:0] mem_c_o,
+    output wire        mem_c_ready_o,
     output wire [31:0] de_rs0_o,
     output wire [31:0] de_rs1_o,
     output wire [31:0] de_rs2_o,
@@ -70,7 +85,7 @@ module uqu_hazard #(
     input  wire [31:0] wb_result_i,
     input  wire        wb_advance_i
 );
-    localparam THIRD_SOURCE = (ISA_ZFINX == 1) || ((XIF == 1) && (XIF_NUM_RS == 3));
+    localparam THIRD_SOURCE = ((ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC)) || (ISA_ZFINX == 1) || ((XIF == 1) && (XIF_NUM_RS == 3));
     localparam SECOND_DESTINATION = (XIF == 1) && (XIF_DUALWRITE == 1);
 
     wire [4:0] de_addr [0:2];
@@ -118,6 +133,17 @@ module uqu_hazard #(
         end
     endfunction
 
+    wire [1:0] mem_c_wb_match = match_destination(wb_valid_i, wb_pending_i,
+        wb_rd0_i, wb_rd1_i, mem_c_addr_i);
+    wire late_enabled = (ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC);
+    wire mem_c_live = late_enabled && rst_ni && mem_valid_i && mem_late_c_i &&
+        ((ISA_E == 0) || !mem_c_addr_i[4]);
+    // Captured payload is authoritative. No RF fallback, MEM result bypass or
+    // live memory response is allowed here; WB's descriptor must be registered.
+    assign mem_c_o = mem_c_addr_i == 5'd0 ? 32'd0 : mem_c_captured_i ? mem_c_i : wb_result_i;
+    assign mem_c_ready_o = mem_c_live && ((mem_c_addr_i == 5'd0) || mem_c_captured_i ||
+        ((MUA_FORWARDING == 1) && mem_c_wb_match[0] && !mem_c_wb_match[1] && wb_result_usable));
+
     genvar source_idx;
     generate
         for (source_idx = 0; source_idx < 3; source_idx = source_idx + 1) begin : gen_source
@@ -136,6 +162,8 @@ module uqu_hazard #(
                                ((ISA_E == 0) || !de_addr[source_idx][4]);
                 wire ex_live = rst_ni && ex_valid_i && ex_rs_used_i[source_idx] &&
                                ((ISA_E == 0) || !ex_addr[source_idx][4]);
+                wire late_de = late_enabled && (source_idx == 2) && de_late_c_i && (MUA_FORWARDING == 1);
+                wire late_ex = late_enabled && (source_idx == 2) && ex_late_c_i;
                 wire retained_valid;
                 wire [31:0] retained_data;
                 reg [31:0] de_value;
@@ -154,6 +182,10 @@ module uqu_hazard #(
                         end else if (retained_valid) begin
                             de_value = retained_data;
                             de_ready = 1'b1;
+                        end else if (late_de && (|de_ex_match)) begin
+                            de_guaranteed = de_ex_match[0] && !de_ex_match[1] && ex_primary_registered_i;
+                        end else if (late_de && (|de_mem_match)) begin
+                            de_guaranteed = de_mem_match[0] && !de_mem_match[1] && mem_primary_registered_i;
                         end else if (|de_ex_match) begin
                             // Select candidate data by producer identity and
                             // configured route, independently of availability.
@@ -202,17 +234,17 @@ module uqu_hazard #(
                             ex_value = ex_data[source_idx];
                             ex_ready = 1'b1;
                         end else if (|ex_mem_match) begin
-                            if (ex_mem_match[0] && (MUA_FORWARDING == 1) &&
+                            if (!late_ex && ex_mem_match[0] && (MUA_FORWARDING == 1) &&
                                 (MUA_FORWARD_MEM_TO_EX == 1)) ex_value = mem_result_i;
-                            if (ex_mem_match[0] && mem_result_usable && (MUA_FORWARDING == 1) &&
+                            if (!late_ex && ex_mem_match[0] && mem_result_usable && (MUA_FORWARDING == 1) &&
                                 (MUA_FORWARD_MEM_TO_EX == 1)) begin
                                 ex_ready = 1'b1;
                             end
                         end else if (|ex_wb_match) begin
                             if (ex_wb_match[0] && (MUA_FORWARDING == 1) &&
-                                (MUA_FORWARD_WB_TO_EX == 1)) ex_value = wb_result_i;
+                                ((MUA_FORWARD_WB_TO_EX == 1) || late_ex)) ex_value = wb_result_i;
                             if (ex_wb_match[0] && wb_result_usable && (MUA_FORWARDING == 1) &&
-                                (MUA_FORWARD_WB_TO_EX == 1)) begin
+                                ((MUA_FORWARD_WB_TO_EX == 1) || late_ex)) begin
                                 ex_ready = 1'b1;
                             end
                         end

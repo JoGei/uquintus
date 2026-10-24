@@ -4,7 +4,7 @@
 // The parent owns the shared first arithmetic instance, as EX will. The DUT contains only the remaining F-1 arithmetic instances.
 module uqu_muldiv_tb #(
     parameter ISA_M = 0,
-    parameter MUA_MUL = `UQU_MUL_ITERATIVE,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
     parameter MUA_MULDIV_ITERUNROLL = 8
 ) (

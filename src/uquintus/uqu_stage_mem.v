@@ -1,8 +1,12 @@
 `default_nettype none
+`include "uqu_config.vh"
 
 // MEM execution/control only. The parent owns EX/MEM and MEM/WB payloads,
 // instruction identity, validity, and the core-wide PMP block.
-module uqu_stage_mem (
+module uqu_stage_mem #(
+    parameter ISA_M = 0,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC
+) (
     input  wire        clk_i,
     input  wire        rst_ni,
     input  wire        flush_i,
@@ -15,6 +19,13 @@ module uqu_stage_mem (
     input  wire [2:0]  op_i,
     input  wire [31:0] result_i,
     input  wire [31:0] store_data_i,
+    // Words zero/one reuse result_i/store_data_i as row A in split mode.
+    input  wire [63:0] mul_row_b_i,
+    input  wire        mul_phase2_i,
+    input  wire        mul_high_i,
+    input  wire        mul_accumulate_i,
+    input  wire [31:0] mul_addend_i,
+    input  wire        mul_addend_ready_i,
     input  wire [31:0] instr_i,
     input  wire        priv_m_i,
     input  wire        fflags_valid_i,
@@ -61,7 +72,10 @@ module uqu_stage_mem (
     reg cancel_response_q;
     wire enabled = rst_ni && !flush_i;
     wire active = enabled && valid_i;
-    wire lsu_req_valid = active && lsu_i && !exception_valid_i && !issued_q;
+    wire split_mul = (ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC) && mul_phase2_i;
+    wire late_mac = split_mul && mul_accumulate_i;
+    wire phase2_ready = !late_mac || mul_addend_ready_i;
+    wire lsu_req_valid = active && lsu_i && !split_mul && !exception_valid_i && !issued_q;
     wire lsu_req_ready;
     wire lsu_exception_valid;
     wire [4:0] lsu_exception_cause;
@@ -71,8 +85,9 @@ module uqu_stage_mem (
 
     // Grant transfers ownership into the parent's MEM/WB boundary. Local
     // faults transfer directly as exception metadata without a bus request.
-    assign valid_o = active && (exception_valid_i || !lsu_i ||
-                               lsu_exception_valid || issued_q || lsu_req_fire);
+    assign valid_o = active && (exception_valid_i ||
+        (split_mul && phase2_ready) || (!split_mul &&
+        (!lsu_i || lsu_exception_valid || issued_q || lsu_req_fire)));
     assign ready_o = enabled && (!valid_i || mem_fire);
     assign exception_valid_o = active && (exception_valid_i ||
                                           lsu_exception_valid);
@@ -82,9 +97,20 @@ module uqu_stage_mem (
         exception_valid_i ? exception_tval_i : lsu_exception_tval;
     // Candidate payload only. Completion/fault qualification belongs on
     // valid_o and the parent's forwarding/transfer enables, not this word.
-    assign result_o = result_i;
+    generate
+        if ((ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC)) begin : gen_mul_finish
+            wire [31:0] mul_result;
+            uqu_mul_finish u_finish (
+                .row_a_i({store_data_i, result_i}), .row_b_i(mul_row_b_i),
+                .high_i(mul_high_i), .accumulate_i(mul_accumulate_i), .addend_i(mul_addend_i), .result_o(mul_result)
+            );
+            assign result_o = split_mul ? mul_result : result_i;
+        end else begin : gen_no_mul_finish
+            assign result_o = result_i;
+        end
+    endgenerate
     assign load_result_valid_o = 1'b0; // Load values become available in WB.
-    assign fflags_valid_o = valid_o && !exception_valid_o && !lsu_i && fflags_valid_i;
+    assign fflags_valid_o = valid_o && !exception_valid_o && !lsu_i && !split_mul && fflags_valid_i;
     assign fflags_o = fflags_valid_o ? fflags_i : 5'd0;
 
     // Pure combinational query into the parent's two-port PMP block. The LSU

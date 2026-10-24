@@ -84,7 +84,7 @@ sources:
       - target: decompressor_test
         files:
           - verif/sim/decompressor/uqu_decompressor_tb.v
-      - target: any(hazard, de_pipeline_test, rtl, core_test)
+      - target: any(mac_pipeline_test, hazard, de_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_hazard.v
       - target: any(decode, branch_test, de, de_pipeline_test, if_pipeline_test, decompressor_test, rtl, core_test)
@@ -102,31 +102,40 @@ sources:
       - target: branch_test
         files:
           - verif/sim/branch/uqu_branch_tb.v
-      - target: any(daddamul, muldiv, muldiv_test, exec_arith_test, ex, ex_pipeline_test, rtl, core_test)
+      - target: any(mac_pipeline_test, daddamul, muldiv, muldiv_test, exec_arith_test, ex, ex_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_daddamul.v
-      - target: any(arith, alu, alu_test, exec_arith_test, muldiv, muldiv_test, ex, ex_pipeline_test, rtl, core_test)
+      - target: any(mac_pipeline_test, daddamul_rows, mem, mem_pipeline_test, pipeline_ctrl_test, ex, ex_pipeline_test, rtl, core_test)
+        files:
+          - src/uquintus/uqu_daddamul_rows.v
+      - target: daddamul_rows
+        files:
+          - verif/sim/daddamul_rows/uqu_daddamul_rows_tb.v
+      - target: any(mac_pipeline_test, daddamul_rows, ex_pipeline_test, mem, mem_pipeline_test, pipeline_ctrl_test, rtl, core_test)
+        files:
+          - src/uquintus/uqu_mul_finish.v
+      - target: any(mac_pipeline_test, arith, alu, alu_test, exec_arith_test, muldiv, muldiv_test, ex, ex_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_arith.v
-      - target: any(muldiv, muldiv_test, exec_arith_test, ex, ex_pipeline_test, rtl, core_test)
+      - target: any(mac_pipeline_test, muldiv, muldiv_test, exec_arith_test, ex, ex_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_muldiv.v
-      - target: any(alu, alu_test, exec_arith_test, ex, ex_pipeline_test, rtl, core_test)
+      - target: any(mac_pipeline_test, alu, alu_test, exec_arith_test, ex, ex_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_alu.v
-      - target: any(fpu, ex, ex_pipeline_test, rtl, core_test)
+      - target: any(mac_pipeline_test, fpu, ex, ex_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_fpu.v
-      - target: any(ex, ex_pipeline_test, rtl, core_test)
+      - target: any(mac_pipeline_test, ex, ex_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_stage_ex.v
       - target: ex_pipeline_test
         files:
           - verif/sim/ex_pipeline/uqu_ex_pipeline_tb.v
-      - target: any(lsu, mem, mem_pipeline_test, pipeline_ctrl_test, ifetch_pmp_test, rtl, core_test)
+      - target: any(mac_pipeline_test, lsu, mem, mem_pipeline_test, pipeline_ctrl_test, ifetch_pmp_test, rtl, core_test)
         files:
           - src/uquintus/uqu_lsu.v
-      - target: any(mem, mem_pipeline_test, pipeline_ctrl_test, rtl, core_test)
+      - target: any(mac_pipeline_test, mem, mem_pipeline_test, pipeline_ctrl_test, rtl, core_test)
         files:
           - src/uquintus/uqu_stage_mem.v
       - target: mem_pipeline_test
@@ -153,6 +162,10 @@ sources:
       - target: muldiv_test
         files:
           - verif/sim/muldiv/uqu_muldiv_tb.v
-      - target: any(gpregfile, de_pipeline_test, wb_pipeline_test, rtl, core_test)
+      - target: any(mac_pipeline_test, gpregfile, de_pipeline_test, wb_pipeline_test, rtl, core_test)
         files:
           - src/uquintus/uqu_gpregfile.v
+
+  - target: mac_pipeline_test
+    files:
+      - verif/sim/mac_pipeline/uqu_mac_pipeline_tb.v

@@ -95,7 +95,7 @@ def render(directory, manifest):
             'body{font-family:system-ui;margin:2rem}table{border-collapse:collapse;font-variant-numeric:tabular-nums}'
             'td,th{padding:.5rem;border-bottom:1px solid GrayText;text-align:right}td:nth-child(2){text-align:left}'
             'object{width:min(100%,1100px)}</style><h1>RV32IMC forwarding ladder</h1>'
-            '<p>BP16 / BTB16 / six packed halfwords / IF decompression / single-cycle parallel MUL. '
+            '<p>BP16 / BTB16 / six packed halfwords / IF decompression / multiplier selected by the recorded configuration. '
             'DIV remains iterative with unroll factor 8. WB→DE is implicit when the forwarding master is enabled. '
             'There is no WB→MEM bypass. Each step adds exactly one path; this ladder is order-dependent.</p>'
             '<p>Same CoreMark performance ELF, CRC checked, one-cycle instruction/data responses. '

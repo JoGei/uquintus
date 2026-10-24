@@ -101,12 +101,7 @@ independent operands to prepare both magnitudes in parallel.
 
 ## Configuration and cycle counts
 
-`MUA_MUL` is `iterative` (default), `parallel`, `parallel+stages+2`, or `dadda`.
-`MUA_DIV` is `iterative`. `F = MUA_MULDIV_ITERUNROLL` defaults to eight and accepts
-only 1, 2, 4, 8, 16, or 32. Labels and numeric RTL constants come from
-[config/selectors.json](../../../config/selectors.json). The default M-enabled
-configuration shares the iterative slices between MUL and DIV, giving four
-MUL cycles and six DIV/REM cycles at factor eight.
+`MUA_MUL` is `dadda_mac` (default), `dadda`, or `iterative`. `MUA_DIV` is `iterative`; `F = MUA_MULDIV_ITERUNROLL` defaults to eight and accepts 1, 2, 4, 8, 16 or 32. Labels/constants come from [config/selectors.json](../../../config/selectors.json).
 
 | F | Iterative MUL cycles | DIV/DIVU/REM/REMU cycles |
 | --- | --- | --- |
@@ -117,14 +112,8 @@ MUL cycles and six DIV/REM cycles at factor eight.
 | 16 | 2 | 4 |
 | 32 | 1 | 3 |
 
-`parallel` infers a one-cycle multiplier with `*`; its two-stage variant takes
-two EX cycles. `dadda` instantiates the one-cycle structural
-[`uqu_daddamul`](../daddamul/README.md), with signed corrections integrated into
-one 32×32 tree and a final 64-bit adder. MUL/DIV selects the product half; the
-same existing completion/held-result logic applies. Dadda multiplication uses
-no shared ALU arithmetic slice. DIV retains its iterative implementation and
-unroll factor. `rv32im_dadda` selects this implementation without changing the
-default or assigning arithmetic to MEM.
+`dadda` instantiates the one-cycle EX1-only PP/Dadda/BK product. `iterative` shares the arithmetic slices with DIV. Canonical `dadda_mac` routes multiplication around this blocking unit: EX1 compresses the product and MEM/EX2 finishes late C plus final addition. In that mode the local request interface accepts only operations 4–7; local MUL requests are explicitly rejected. The complete multiply/MAC path is tested by [daddamul_rows](../daddamul_rows/README.md), EX/pipeline/core and [mac_pipeline](../mac_pipeline/README.md).
+
 These timings are operand independent, including zero, signed overflow, and
 division by zero. Backpressure can delay result transfer but never result
 availability. There is no cross-instruction fusion or saved-result reuse.
@@ -141,12 +130,6 @@ quotient bit without a restoring addition. Division by zero returns all ones
 for quotient or the original dividend for remainder. Signed `INT_MIN / -1`
 returns `INT_MIN` and remainder zero, following the
 [RISC-V M-extension specification](https://github.com/riscv/riscv-isa-manual/blob/main/src/unpriv/m-st-ext.adoc).
-
-The two-stage parallel implementation computes the low-16-bit multiplicand's
-partial product in stage one, stores it and the other required operands, then
-computes and combines the upper partial product in stage two. It partitions
-actual work across the register boundary; it does not add a delay after a
-complete multiplier. Synthesis determines its cell implementation and timing.
 
 ## Running tests
 

@@ -84,7 +84,7 @@ queue work privately before grant. This does not change the LSU's MEM-to-WB
 ownership boundary.
 
 `imem_addr_o` selects the queued address or the live aligned input address.
-There is no request-controlled idle-zero mask: idle payload is unspecified.
+There is no request-controlled idle-zero mask: idle payload is unspecified. Canceling a private, unpresented request without replacement keeps its queued address selected during that idle cycle. This separates address selection from late flush/clear control when same-cycle replacement is disabled. Presented requests retain their address until grant; same-cycle replacements select the new address when no old request has reached the bus.
 Removing request capture from the fast path exposes address generation,
 protection and capacity/request qualification to interface timing constraints.
 

@@ -152,6 +152,7 @@ module uqu_pipeline_ctrl_tb #(
         .fence_req_o(fence_req_o), .fencei_req_o(fencei_req_o)
     );
     uqu_stage_mem u_mem (
+        .mul_row_b_i(64'd0), .mul_phase2_i(1'b0), .mul_high_i(1'b0), .mul_accumulate_i(1'b0), .mul_addend_i(32'd0), .mul_addend_ready_i(1'b1),
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush[2]),
         .valid_i(valid_q[2]), .ready_o(), .valid_o(mem_complete), .ready_i(mem_ready),
         .lsu_i(lsu_q[2]), .we_i(we_q[2]), .op_i(3'b010), .result_i(data_q[2]),

@@ -1,6 +1,7 @@
 """MEM grants transfer to WB; response completion is a separate channel."""
 
 import os
+import json
 import random
 import sys
 from pathlib import Path
@@ -19,6 +20,7 @@ class MemTest(uvm_test):
         self.dut = cocotb.top
         self.memory = ByteMemory()
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
+        self.params = json.loads(os.environ['UQU_COMPONENT_PARAMS'])
 
     async def settle(self):
         await Timer(1, units='ns')
@@ -36,6 +38,13 @@ class MemTest(uvm_test):
     async def initialize(self):
         d = self.dut
         d.clk_i.value = 0
+        d.mul_row_b_i.value = 0
+
+        d.mul_phase2_i.value = 0
+        d.mul_high_i.value = 0
+        d.mul_accumulate_i.value = 0
+        d.mul_addend_i.value = 0
+        d.mul_addend_ready_i.value = 1
         self.drive(token())
         for name, value in dict(rst_n=0, flush=0, valid=0, ready=1, request_permit=1,
             pmp_allow=1, lsu_res_ready=0, lsu_res_flush=0, dmem_gnt=0,
@@ -212,3 +221,99 @@ async def randomized(_dut):
 @cocotb.test()
 async def control(_dut):
     await uvm_root().run_test(ControlTest)
+
+
+class SplitTest(MemTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.initialize()
+        if not self.params['ISA_M'] or self.params['MUA_MUL'] not in (13,):
+            self.drop_objection()
+            return
+        d = self.dut
+        rows = [(0xffffffff,1), (0xffffffffffffffff,1), (0x7fffffffffffffff,1),
+                (0x8000000000000000,0x8000000000000000)]
+        rows += [(self.rng.getrandbits(64),self.rng.getrandbits(64)) for _ in range(128)]
+        for a,b in rows:
+            self.drive(token(result=a & 0xffffffff, store_data=a >> 32))
+            d.mul_row_b_i.value = b
+
+            d.mul_phase2_i.value = 1
+            d.valid_i.value = 1
+            for high in (0,1):
+                d.mul_high_i.value = high
+                expected = (((a+b) & ((1 << 64)-1)) >> (32*high)) & 0xffffffff
+                for _ in range(self.rng.randrange(1,5)):
+                    d.ready_i.value = 0
+                    await self.settle()
+                    assert int(d.valid_o.value) and not int(d.ready_o.value)
+                    assert int(d.result_o.value) == expected
+                    assert not int(d.dmem_req_o.value) and not int(d.pmp_valid_o.value)
+                    assert not int(d.fflags_valid_o.value) and not int(d.exception_valid_o.value)
+                    await self.edge()
+                d.ready_i.value = 1
+                await self.settle()
+                assert int(d.ready_o.value) and int(d.result_o.value) == expected
+                await self.edge()
+        # Flush suppresses the token, including accidental LSU qualification.
+        d.lsu_i.value = 1
+        d.dmem_gnt_i.value = 1
+        await self.settle()
+        assert not int(d.dmem_req_o.value) and not int(d.pmp_valid_o.value)
+        d.flush_i.value = 1
+        await self.settle()
+        assert not int(d.valid_o.value) and not int(d.dmem_req_o.value)
+        await self.edge()
+        self.drop_objection()
+
+
+@cocotb.test()
+async def split(_dut):
+    await uvm_root().run_test(SplitTest)
+
+
+class LateMacTest(MemTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.initialize()
+        if self.params['ISA_M'] and self.params['MUA_MUL'] == 13:
+            d = self.dut
+            self.drive(token())
+            d.valid_i.value = 1
+            d.mul_phase2_i.value = 1
+            for _ in range(256):
+                a, b = self.rng.getrandbits(64), self.rng.getrandbits(64)
+                c = self.rng.getrandbits(32)
+                d.result_i.value = a & 0xffffffff
+                d.store_data_i.value = a >> 32
+                d.mul_row_b_i.value = b
+                d.mul_addend_i.value = c
+                d.mul_accumulate_i.value = 1
+                d.mul_addend_ready_i.value = 0
+                await self.settle()
+                assert not int(d.valid_o.value) and not int(d.dmem_req_o.value)
+                d.mul_addend_ready_i.value = 1
+                await self.settle()
+                assert int(d.valid_o.value) and int(d.result_o.value) == (a+b+c) & 0xffffffff
+                # Native MULH ignores C, even when C is unavailable.
+                d.mul_accumulate_i.value = 0
+                d.mul_addend_ready_i.value = 0
+                d.mul_high_i.value = 1
+                await self.settle()
+                assert int(d.valid_o.value) and int(d.result_o.value) == ((a+b) >> 32) & 0xffffffff
+                d.mul_high_i.value = 0
+            # A known exception must drain without waiting for its unused C.
+            d.mul_accumulate_i.value = 1
+            d.exception_valid_i.value = 1
+            d.exception_cause_i.value = 2
+            await self.settle()
+            assert int(d.valid_o.value) and int(d.exception_valid_o.value)
+            d.flush_i.value = 1
+            await self.settle()
+            assert not int(d.valid_o.value)
+        self.drop_objection()
+
+
+@cocotb.test()
+async def late_mac(_dut):
+    await uvm_root().run_test(LateMacTest)

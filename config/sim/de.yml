@@ -2,6 +2,7 @@ top_module: uqu_stage_de
 bender_target: de
 test_module: test_uqu_stage_de
 parameters:
+  - MUA_MUL
   - ISA_E
   - ISA_M
   - ISA_C

@@ -6,7 +6,7 @@
 module uqu_ex_pipeline_tb #(
     parameter ISA_M = 0,
     parameter ISA_ZFINX = 0,
-    parameter MUA_MUL = `UQU_MUL_ITERATIVE,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
     parameter MUA_MULDIV_ITERUNROLL = 8,
     parameter MUA_FPU_PIPE_REGS_FMA = 2,
@@ -92,14 +92,50 @@ module uqu_ex_pipeline_tb #(
     wire                ex_exception_valid;
     wire        [4:0]   ex_exception_cause;
     wire        [31:0]  ex_exception_tval;
+    wire ex_mul_phase2, ex_mul_high;
+    wire [63:0] ex_mul_row_a, ex_mul_row_b;
+    wire mem_mul_phase2, mem_mul_high;
+    wire [63:0] mem_mul_row_b;
+    generate
+        if ((ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC)) begin : gen_mul_payload
+            reg [63:0] row_b_q;
+            reg [31:0] addend_q;
+            reg accumulate_q;
+            reg phase2_q, high_q;
+
+            wire [31:0] result;
+            assign mem_mul_phase2 = phase2_q;
+            assign mem_mul_high = high_q;
+            assign mem_mul_row_b = row_b_q;
+            uqu_mul_finish u_finish (
+                .row_a_i({exmem_store_data_q, exmem_result_q}),
+                .row_b_i(mem_mul_row_b), .high_i(mem_mul_high), .accumulate_i(accumulate_q), .addend_i(addend_q), .result_o(result)
+            );
+            assign out_result_o = phase2_q ? result : exmem_result_q;
+            always @(posedge clk_i) begin
+                if (rst_ni && exmem_ready && ex_valid) begin
+                    phase2_q <= ex_mul_phase2 && !ex_exception_valid;
+                    high_q <= ex_mul_high;
+                    addend_q <= deex_c_q;
+                    accumulate_q <= deex_op_q == 5'd8;
+                    if (ex_mul_phase2) row_b_q <= ex_mul_row_b;
+                end
+            end
+        end else begin : gen_no_mul_payload
+            assign mem_mul_phase2 = 1'b0;
+            assign mem_mul_high = 1'b0;
+            assign mem_mul_row_b = 64'd0;
+
+            assign out_result_o = exmem_result_q;
+        end
+    endgenerate
 
     assign in_ready_o = rst_ni && !flush_i && ex_ready;
     assign out_valid_o = rst_ni && exmem_valid_q;
     assign ex_valid_o = rst_ni && deex_valid_q;
     assign ex_pc_o = deex_pc_q;
     assign ex_fire_o = ex_valid && exmem_ready;
-    assign out_result_o = exmem_result_q;
-    assign out_store_data_o = exmem_store_data_q;
+    assign out_store_data_o = mem_mul_phase2 ? 32'd0 : exmem_store_data_q;
     assign out_fflags_valid_o = exmem_fflags_valid_q;
     assign out_fflags_o = exmem_fflags_q;
     assign out_exception_valid_o = exmem_exception_valid_q;
@@ -138,8 +174,8 @@ module uqu_ex_pipeline_tb #(
         end else if (exmem_ready) begin
             exmem_valid_q <= ex_valid;
             if (ex_valid) begin
-                exmem_result_q <= ex_result;
-                exmem_store_data_q <= ex_store_data;
+                exmem_result_q <= ex_mul_phase2 ? ex_mul_row_a[31:0] : ex_result;
+                exmem_store_data_q <= ex_mul_phase2 ? ex_mul_row_a[63:32] : ex_store_data;
                 exmem_fflags_valid_q <= ex_fflags_valid;
                 exmem_fflags_q <= ex_fflags;
                 exmem_exception_valid_q <= ex_exception_valid;
@@ -180,6 +216,8 @@ module uqu_ex_pipeline_tb #(
         .exception_cause_i(deex_exception_cause_q),
         .exception_tval_i(deex_exception_tval_q),
         .result_o(ex_result),
+        .result_available_o(), .mul_phase2_o(ex_mul_phase2), .mul_high_o(ex_mul_high),
+        .mul_row_a_o(ex_mul_row_a), .mul_row_b_o(ex_mul_row_b),
         .store_data_o(ex_store_data),
         .fflags_valid_o(ex_fflags_valid),
         .fflags_o(ex_fflags),

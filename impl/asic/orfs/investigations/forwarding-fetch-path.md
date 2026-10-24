@@ -1,5 +1,7 @@
 # Forwarding, fetch control and physical buffers
 
+The address-selector candidate rejected in the historical sections below is now retained for the canonical split-MAC configuration after a fresh matched measurement; see [the MEM/EX2 re-evaluation](#re-evaluation-on-canonical-memex2).
+
 This continues the [CSR timing cleanup](csr-bypass-separation.md) using its
 completed Sky130 HD placements. It rechecks the current buffer chains, identifies
 another address/control dependency, and examines the operand-capture contract
@@ -174,3 +176,56 @@ Both matched CoreMark performance ELFs pass CRC checking with the unchanged
 Evidence, generated configurations, annotated baseline paths, buffer counts,
 the sixteen-entry guarantee matrix, DE capture proofs and flow logs live under
 [`build/investigations/fetch-address-selection/`](../../../../build/investigations/fetch-address-selection/).
+
+## Re-evaluation on canonical MEM/EX2
+
+On 2026-10-24, the canceled-private-address candidate above was re-evaluated against a fresh control after multiplier consolidation. The hardware is now `rv32imc_bimodal_idata_dadda_mac_div1`: canonical two-row PP/Dadda/BK with late C, RV32IMC, BPU16/BTB16/H6, IF decompression, FF GPRs, all forwarding, continuous DE operands and DIV factor one. The same-cycle redirect-request bypass is disabled. The earlier rejection remains evidence for the older EX1-only configurations; it does not predict this different implementation's outcome.
+
+### Current dependency and retained fix
+
+The historical late-C path `MDU state_q[0] → imem_addr_o[27]` is no longer the fresh control's first path. Its worst path starts at `wb_kind_q[1]` and ends at `imem_addr_o[24]`. The structural MDU-state-to-address dependency nevertheless still exists: EX completion/forwarding and DE branch acceptance can affect IF cancellation, which controls `use_queued`, the address mux selector.
+
+An unpresented private request canceled without replacement cannot assert `imem_req_o`. Retaining its queued address during that idle cycle is permitted. The retained implementation separates `address_queued` from request ownership:
+
+```verilog
+wire use_queued = request_valid_q && (!invalidate || request_presented_q);
+wire address_queued = request_valid_q &&
+                      (request_presented_q || !replace_i || !invalidate);
+assign imem_addr_o = address_queued ? request_addr_q : {req_addr_i[31:2],2'b00};
+```
+
+The selectors differ only with a private queued request, cancellation asserted, and no replacement. Presented requests keep their address through grant; replacements still select the new stream. Request, grant, protection, capacity, cancellation and response equations are unchanged. No pipeline register, startup cycle or new microarchitecture parameter is added.
+
+In the measured no-redirect-bypass configuration, `replace_i` is constant zero and address selection reduces to the registered request-valid bit. A flattened core ancestry check confirms that the candidate address output depends only on registered IF fetch/request addresses and request ownership. MDU state, DE arithmetic, WB control and external memory-response inputs no longer enter that cone. Both compared cores have zero combinational strongly connected components.
+
+### Matched repaired-placement result
+
+Both full-core runs use the same Sky130 HD TT/1.80 V/25 °C library, tools, ABC/buffering policy, 20 ns constraint, 4 ns ordinary I/O budget, 0–1 ns reset arrival, 0.1 ns uncertainty, floorplan/density and two workers. The audit checks identical parameter dictionaries, physical/tool contexts, SDC bytes and shared RTL/flow hashes; only `src/uquintus/uqu_ifetch.v` differs. A source copy isolates the candidate while the control runs. These are repaired-placement estimates with ideal clocks and placement-estimated RC before CTS/routing.
+
+| Metric | Fresh control | Separate address selector |
+| --- | ---: | ---: |
+| Tmin (ns) | 21.347169 | 20.684476 |
+| Estimated Fmax (MHz) | 46.844618 | 48.345435 |
+| Setup WNS at 20 ns | −1.347169 ns | −0.684476 ns |
+| Setup TNS | −520.554 ns | −0.684 ns |
+| Register-to-register WNS | −0.348047 ns | +0.379393 ns |
+| Logical cell area (µm²) | 458,965.1840 | 443,849.4368 |
+| Buffer count | 5,842 | 4,782 |
+| Minimum hold slack | +0.304504 ns | +0.304504 ns |
+| Placement / slew / capacitance / fanout violations | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+
+Retain the candidate: estimated Fmax improves by 3.204%, cell area decreases by 3.293%, and setup improves by 0.662693 ns in this matched point. Mapping and physical optimization change globally; the area difference is not a standalone mux-area estimate or a general guarantee for every configuration. Both flow records remain `failed` because setup still misses the unchanged 20 ns target. No timing exception was added.
+
+### Remaining first path
+
+The candidate's first STA path starts at MDU `state_q[0]` and ends at `imem_req_o`. Annotated arrivals include shared `u_ex.arith_result[32]` at 6.386 ns, ALU `computed_result[0]` at 6.623 ns, and DE source-one bit zero at 7.412 ns, followed by branch/acceptance and IF request logic. This is a shared-arithmetic-to-forwarding-to-control route, not an isolated multiplier delay. The source state and the ALU result selection represent resource-sharing correlations that STA does not resolve automatically.
+
+A two-stable-snapshot Boolean check of that placed path, allowing 3,504 arbitrary shared boundary bits and 7,833 combinational cells, is UNSAT for simultaneous change of every traversed net when only the source toggles. Endpoint sensitivity is SAT: MDU state can affect fetch request through other routes. This is neither timed-glitch analysis nor sequential reachability proof. It does not justify a false-path/multicycle constraint, and the recorded setup failure remains unchanged. The address-control fix is supported by the unconstrained physical comparison above, independently of that sensitization result.
+
+### Verification and evidence
+
+All eight fetch-bypass selectors pass their ten fetch-engine cases, including stalled grants, simultaneous replacement, outstanding responses and randomized cancellation. IF and IF/DE fixtures pass default, redirect-request and full bypass; native core tests pass canonical RV32IMC, EX1 Dadda, iterative MUL and PMP configurations. Both compressed-expansion placements and direct compressed decoding pass their component fixtures. Sequential Yosys equivalence passes for bypass selectors 0 and 7, comparing state/control and all outputs while qualifying address equality by `imem_req_o`; idle address values are deliberately unspecified. New directed cases check idle queued-address retention under local clear and global flush.
+
+After correcting previously unconnected, unused `late_c_o` outputs in three fixtures, the resolved matrix passes 212 RTL cases across 22 runs. The initial fixture elaboration failures are retained separately; they were not simulated RTL failures. A further ten-case fetch run passes on the retained production source. Pipeline timing and transaction behavior are unchanged, so no benchmark cycle reduction is claimed.
+
+Control: `impl-core-20261024T213041Z-1c3e7d7a`. Candidate: `impl-core-20261024T213331Z-e0a3d482`, published into the standard core-report directory with a pointer to the original isolated run and ODB. Configurations, source snapshots, commands, comparison audit, annotated gate paths, structural ancestry, equivalence proofs, stable-sensitization model and all test logs are retained under `build/investigations/ex-fetch-critical/`. `comparison.json` records the measured pair and `address-cone.json` records the dependency change. Historical 45.442 MHz late-C and 49.685 MHz product-only results belong to different source snapshots and are not used as the control here.

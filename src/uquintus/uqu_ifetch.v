@@ -71,6 +71,12 @@ module uqu_ifetch #(
     // In particular, do not borrow a credit from this cycle's live response.
     wire response_room = (reserved_q < 2'd2) || stored_pop;
     wire use_queued = request_valid_q && (!invalidate || request_presented_q);
+    // Canceling private work without replacement leaves no active bus payload.
+    // Keep that idle address selected; late cancellation need not reach the
+    // address mux. A presented request or a same-cycle replacement retains
+    // the same payload as the ownership selector above.
+    wire address_queued = request_valid_q &&
+                          (request_presented_q || !replace_i || !invalidate);
     wire may_present = (request_armed_q || request_permit_i) && !invalidate && response_room;
     wire queued_request = rst_ni && request_valid_q && !request_fault_q &&
                           (request_presented_q || may_present);
@@ -112,7 +118,7 @@ module uqu_ifetch #(
     assign imem_req_o = queued_request || direct_request;
     // Payload is irrelevant while idle; avoid a request-control mux at the
     // address endpoint. Presented requests use their retained address.
-    assign imem_addr_o = use_queued ? request_addr_q : {req_addr_i[31:2],2'b00};
+    assign imem_addr_o = address_queued ? request_addr_q : {req_addr_i[31:2],2'b00};
 
     always @(posedge clk_i) begin
         if (!rst_ni) begin

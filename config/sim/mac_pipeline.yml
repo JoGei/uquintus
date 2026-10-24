@@ -1,0 +1,16 @@
+top_module: uqu_mac_pipeline_tb
+bender_target: mac_pipeline_test
+test_module: test_uqu_mac_pipeline
+parameters:
+  - MUA_MUL
+  - MUA_FORWARDING
+  - MUA_FORWARD_EX_TO_DE
+  - MUA_FORWARD_MEM_TO_DE
+  - MUA_FORWARD_MEM_TO_EX
+  - MUA_FORWARD_WB_TO_EX
+  - MUA_DE_OPERAND_RETENTION
+tests:
+  - recurrence
+  - hazards
+  - backpressure
+  - flush_reset

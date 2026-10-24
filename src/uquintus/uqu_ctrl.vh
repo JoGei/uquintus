@@ -54,6 +54,9 @@
 `define UQU_ALU_SUB  {1'b1, `UQU_FUNCT3_ADD_SUB}
 `define UQU_ALU_SRA  {1'b1, `UQU_FUNCT3_SRL_SRA}
 
+// Experimental execution control only; no architectural MAC encoding is assigned.
+`define UQU_MDU_MAC 5'd8
+
 `define UQU_FPU_FADD_S    5'd0
 `define UQU_FPU_FSUB_S    5'd1
 `define UQU_FPU_FMUL_S    5'd2

@@ -162,6 +162,7 @@ module uqu_mem_pipeline_tb #(
     end
 
     uqu_stage_mem u_mem (
+        .mul_row_b_i(64'd0), .mul_phase2_i(1'b0), .mul_high_i(1'b0), .mul_accumulate_i(1'b0), .mul_addend_i(32'd0), .mul_addend_ready_i(1'b1),
         .clk_i(clk_i), .rst_ni(rst_ni), .flush_i(flush_i),
         .valid_i(exmem_valid_q), .ready_o(mem_ready), .valid_o(mem_valid), .ready_i(memwb_ready),
         .lsu_i(exmem_lsu_q),

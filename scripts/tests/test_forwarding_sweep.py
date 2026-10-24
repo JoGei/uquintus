@@ -37,7 +37,7 @@ class ForwardingSweepTests(unittest.TestCase):
         self.assertEqual(cases[1]['paths'], ['wb2de'])
         self.assertEqual(cases[-1]['paths'], ['wb2de', 'wb2ex', 'mem2ex', 'mem2de', 'ex2de'])
         self.assertEqual(configs[cases[-1]['name']], base)
-        self.assertEqual(base['MUA_MUL'], 'parallel')
+        self.assertEqual(base['MUA_MUL'], 'dadda_mac')
         self.assertEqual(base['MUA_MULDIV_ITERUNROLL'], 8)
         self.assertEqual((base['ISA_M'], base['ISA_C']), (1, 1))
 

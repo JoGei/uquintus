@@ -5,6 +5,8 @@
 // forwarding belong to the pipeline. No architectural register is reset.
 module uqu_gpregfile #(
     parameter ISA_E = 0,
+    parameter ISA_M = 0,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter ISA_ZFINX = 0,
     parameter XIF = 0,
     parameter XIF_NUM_RS = 3,
@@ -30,7 +32,7 @@ module uqu_gpregfile #(
 );
     localparam NUM_REGS = (ISA_E == 1) ? 16 : 32;
     localparam REG_ADDR_WIDTH = (ISA_E == 1) ? 4 : 5;
-    localparam READ_THIRD = (ISA_ZFINX == 1) || ((XIF == 1) && (XIF_NUM_RS == 3));
+    localparam READ_THIRD = ((ISA_M == 1) && (MUA_MUL == `UQU_MUL_DADDA_MAC)) || (ISA_ZFINX == 1) || ((XIF == 1) && (XIF_NUM_RS == 3));
     localparam WRITE_SECOND = (XIF == 1) && (XIF_DUALWRITE == 1);
 
     // x0 has no storage. Keep architectural addresses five bits wide in E

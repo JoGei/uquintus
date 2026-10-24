@@ -74,6 +74,7 @@ deferred pending selection of an open-source formal toolchain.
 | --- | --- |
 | [Overview](uqu_spec.md) | Purpose, principles, scope, implementation milestones, and first-draft status. |
 | [Architecture](uqu_spec.arch.md) | ISA and microarchitecture together: parameters, pipeline, arithmetic, hazards, privilege, PMP, traps, CSRs, and memory-instruction semantics. |
+| [Multiplication](uqu_spec.mul.md) | Normative MUL/MAC arithmetic, EX1/MEM-EX2 payload, late-C forwarding, timing and verification contract. |
 | [Interfaces](uqu_spec.interfaces.md) | Clock/reset, native OBI ports, interrupts, CV-X-IF, debug, fence handshakes, hart identity, and the baseline port index. |
 | [Verification](uqu_spec.verif.md) | Pipeline visibility, trace/RVFI, Spike comparison, formal checking, randomized memory tests, and CI coverage. |
 | [Build](uqu_spec.build.md) | Bender/Make, configurations, simulation backends, ORFS, environment provisioning, and project/file layout. |

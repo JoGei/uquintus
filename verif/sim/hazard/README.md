@@ -1,7 +1,7 @@
 # Core-owned hazard and forwarding unit
 
 [uqu_hazard.v](../../../src/uquintus/uqu_hazard.v) resolves DE and EX register
-sources. It owns no pipeline slots, instruction queue, architectural registers,
+sources, plus the optional late-C operand in MEM/EX2. It owns no pipeline slots, instruction queue, architectural registers,
 retirement logic or global stall/flush controller. The core supplies normalized
 producer descriptors and consumer metadata from its pipeline registers.
 
@@ -157,4 +157,10 @@ Yosys `proc; opt; check -assert` yields zero storage bits in continuous mode,
 66 bits with two retained sources, or 99 bits with three. No latches are
 required. These are generic optimized storage counts, not mapped ASIC PPA.
 
-The full contract is [architecture Sections 4.1 and 4.2](../../../doc/uqu_spec.arch.md#41-core-to-de-operand-availability-contract).
+The full contract is [architecture Sections 4.1 and 4.2](../../../docs/uqu_spec.arch.md#41-core-to-de-operand-availability-contract).
+
+## Late-C MAC admission and resolution
+
+`ISA_M=1` with `MUA_MUL: dadda_mac` enables the third source even when Zfinx/XIF are disabled. The parent supplies `de_late_c_i`/`ex_late_c_i` only for internal MAC, and `ex_primary_registered_i`/`mem_primary_registered_i` only for primary results that will reach WB as registered data. This excludes LSU, CSR and XIF producers in the core. For source two of a late-C MAC, the DE admission guarantee permits passing EX1 with C unavailable; it promises resolution by EX2 rather than ordinary EX consumption. A/B and all other consumers retain the ordinary admission rules above. Global forwarding must be enabled; otherwise DE waits for architectural RF capture.
+
+EX does not capture C directly from MEM in this mode. A matching youngest MEM writer blocks an older matching WB writer, even if the MEM result is otherwise available. Registered WB can supply uncaptured C independently of `MUA_FORWARD_WB_TO_EX`. The MEM consumer interface is `mem_late_c_i`, `mem_c_addr_i[4:0]`, `mem_c_i[31:0]` and `mem_c_captured_i`, returning `mem_c_o[31:0]` and `mem_c_ready_o`. Captured payload takes priority, x0 resolves to zero, and an uncaptured source needs a matching usable primary WB result. No RF fallback or secondary-destination data bypass is provided. The parent captures ready data if a consumer is held, and owns clearing its capture/operation tags on flush or reset. `late_c` tests these routes and the [MAC pipeline fixture](../mac_pipeline/README.md) checks their lifecycle with real execution and register storage.

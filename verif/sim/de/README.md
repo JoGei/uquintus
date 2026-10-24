@@ -27,7 +27,7 @@ the still-unimplemented EX FPU backend.
 `MUA_C_DECOMPRESS_STAGE` selects `if` (0, default) or `de` (1), and is inactive
 in direct mode. With C disabled both selectors are inactive. The generated
 `uqu_config.vh` supplies integer macros from the canonical catalog.
-The [strategy contract](../../../doc/uqu_spec.arch.md#151-configurable-compressed-instruction-decoding)
+The [strategy contract](../../../docs/uqu_spec.arch.md#151-configurable-compressed-instruction-decoding)
 and [component comparison tests](../decompressor/README.md) describe the paths.
 
 For `decompress/if`, the parent supplies expanded `instr_i` and any expansion
@@ -208,4 +208,4 @@ expansion and direct C decoding with I, E+Zfinx and two-/three-source XIF,
 plus C-disabled inactive-selector cases. All six suites and lint run for every
 profile. The parent fixture also runs for all three C-enabled strategies.
 
-The structural regression in [test_de_candidate_contract.py](../common/tests/test_de_candidate_contract.py) elaborates 16 C-strategy, RV32E and XIF combinations with Yosys. Cutting sequential XIF state boundaries, it checks that candidate source fields and next-PC have no combinational dependency on live slot/handshake qualification or coprocessor responses. Run it with `.venv/bin/python -m unittest discover -s verif/sim/common/tests -p test_de_candidate_contract.py`; it skips when Yosys is unavailable.
+The structural regression in [test_de_candidate_contract.py](../common/tests/test_de_candidate_contract.py) elaborates 16 C-strategy, RV32E and XIF combinations with Yosys. Cutting sequential XIF state boundaries, it checks that candidate source fields and next-PC have no combinational dependency on live slot/handshake qualification or coprocessor responses. Run it with `.venv/bin/python -m unittest discover -s verif/sim/common/tests -p test_de_candidate_contract.py`; it skips when Yosys is unavailable. The matched physical experiment is documented in [DE candidate qualification](../../../impl/asic/orfs/investigations/de-candidates.md).

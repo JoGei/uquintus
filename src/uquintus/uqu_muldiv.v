@@ -5,7 +5,7 @@
 // Arithmetic slice zero is owned by the parent EX stage, combinationally.
 module uqu_muldiv #(
     parameter ISA_M = 0,
-    parameter MUA_MUL = `UQU_MUL_ITERATIVE,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
     parameter MUA_MULDIV_ITERUNROLL = 8
 ) (
@@ -30,10 +30,8 @@ module uqu_muldiv #(
     input  wire        arith_carry_out_i
 );
     localparam CONFIG_VALID =
-        ((MUA_MUL == `UQU_MUL_PARALLEL) ||
-         (MUA_MUL == `UQU_MUL_PARALLEL_2) ||
-         (MUA_MUL == `UQU_MUL_ITERATIVE) ||
-         (MUA_MUL == `UQU_MUL_DADDA)) &&
+        ((MUA_MUL == `UQU_MUL_ITERATIVE) || (MUA_MUL == `UQU_MUL_DADDA) ||
+         (MUA_MUL == `UQU_MUL_DADDA_MAC)) &&
         (MUA_DIV == `UQU_DIV_ITERATIVE) &&
         ((MUA_MULDIV_ITERUNROLL == 1) || (MUA_MULDIV_ITERUNROLL == 2) ||
          (MUA_MULDIV_ITERUNROLL == 4) || (MUA_MULDIV_ITERUNROLL == 8) ||
@@ -58,7 +56,6 @@ module uqu_muldiv #(
             localparam [2:0] ST_DIV_PREP_B = 3'd2;
             localparam [2:0] ST_DIV = 3'd3;
             localparam [2:0] ST_DIV_FINISH = 3'd4;
-            localparam [2:0] ST_MUL_PARALLEL_2 = 3'd5;
             localparam [2:0] ST_HOLD = 3'd6;
 
             reg [2:0] state_q;
@@ -102,9 +99,7 @@ module uqu_muldiv #(
             wire phase_prep_b = (state_q == ST_DIV_PREP_B);
             wire phase_div = (state_q == ST_DIV);
             wire phase_finish = (state_q == ST_DIV_FINISH);
-            wire phase_single_cycle = idle && !req_op_i[2] &&
-                ((MUA_MUL == `UQU_MUL_PARALLEL) || (MUA_MUL == `UQU_MUL_DADDA));
-            wire phase_parallel_2 = (state_q == ST_MUL_PARALLEL_2);
+            wire phase_single_cycle = idle && !req_op_i[2] && (MUA_MUL == `UQU_MUL_DADDA);
 
             wire [32:0] selected_magnitude = op_q[1] ? accum_q : {1'b0, bits_q};
             wire [32:0] prepared_b;
@@ -116,7 +111,10 @@ module uqu_muldiv #(
             wire negate_result = op_q[1] ? negative_a_q :
                                                        (negative_a_q ^ negative_b_q);
 
-            assign req_ready_o = enabled && (state_q == ST_IDLE);
+            // In the split configuration EX handles MUL compression directly;
+            // this unit contains only the blocking DIV/REM execution path.
+            assign req_ready_o = enabled && (state_q == ST_IDLE) &&
+                ((MUA_MUL != `UQU_MUL_DADDA_MAC) || req_op_i[2]);
             assign arith_use_o = enabled && (!idle || req_fire) &&
                 (phase_mul || phase_prep_a || phase_prep_b || phase_div || phase_finish);
             if (F == 1) begin : gen_serial_preparation
@@ -213,16 +211,7 @@ module uqu_muldiv #(
             wire [31:0] iterative_product = (op == 3'b000) ?
                 next_mul_bits : next_mul_accum[31:0];
             wire [31:0] single_cycle_product;
-            wire [31:0] parallel_product_2;
-
-            if (MUA_MUL == `UQU_MUL_PARALLEL) begin : gen_parallel
-                wire signed [32:0] operand_a = {request_signed_a && req_a_i[31], req_a_i};
-                wire signed [32:0] operand_b = {request_signed_b && req_b_i[31], req_b_i};
-                wire signed [65:0] product = operand_a * operand_b;
-                assign single_cycle_product = (req_op_i == 3'b000) ?
-                                            product[31:0] : product[63:32];
-                assign parallel_product_2 = 32'd0;
-            end else if (MUA_MUL == `UQU_MUL_DADDA) begin : gen_dadda
+            if (MUA_MUL == `UQU_MUL_DADDA) begin : gen_dadda
                 wire [63:0] product;
                 uqu_daddamul u_daddamul (
                     .a_i(req_a_i), .b_i(req_b_i),
@@ -231,40 +220,13 @@ module uqu_muldiv #(
                 );
                 assign single_cycle_product = (req_op_i == 3'b000) ?
                     product[31:0] : product[63:32];
-                assign parallel_product_2 = 32'd0;
-            end else if (MUA_MUL == `UQU_MUL_PARALLEL_2) begin : gen_parallel_2
-                // Stage 1 computes the low partial product. Stage 2 computes
-                // the high partial product and combines them after a real
-                // internal register boundary; this is not a delayed full product.
-                wire signed [32:0] operand_b = {request_signed_b && req_b_i[31], req_b_i};
-                wire signed [16:0] low_a = {1'b0, req_a_i[15:0]};
-                wire signed [49:0] low_product = low_a * operand_b;
-                reg signed [49:0] low_product_q;
-                reg signed [16:0] high_a_q;
-                reg signed [32:0] operand_b_q;
-                wire signed [49:0] high_product = high_a_q * operand_b_q;
-                wire [65:0] combined_product =
-                    {{16{low_product_q[49]}}, low_product_q} +
-                    {high_product, 16'd0};
-                always @(posedge clk_i) begin
-                    if (enabled && start && !req_op_i[2]) begin
-                        low_product_q <= low_product;
-                        high_a_q <= {request_signed_a && req_a_i[31], req_a_i[31:16]};
-                        operand_b_q <= operand_b;
-                    end
-                end
+            end else begin : gen_no_product
                 assign single_cycle_product = 32'd0;
-                assign parallel_product_2 = (op_q == 3'b000) ?
-                    combined_product[31:0] : combined_product[63:32];
-            end else begin : gen_no_parallel
-                assign single_cycle_product = 32'd0;
-                assign parallel_product_2 = 32'd0;
             end
 
-            wire complete = phase_single_cycle || phase_parallel_2 ||
+            wire complete = phase_single_cycle ||
                             (phase_mul && last_group) || phase_finish;
             wire [31:0] completed_result = phase_single_cycle ? single_cycle_product :
-                phase_parallel_2 ? parallel_product_2 :
                 phase_mul ? iterative_product :
                 divide_zero_q ? (op_q[1] ? original_a_q : 32'hffffffff) :
                 first_result[31:0];
@@ -301,11 +263,8 @@ module uqu_muldiv #(
                                         divisor_q <= prepared_b;
                                         state_q <= ST_DIV;
                                     end
-                                end else if ((MUA_MUL == `UQU_MUL_PARALLEL) ||
-                                             (MUA_MUL == `UQU_MUL_DADDA)) begin
+                                end else if (MUA_MUL == `UQU_MUL_DADDA) begin
                                     state_q <= res_fire ? ST_IDLE : ST_HOLD;
-                                end else if (MUA_MUL == `UQU_MUL_PARALLEL_2) begin
-                                    state_q <= ST_MUL_PARALLEL_2;
                                 end else if (last_group) begin
                                     state_q <= res_fire ? ST_IDLE : ST_HOLD;
                                 end else begin
@@ -338,7 +297,7 @@ module uqu_muldiv #(
                                 step_q <= step_q + STEP_INCREMENT;
                             end
                         end
-                        ST_DIV_FINISH, ST_MUL_PARALLEL_2: begin
+                        ST_DIV_FINISH: begin
                             state_q <= res_fire ? ST_IDLE : ST_HOLD;
                         end
                         ST_HOLD: begin

@@ -32,7 +32,7 @@ module uqu_benchmark_tb #(
     parameter MUA_IF_BUFFER_WORDS = 2,
     parameter MUA_REDIRECT_BYPASS = `UQU_REDIRECT_BYPASS_NONE,
     parameter MUA_HARDENED = 0,
-    parameter MUA_MUL = `UQU_MUL_ITERATIVE,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
     parameter MUA_MULDIV_ITERUNROLL = 8,
     parameter MUA_FPU_PIPE_REGS_FMA = 2,

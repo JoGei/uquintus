@@ -49,14 +49,7 @@ make report
 ```
 
 `TOP` defaults to `core`; `fpu` selects the actual standalone adapter/backend.
-For the structural single-cycle Dadda multiplier, select `TOP=core` and a
-configuration with `MUA_MUL: dadda` (for example `CONFIG=rv32im_dadda`).
-For a controlled RV32IMC multiplier comparison with divider unroll 1, use
-`CONFIG=rv32imc_bimodal_idata_dadda_div1` versus
-`CONFIG=rv32imc_bimodal_idata_parallel_div1`; see the
-[comparison](orfs/investigations/daddamul-div1.md).
-The former standalone EX/MEM split targets are removed; their
-[measurements](orfs/investigations/dadda-split.md) are historical.
+For multiplication, `MUA_MUL: dadda_mac` is the canonical EX1→MEM/EX2 implementation with late-C compressor fusion. `dadda` retains an EX1-only PP/Dadda/BK product, and `iterative` retains shared arithmetic. Use `CONFIG=rv32imc_bimodal_idata_dadda_div1` versus `CONFIG=rv32imc_bimodal_idata_dadda_mac_div1` for a current matched product/split comparison with DIV factor one. The [multiplication specification](../../docs/uqu_spec.mul.md) defines current behavior; [efficient multiplication](orfs/investigations/efficient-mul.md) consolidates the historical family/cut/MAC measurements and selection rationale.
 `PLATFORM` defaults to `sky130hd`; `ihp-sg13g2` is also supported. Libraries,
 LEFs and mapping files come from the installed ORFS platform. `CLOCK_PERIOD_NS`
 defaults to 20, and `JOBS` to 4. Provide Python/PyYAML and Bender as for simulation;
@@ -70,7 +63,7 @@ provide the selected arrival window; reset timing is not waived. The
 The generated SDC is a **standalone evaluation profile**, using generic port
 delays, slew and load assumptions. It does not model a particular SRAM or
 coprocessor. The SoC owns final integrated timing; see the
-[interface timing policy](../../doc/uqu_spec.build.md#41-interface-timing-scope).
+[interface timing policy](../../docs/uqu_spec.build.md#41-interface-timing-scope).
 Supply `SDC=/absolute/path/system.sdc` to `make synth` or `make impl` to replace
 the generated constraints. Omit `RESET_INPUT_DELAY_NS` in that case; put reset
 timing in the supplied file. `CLOCK_PERIOD_NS` must match its single ideal clock's
@@ -221,7 +214,7 @@ and does not consume Yosys's `-D` delay-target argument. The requested clock
 period still constrains OpenROAD's reported slack; it does not guarantee that
 this ABC script maps specifically toward that period. Preserve the script
 revision when comparing results or clock targets.
-The [benchmarking specification](../../doc/uqu_spec.bench.md) defines `T_min`,
+The [benchmarking specification](../../docs/uqu_spec.bench.md) defines `T_min`,
 estimated maximum frequency, timing scope and reset-arrival assumptions.
 Implementation passing additionally requires legal placement, nonnegative
 setup/hold slack and zero reported slew, capacitance and fanout violations.
@@ -243,7 +236,7 @@ these are register regions, not isolated combinational-stage budgets.
 paths; `summary.json` and report metrics retain their worst slacks/endpoints.
 Empty or optimized-away regions have no constrained paths rather than zero
 slack. Standalone FPU tops mark pipeline regions not applicable. See the
-[region definitions](../../doc/uqu_spec.build.md#42-pipeline-register-region-timing-diagnostics).
+[region definitions](../../docs/uqu_spec.build.md#42-pipeline-register-region-timing-diagnostics).
 
 ORFS's raw report includes default-activity power estimates; this flow does not
 publish them as qualified power measurements. Physical timing, area, power,

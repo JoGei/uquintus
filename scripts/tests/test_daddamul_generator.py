@@ -22,26 +22,7 @@ def weighted(heap, rows, width):
     return sum((heap >> (2*width*r)) & mask for r in range(rows)) & mask
 
 
-class DaddaGeneratorTests(unittest.TestCase):
-    def test_checked_in_verilog_matches_canonical_generator(self):
-        self.assertEqual(gen.OUTPUT.read_text(), gen.generate())
-
-    def test_schedule_has_no_same_pass_counter_dependencies_or_lost_dots(self):
-        stages = gen.stages_for()
-        self.assertEqual([s.target for s in stages], [28, 19, 13, 9, 6, 4, 3, 2])
-        self.assertEqual([sum(s.output_heights) for s in stages],
-                         [1010, 857, 665, 497, 350, 242, 185, 126])
-        for stage in stages:
-            used = []
-            for counter in stage.counters:
-                self.assertTrue(all(ref.startswith('heap_i[') for ref in counter.inputs))
-                used.extend(counter.inputs)
-            used.extend(ref for col in stage.output_columns for ref in col if ref.startswith('heap_i['))
-            expected = [f'heap_i[{64*r+c}]' for c, h in enumerate(stage.input_heights) for r in range(h)]
-            self.assertCountEqual(used, expected)
-            self.assertEqual(len(used), len(set(used)))
-            self.assertLessEqual(max(stage.output_heights), stage.target)
-
+class DaddaProductOracle:
     def check_product(self, width, a, b, sa, sb, stages):
         bits = {f'pp[{width*i+j}]': ((a >> i & 1) & (b >> j & 1)) ^
                 ((sa and i == width-1) ^ (sb and j == width-1))
@@ -61,6 +42,27 @@ class DaddaGeneratorTests(unittest.TestCase):
                 bits[counter.sum], bits[counter.carry] = value & 1, value >> 1
             heap = packed(stage.output_columns, bits, width)
             self.assertEqual(weighted(heap, stage.target, width), expected)
+
+
+class DaddaGeneratorTests(DaddaProductOracle, unittest.TestCase):
+    def test_checked_in_verilog_matches_canonical_generator(self):
+        self.assertEqual(gen.OUTPUT.read_text(), gen.generate())
+
+    def test_schedule_has_no_same_pass_counter_dependencies_or_lost_dots(self):
+        stages = gen.stages_for()
+        self.assertEqual([s.target for s in stages], [28, 19, 13, 9, 6, 4, 3, 2])
+        self.assertEqual([sum(s.output_heights) for s in stages],
+                         [1010, 857, 665, 497, 350, 242, 185, 126])
+        for stage in stages:
+            used = []
+            for counter in stage.counters:
+                self.assertTrue(all(ref.startswith('heap_i[') for ref in counter.inputs))
+                used.extend(counter.inputs)
+            used.extend(ref for col in stage.output_columns for ref in col if ref.startswith('heap_i['))
+            expected = [f'heap_i[{64*r+c}]' for c, h in enumerate(stage.input_heights) for r in range(h)]
+            self.assertCountEqual(used, expected)
+            self.assertEqual(len(used), len(set(used)))
+            self.assertLessEqual(max(stage.output_heights), stage.target)
 
     def test_exhaustive_small_and_random_rv32_signed_products(self):
         for width in (2, 3, 4):

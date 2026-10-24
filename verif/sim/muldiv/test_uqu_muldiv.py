@@ -21,13 +21,14 @@ class MuldivTest(uvm_test):
         self.enabled = self.params['ISA_M']
         self.factor = self.params['MUA_MULDIV_ITERUNROLL']
         self.mul_mode = self.params['MUA_MUL']
+        self.operations = range(4,8) if self.mul_mode in (13,) else range(8)
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
         self.checks = 0
 
     def latency(self, op):
         if op >= 4:
             return (2 + self.factor - 1) // self.factor + 32 // self.factor + 1
-        return {0: 1, 1: 2, 2: 32 // self.factor, 3: 1}[self.mul_mode]
+        return {2: 32 // self.factor, 3: 1}[self.mul_mode]
 
     async def settle(self):
         await Timer(1, units='ns')
@@ -48,7 +49,7 @@ class MuldivTest(uvm_test):
         d.flush_i.value = 0
         d.req_valid_i.value = 0
         d.res_ready_i.value = 0
-        d.req_op_i.value = 0
+        d.req_op_i.value = 4 if self.mul_mode in (13,) else 0
         d.req_a_i.value = 0
         d.req_b_i.value = 0
         await self.settle()
@@ -115,10 +116,24 @@ class MuldivTest(uvm_test):
             assert int(self.dut.res_data_o.value) == expected
             await self.edge()
         await self.settle()
-        assert self.outputs() == (1, 0, 0), 'unit did not drain exactly once'
+        assert self.outputs() == self.idle_outputs(), 'unit did not drain exactly once'
         self.checks += 1
 
+    def idle_outputs(self):
+        ready = self.mul_mode not in (13,) or int(self.dut.req_op_i.value) >= 4
+        return int(ready), 0, 0
+
     async def consecutive_multiplies(self):
+        if self.mul_mode in (13,):
+            # EX owns compression; the local MDU must reject MUL encodings.
+            for op in range(4):
+                self.request(op, MASK, MASK)
+                for _ in range(4):
+                    await self.settle()
+                    assert self.outputs() == (0, 0, 0)
+                    await self.edge()
+            self.dut.req_valid_i.value = 0
+            return
         if self.latency(0) != 1:
             return
         # Keep valid asserted: every cycle must accept and complete a different
@@ -145,7 +160,7 @@ class MuldivTest(uvm_test):
         await self.settle()
         assert self.outputs() == (1, 0, 1)
         await self.edge()
-        self.request(1, 0x80000000, 0xFFFFFFFF)
+        self.request(6 if self.mul_mode in (13,) else 1, 0x80000000, 0xFFFFFFFF)
         expected = reference(5, MASK, 7)
         for cycle in range(2, self.latency(5) + 1):
             await self.settle()
@@ -162,7 +177,7 @@ class MuldivTest(uvm_test):
         await self.settle()
         assert self.outputs() == (0, 1, 0)
         await self.edge()
-        await self.operation(1, 0x80000000, 0xFFFFFFFF)
+        await self.operation(6 if self.mul_mode in (13,) else 1, 0x80000000, 0xFFFFFFFF)
 
     async def cancel(self, op, cut, reset=False, held=False):
         self.request(op, 0x81234567, 0xFFFFFFFD)
@@ -189,9 +204,9 @@ class MuldivTest(uvm_test):
         # Wait longer than the original latency: canceled work must never return.
         for _ in range(self.latency(op) + 1):
             await self.settle()
-            assert self.outputs() == (1, 0, 0), 'stale result after cancellation'
+            assert self.outputs() == self.idle_outputs(), 'stale result after cancellation'
             await self.edge()
-        await self.operation((op + 1) % 8, 0x80000000, 0xFFFFFFFF)
+        await self.operation((4+(op+1)%4) if self.mul_mode in (13,) else (op+1)%8, 0x80000000, 0xFFFFFFFF)
 
 
 class DirectedTest(MuldivTest):
@@ -203,7 +218,7 @@ class DirectedTest(MuldivTest):
         else:
             values = [0, 1, 2, 0x7FFFFFFF, 0x80000000, 0x80000001,
                       0xFFFFFFFE, MASK, 0xAAAAAAAA, 0x55555555]
-            for op in range(8):
+            for op in self.operations:
                 for a in values:
                     for b in values:
                         await self.operation(op, a, b)
@@ -223,7 +238,7 @@ class RandomizedTest(MuldivTest):
         else:
             for _ in range(256):
                 a, b = self.rng.getrandbits(32), self.rng.getrandbits(32)
-                for op in range(8):
+                for op in self.operations:
                     await self.operation(op, a, b, hold=self.rng.randrange(5))
         self.logger.info('Randomized M-extension results/latencies: %d', self.checks)
         self.drop_objection()
@@ -238,7 +253,7 @@ class ControlTest(MuldivTest):
         else:
             await self.consecutive_multiplies()
             await self.pending_request()
-            for op in range(8):
+            for op in self.operations:
                 # Every computation phase, result cycle, and held-result state.
                 for reset in (False, True):
                     for cut in range(1, self.latency(op) + 1):

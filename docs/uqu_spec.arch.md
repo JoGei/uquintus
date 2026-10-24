@@ -213,7 +213,7 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_IF_BUFFER_WORDS` | Integer capacity of at least `2` in 32-bit fetch words; non-power-of-two capacities supported. | `2` |
 | `MUA_REDIRECT_BYPASS` | `none` or canonical `+` combinations of `if_buffer`, `redirect_request`, and `ifetch_result`: independently select word-FIFO fall-through, same-cycle target requests, and empty-result-queue response fall-through. All eight choices are defined in Section 15.4. | `none` |
 | `MUA_HARDENED` | `0`: no OBI parity/checksum generation/checking requirement; `1`: planned hardened implementation including OBI parity/checksum generation and checking on both ports; enabled setting unsupported until implemented. | `0` |
-| `MUA_MUL` | `parallel`, `parallel+stages+2`, `iterative`, or `dadda`; iterative unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
+| `MUA_MUL` | `dadda_mac`: canonical PP/Dadda/BK across EX1 and MEM/EX2 with late C; `dadda`: EX1-only product; `iterative`: shared radix-2 baseline. Inactive when `ISA_M = 0`. | `dadda_mac` |
 | `MUA_DIV` | `iterative`; unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
 | `MUA_MULDIV_ITERUNROLL` | Integer factor 1, 2, 4, 8, 16, or 32 for the shared iterative chain; 1 means no unrolling; inactive when `ISA_M = 0`. | `8` |
 | `MUA_FPU_PIPE_REGS_FMA` | Nonnegative register count for the FP32 add/multiply/fused-operation group. | `2` |
@@ -269,8 +269,8 @@ The pipeline stages shall be arranged in this order:
 | --- | --- | --- |
 | IF | Fetch | Fetch instructions through the instruction memory interface. |
 | ID | Decode | Decode instructions, read source registers, resolve conditional branches, and calculate `JAL`/`JALR` jump targets. |
-| EX | Execute | Perform arithmetic and logic operations and calculate effective addresses for memory accesses. |
-| MEM | Memory | Check and issue load/store requests; advance on grant. |
+| EX / EX1 | First execute | Perform arithmetic/logic and effective-address calculation; compress split products. |
+| MEM / EX2 | Memory and second execute | Issue load/store requests; complete split multiplication and late-C MAC. |
 | WB | Write back | Await memory responses, handle faults and retire/write results. |
 
 MEM shall present a permitted native load/store request combinationally and
@@ -289,47 +289,29 @@ and arithmetic shifts for both the RV32I and RV32E bases. Hazards and downstream
 backpressure may still hold the instruction in EX; they shall not require
 additional ALU execution steps.
 
-When `ISA_M = 1`, `MUA_MUL` shall select the integer multiplier implementation
-at elaboration time. Its readable YAML choices shall select a parallel or
-iterative implementation, including an explicit structural Dadda choice,
-translated into integer RTL settings under
-[build, Section 2](uqu_spec.build.md#2-shared-core-configuration-and-separate-build-targets):
+The [multiplication specification](uqu_spec.mul.md) defines the detailed arithmetic, payload and late-C requirements. When `ISA_M = 1`, `MUA_MUL` selects one of three implementations at elaboration. MEM is canonically the combined memory/second-execute region (MEM/EX2), retaining the LSU and allowing an older multiplication to finish alongside a younger instruction in EX1. The five pipeline stages and core-owned register boundaries are unchanged. No multiplication passes WB retirement or an older unresolved memory operation.
 
-| `MUA_MUL` value | Implementation contract |
-| --- | --- |
-| `dadda` | Use `uqu_daddamul`: an explicit 32×32 Dadda compressor tree with integrated signed corrections and a final 64-bit adder; produce the selected result in one EX computation cycle. |
-| `parallel` | Infer a parallel multiplier using the Verilog `*` operator initially; produce the result in one EX execution cycle once operands are available. |
-| `parallel+stages+2` | Partition parallel multiplication across two computation stages with an internal register boundary; execute in exactly two EX cycles. |
-| `iterative` | Use the shared iterative radix-2 datapath with unroll factor `F = MUA_MULDIV_ITERUNROLL`; execute in exactly `32 / F` EX cycles. This is the default. |
+| `MUA_MUL` | Arithmetic and availability | RTL encoding |
+| --- | --- | ---: |
+| `dadda_mac` (default) | Ordinary partial products and Dadda compression to two aligned 64-bit rows in EX1; late C through a 3:2 compressor and one BK-mapped final addition in MEM/EX2. Native MUL uses C=0. The result is first available in MEM/EX2; independent operations have initiation interval one when downstream is ready. | 13 |
+| `dadda` | The same PP/Dadda product with its final addition in EX1, through `uqu_muldiv`. Product-only MUL/MULH completes in one EX computation cycle. | 3 |
+| `iterative` | Shared radix-2 arithmetic chain with `F = MUA_MULDIV_ITERUNROLL`; all native multiply forms take exactly `32/F` EX computation cycles. | 2 |
 
-The selection shall apply to `MUL`, `MULH`, `MULHU`, and `MULHSU`, with the
-signedness and result selection defined by the
-[RISC-V M-extension specification](https://docs.riscv.org/reference/isa/unpriv/m-st-ext.html).
+`config/selectors.json` is authoritative. Removed encodings are not reassigned or accepted as aliases. The Booth, Wallace, explicit Sklansky, inferred `*`, internally registered parallel, early-C MAC, product-only split and optional three-row-cut experiments are historical. `MUA_MUL_SPLIT` is removed: the canonical split always carries two product rows and separate C. See the [selection rationale and measurement history](../impl/asic/orfs/investigations/efficient-mul.md#decision).
 
-`MUA_MUL: dadda` instantiates the combinational `uqu_daddamul` in `uqu_muldiv`.
-The unit returns a full 64-bit product; MUL/DIV chooses signedness and the high
-or low half, using its existing single-cycle completion, held-result and
-flush/reset behavior. Dadda multiplication does not use the shared EX adder;
-DIV continues using the configured iterative arithmetic chain. Selectors retain
-values 0/1/2 for the existing modes and add `UQU_MUL_DADDA = 3`. The
-`rv32im_dadda` preset and configuration label `mua-mul:dadda` expose the choice.
-See the [component contract](../verif/sim/daddamul/README.md).
+All three choices implement MUL, MULH, MULHSU and MULHU with their architectural signedness and half selection. Structural products integrate signed correction into the partial-product heap and preserve lower-column carries for high-half results. `uqu_daddamul` returns the full 64-bit product; `uqu_daddamul_rows` exposes the same two weighted rows without a final carry-propagate adder. Both checked-in Verilog files come from one canonical Dadda generator. The behavioral final `+` uses the established Yosys Brent–Kung mapping; ABC and physical repair may restructure it. BK describes that mapping, not a guaranteed immutable gate topology.
 
-The core supplies MUL/DIV with resolved EX RS1 and RS2 through dedicated `uqu_stage_ex.muldiv_a_i` and `muldiv_b_i` inputs. These bypass the ALU's PC/immediate operand selectors; legal native M instructions consume register operands exclusively. The existing captured/deferred operand resolution, readiness, forwarding, cancellation and latency rules still apply. This adds neither operand registers nor a separate arithmetic unit: ALU and iterative MUL/DIV continue sharing the EX-owned arithmetic slice. ALU/FPU operands and functional-unit result selection retain their existing paths.
+The core supplies multiplication/division with resolved RS1 and RS2 through `uqu_stage_ex.muldiv_a_i` and `muldiv_b_i`, bypassing the ALU PC/immediate selectors. ALU and iterative MDU still share the EX-owned first arithmetic slice; structural multiplication uses its own datapath. DIV/REM always retain the blocking iterative EX path.
 
-A [future EX/MEM split](uqu_draft.mul.md#deferred-use-of-mem-as-phase-two) is
-deferred. MEM retains its LSU role; there is no implemented Dadda cut parameter
-or two-phase multiplier interface. The default remains `iterative`.
+For `dadda_mac`, `uqu_stage_ex` owns the stateless compressor and `uqu_stage_mem` owns the stateless `uqu_mul_finish`. The core owns the EX1→MEM/EX2 payload: row A reuses `mem_data_q` and `mem_store_data_q`, and row B adds 64 bits. Phase/half tags travel with the owning instruction. EX completion allows transfer but does not advertise a usable GPR result; compressor rows must never enter ordinary forwarding. MEM/EX2 produces the architectural result, using existing MEM forwarding controls. A/B-dependent consumers conservatively wait for that result; independent multiplications may enter EX1 every cycle.
 
-For the parallel family, the stage count shall describe computation stages,
-not merely delay registers after a complete combinational multiplier. Internal
-registers shall partition the arithmetic path. Initial support shall be limited
-to `parallel` and `parallel+stages+2`; other explicit stage counts shall fail
-configuration validation. The initial two-stage implementation computes the
-low-16-bit partial product in stage one, then computes and combines the upper
-partial product in stage two, with an internal register boundary between those
-computations. No particular Booth encoding, array structure, or
-Wallace/Dadda reduction tree is required for the initially inferred multiplier.
+The internal MAC control `UQU_MDU_MAC` (8) computes `d = (a*b+c) mod 2^32`, writing one integer destination. Only `dadda_mac` accepts this control. EX1 compresses A×B; MEM/EX2 inserts zero-extended C through a 3:2 layer before a single final carry-propagate addition. Native MUL/MULH always ignore the C payload. There is no hidden accumulator, MUL/ADD fusion, or MAC architectural opcode yet; the native decoder does not emit MAC. A future encoding must identify its three sources and enable the specified late-C consumer contract. The third GPR read port is enabled for M plus `dadda_mac`, independently of the existing Zfinx and three-source XIF enables.
+
+Late C travels through parent-owned payload registers: 128 product-row bits plus 32 C bits, a five-bit source address, a captured flag and an accumulate tag, alongside the existing phase/high metadata. C is never reread through an arbitrated DE GPR port. A captured C value is authoritative and retained through stalls. An uncaptured C is supplied only by its matching registered WB producer; a younger matching MEM producer blocks an older matching WB value. The hazard unit owns resolution, while the core owns payload state and its flush/reset lifecycle. C readiness gates EX2 completion, not EX1 multiplication. A/B are still required for EX1. Known exceptions drain without waiting for unused C.
+
+With `MUA_FORWARDING=1`, the late-C WB route is independent of the ordinary `MUA_FORWARD_WB_TO_EX` selector because it supplies the EX2 operand. Late DE admission is permitted only for matching primary result producers that will reach WB with registered data. Loads, CSR instructions and XIF results retain conservative ordinary admission; secondary XIF destinations do not receive a late guarantee. With global forwarding disabled, DE waits until C can be captured architecturally. Ordinary captured-source and x0 rules still apply.
+
+For consecutive `MAC x3,x1,x2,x3` internal operations, cycle k may hold MAC1 in EX1; cycle k+1 holds MAC1 in EX2 and MAC2 in EX1; cycle k+2 holds MAC1's registered WB result and MAC2 in EX2. WB→EX2 supplies MAC2's C, permitting initiation interval one. A dependency through either multiplicand still waits for the preceding EX2 result before EX1. This operation remains an internal FU control without an assigned architectural encoding; software-visible MAC decoding is deferred. The [MAC pipeline fixture](../verif/sim/mac_pipeline/README.md) verifies the recurrence with the actual hazard, GPR, EX and MEM blocks.
 
 The integer parameter `MUA_MULDIV_ITERUNROLL` shall select the shared iterative
 unroll factor `F`, with supported values `1`, `2`, `4`, `8`, `16`, and `32` and
@@ -360,8 +342,7 @@ completion shall be permitted. Multi-cycle multiplication shall retain EX under
 the blocking policy below; internal registers shall not add architectural
 pipeline stages or permit younger instructions to pass it. Hazards and downstream
 backpressure may still extend the instruction's residence in EX without
-requiring additional multiplication work. `MUA_MUL` shall default to `iterative` so MUL and DIV share the iterative
-arithmetic chain.
+requiring additional multiplication work. `MUA_MUL` defaults to `dadda_mac`; selecting `iterative` retains shared-chain multiplication as the size-oriented baseline.
 
 Multiply instructions shall execute independently. The core shall not fuse a
 `MULH`/`MULHU`/`MULHSU` instruction with a following `MUL`, or reuse a previous
@@ -421,9 +402,7 @@ fixed execution latency and separate architectural retirement.
 
 The defaults `MUA_DIV = iterative` and `MUA_MULDIV_ITERUNROLL = 8` shall give
 a fixed divider execution latency of six EX cycles when `ISA_M = 1`.
-The default `MUA_MUL = iterative` shall give four multiplication cycles
-with that unroll setting, sharing the same arithmetic slices as division. This default shall exercise and demonstrate the
-unroll configuration.
+Selecting `MUA_MUL = iterative` gives four multiplication cycles at factor eight, sharing the divider slices. The default `dadda_mac` instead uses EX1 compression and MEM/EX2 completion; the unroll factor continues to configure division independently.
 
 Iterative multiplication and division shall reuse the EX ALU's add/sub
 datapath. With `MUA_MULDIV_ITERUNROLL = 1`, all iterative data arithmetic,
@@ -444,7 +423,7 @@ add/sub-and-fixed-shift slices shall implement the remaining steps. With
 same chain and the same unroll factor. Separate chains shall not be generated
 for MUL and DIV. Factor one shall generate no additional arithmetic slices.
 
-With `MUA_MUL = parallel`, `parallel+stages+2`, or `dadda` and `MUA_DIV = iterative`,
+With `MUA_MUL = dadda` or `dadda_mac` and `MUA_DIV = iterative`,
 only division shall use the shared iterative chain; multiplication shall use
 its separate parallel datapath and retain its selected stage-count contract.
 The initial shared chain uses the 33-bit `uqu_arith` primitive, with
@@ -524,11 +503,12 @@ despite downstream backpressure and
 retain its completed result until accepted.
 
 EX shall track request acceptance so a held instruction starts computation
-only once. The blocking EX policy permits at most one live native arithmetic
-operation at a time. An accepted result shall be transferred or retained by
+only once. The blocking EX policy permits at most one native instruction in EX at a time; with the canonical `dadda_mac` multiplier, an older multiply may concurrently finish in MEM. An accepted result shall be transferred or retained by
 the pipeline exactly once; result acceptance shall not itself be architectural
 retirement. Reset shall prevent stale results from being associated with another
 instruction.
+
+Split multiplication uses stateless phase-one/phase-two leaves governed by the existing stage-slot transfers rather than a second blocking request/result controller. EX completion and final-result availability are distinct: compression completes without forwarding a product, and MEM finishes the product before normal WB retirement. The core-owned boundary retains intermediate rows under backpressure and invalidates their instruction on reset/flush. Combinational reevaluation while held is harmless; instruction transfers and architectural effects still occur once.
 
 A flush that discards the instruction owning a native ALU/MUL/DIV/FPU operation
 shall cancel that operation immediately at the active clock edge, following
@@ -1093,7 +1073,7 @@ See the [LSU guide](../verif/sim/lsu/README.md) for the exact ports and tests.
 
 ### 3.9. MEM stage and parent-owned pipeline storage
 
-`src/uquintus/uqu_stage_mem.v` owns one LSU and private issue/cancellation control,
+`src/uquintus/uqu_stage_mem.v` is the canonical MEM/EX2 region. It owns the optional split-MAC finisher, one LSU and private issue/cancellation control,
 without duplicating pipeline-boundary payloads or the core-owned PMP block.
 The parent retains EX/MEM inputs until `valid_o && ready_i`, then captures the
 instruction's identity and pending-memory marker in MEM/WB. Before initially
@@ -4134,9 +4114,9 @@ later decisions determine the active contract.
 | D-159 | Integrate iterative-multiplier preparation/sign handling into the first iteration and final accumulation/correction/result selection into the last, with no extra setup or completion cycles; execute all four multiply instructions in exactly `32 / factor` EX cycles. | Give iterative multiplication the same fixed iteration-to-cycle mapping as division, including single-cycle execution at factor 32. | Agreed; initial iterative algorithm described in Section 3 |
 | D-160 | Execute multiply instructions independently, without high/low instruction fusion or reuse of a previous instruction's product. | Retain independent execution, fixed latency, and retirement for every multiply instruction. | Agreed |
 | D-161 | Reuse the EX ALU for all iterative MUL/DIV data arithmetic at factor one, including preparation and arithmetic sign correction, with no dedicated data add/sub/multiply/negation units; for unrolling, reuse the first arithmetic step and generate the additional steps as needed. | Eliminate duplicate compute arithmetic when unrolling is disabled while preserving configurable unrolling and fixed execution latency. | Agreed; sharing of additional stages defined by D-163; initial algorithms and arithmetic interface defined in Sections 3 and 3.5 |
-| D-162 | Move iterative unrolling into integer parameter `MUA_MULDIV_ITERUNROLL`, accepting 1, 2, 4, 8, 16, or 32 and defaulting to 8; use `MUA_MUL = parallel`, `parallel+stages+<N>`, or `iterative`, and `MUA_DIV = iterative` (default), with no embedded unroll suffixes. | Give iterative multiplication and division one common unroll count, preserving the factor-eight divider default and requiring all hardware configurations to set the factor explicitly even when inactive. | Agreed; parallel stage count limited by D-164; selector encodings defined in config/selectors.json |
+| D-162 | Move iterative unrolling into integer parameter `MUA_MULDIV_ITERUNROLL`, accepting 1, 2, 4, 8, 16, or 32 and defaulting to 8; use `MUA_MUL = parallel`, `parallel+stages+<N>`, or `iterative`, and `MUA_DIV = iterative` (default), with no embedded unroll suffixes. | Give iterative multiplication and division one common unroll count, preserving the factor-eight divider default and requiring all hardware configurations to set the factor explicitly even when inactive. | Historical multiplier choices superseded by D-317; shared unroll parameter retained |
 | D-163 | Share one iterative chain between MUL and DIV, comprising the EX ALU's first arithmetic step and `F - 1` additional configurable slices, where `F = MUA_MULDIV_ITERUNROLL`; when MUL is parallel, only DIV uses the iterative chain and MUL has its own parallel datapath. | Use the full configured unroll capacity for either iterative operation without separate arithmetic chains or independent factors. | Agreed; initial implementation described in Sections 3.4 and 3.5 |
-| D-164 | Limit initial parallel multiplication to `parallel` (one EX cycle, default) and `parallel+stages+2` (two EX cycles with an internal register boundary); reject other explicit stage counts. | Provide one registered parallel option while keeping the implementation scope limited. | Agreed; parallel default superseded by D-262; initial partial-product partition described in Section 3 |
+| D-164 | Limit initial parallel multiplication to `parallel` (one EX cycle, default) and `parallel+stages+2` (two EX cycles with an internal register boundary); reject other explicit stage counts. | Provide one registered parallel option while keeping the implementation scope limited. | Historical; inferred parallel implementations removed by D-317 |
 | D-165 | Execute division and remainder instructions independently, without instruction fusion or reuse of a previous instruction's quotient/remainder. | Retain independent computation, fixed latency, and retirement for every division or remainder instruction. | Agreed |
 | D-166 | Use common request/result `valid`/`ready`/`fire` handshakes for native arithmetic execution units, with stable blocked payloads, one start and one result per live instruction, and same-edge request/result transfer for single-cycle units. | Integrate arithmetic implementations consistently while preserving fixed execution latency, blocking EX behavior, and correct backpressure handling. | Implemented ALU/MUL/DIV interfaces and EX ownership; FPU adapter implemented under D-304; D-167 cancellation retained |
 | D-167 | Immediately cancel an affected native ALU/MUL/DIV operation on its instruction's flush, clearing active/busy, pending-result validity, and request tracking at the active clock edge with priority over stalls, progress, and transfers; suppress stale results and release the unit without waiting for completion. | Discard flushed arithmetic work promptly while preserving instruction ownership, precise side effects, and the separate memory, CV-X-IF, and interrupt contracts. | Agreed; extended to FPU operations by D-239 |
@@ -4193,7 +4173,7 @@ later decisions determine the active contract.
 | D-260 | Name the shared extended add/sub component `uqu_arith`; keep ALU logic/variable shifts and MUL/DIV-specific steering/fixed shifts in their enclosing blocks. | Reuse a small arithmetic primitive while preserving physical ALU sharing for the first iterative step. | Agreed; initial 33-bit implementation and carry convention described in Section 3.4 |
 | D-261 | Give DIV/DIVU/REM/REMU exactly `ceil(2/F) + 32/F + 1` EX cycles: two sequential magnitude preparations at F=1 or two parallel preparations in one cycle at F>=2, followed by the iterations and one completion cycle; use existing arithmetic slices and reserve all phases for unsigned and special cases too. | Reuse available unrolled arithmetic for operand preparation while keeping latency operand-independent. | Agreed; supersedes the divider timing in D-155 and D-157; default F=8 gives six cycles; iterative MUL timing remains D-159 |
 | D-251 | Fix enabled PMP capacity at sixteen configurable entries, numbered zero through fifteen, and remove the external ISA_PMP_REGIONS parameter; retain optional ISA_PMP with default zero and fixed four-byte granularity. | Provide one standard PMP capacity without region-count configuration or alternative-count implementation work. | Agreed; supersedes D-145 and D-146 |
-| D-262 | Default `MUA_MUL` to `iterative` alongside `MUA_DIV = iterative`, retaining `MUA_MULDIV_ITERUNROLL = 8`; preserve parallel multiplication as an explicit configuration option. | Share the iterative arithmetic chain between MUL and DIV in the default M-enabled implementation. | Agreed; supersedes the multiplier defaults in D-158 and D-164 |
+| D-262 | Default `MUA_MUL` to `iterative` alongside `MUA_DIV = iterative`, retaining `MUA_MULDIV_ITERUNROLL = 8`; preserve parallel multiplication as an explicit configuration option. | Share the iterative arithmetic chain between MUL and DIV in the default M-enabled implementation. | Historical default; superseded by D-317 below |
 | D-263 | Place the first shared `uqu_arith` instance and its input mux in parent EX, with ALU and MUL/DIV as siblings exposing combinational arithmetic ports; retain MUL/DIV's additional `F - 1` slices and existing execution timings. | Make resource ownership explicit in the stage that already owns the executing instruction and keep the unit boundaries independent. | Agreed; supersedes the earlier ALU-owned arrangement; interfaces described in Sections 3.5 and 3.6 |
 | D-264 | Keep DE/EX and EX/MEM registers in the EX stage parent; EX owns only local execution control/tracking, its functional units, and the first shared arithmetic instance. | Separate pipeline storage and instruction identity from stage execution while preserving one-time unit issue, backpressure, and age-qualified cancellation. | Agreed; EX component and parent-register fixture described in Section 3.7 |
 | D-265 | Instantiate the same stateless PMP checker separately in IF and MEM, consuming PMP configuration/address state owned solely by the CSR unit through core-parent connections. | Check instruction and data accesses independently while sharing implementation and keeping architectural protection state in one place. | Superseded by D-266: core-owned two-port block with shared region decoding |
@@ -4225,3 +4205,4 @@ later decisions determine the active contract.
 | D-305 | Add independent Spike Zfinx ELF execution and observe actual third operands/effective rounding in a simulation companion. Preserve IEEE boundary-underflow status and correct the exact-arithmetic oracle using unbounded-exponent tininess. | Check the ISA through an external model and expose common assumptions shared by native RTL/oracles. | Implemented; verification Section 2.10; architectural certification and formal FP models remain open |
 | D-315 | Issue native data requests combinationally in MEM, transfer ownership to WB on grant, and complete loads/stores or raise precise bus faults in WB; allow successful response/request overlap while preserving registered-only DE/EX load forwarding. | Remove mandatory request and completion bubbles without speculative memory effects, extra pipeline boundaries or a store buffer. | Implemented LSU/MEM/WB/core, response-aware RVFI and component/parent/core regressions; Sections 3.8–3.10 |
 | D-316 | Bypass an empty IF request holding slot so permitted fetches can be granted in their first eligible cycle; capture stalled requests, preserve registered responses and remove idle address masking. | Align imem/dmem request presentation and reduce cold/redirect refill by one cycle without changing sustained bandwidth or outstanding limits. | Implemented engine, production IF/core regressions and BTB halfword characterization; Sections 15.2 and 15.4 |
+| D-317 | Make MEM/EX2 canonical; default to two-row PP/Dadda/BK with late-C compressor fusion (`dadda_mac`), retaining EX1 product-only `dadda` and shared `iterative` MUL. Remove superseded compressor/adder/cut settings and implementations. | Preserve independent throughput and accumulator recurrence, retain latency/area comparison baselines, and reduce active implementation and verification complexity. | Implemented; current contract in Section 3 and measurement rationale in [multiplier selection](../impl/asic/orfs/investigations/efficient-mul.md#decision). |

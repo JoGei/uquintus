@@ -9,7 +9,7 @@ the lower registers; the future decoder remains responsible for illegal-register
 traps. Nonzero storage is uninitialized and retained across reset. `rst_ni` is
 sampled on rising edges to suppress writes, not to initialize storage.
 
-The third read port is enabled by `ISA_ZFINX` or by `XIF` with `XIF_NUM_RS=3`.
+The third read port is enabled by `ISA_ZFINX`, by `XIF` with `XIF_NUM_RS=3`, or by the canonical `ISA_M=1` / `MUA_MUL: dadda_mac` integration. The latter carries C in pipeline payload registers; it does not arbitrate this port for an EX2 reread.
 The second write port is enabled by `XIF` with `XIF_DUALWRITE`. Disabled third reads
 return zero; disabled second writes are ignored. Interface ports remain present
 in every configuration, and inactive hardware is removed at elaboration or

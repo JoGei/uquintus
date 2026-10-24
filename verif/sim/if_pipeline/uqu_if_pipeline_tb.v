@@ -125,7 +125,7 @@ module uqu_if_pipeline_tb #(
         .exception_valid_i(exception_q), .exception_cause_i(cause_q), .exception_tval_i(tval_q),
         .rs0_i(32'd0), .rs1_i(32'd0), .rs2_i(32'd0), .rs_ready_i(3'b111), .rs_ex_guaranteed_i(3'd0),
         .rs0_addr_o(), .rs1_addr_o(), .rs2_addr_o(), .rs_used_o(), .rs_need_now_o(),
-        .rs_ex_used_o(), .rs_captured_o(), .native_o(), .fu_o(), .op_o(), .a_sel_o(), .b_sel_o(),
+        .rs_ex_used_o(), .rs_captured_o(), .late_c_o(), .native_o(), .fu_o(), .op_o(), .a_sel_o(), .b_sel_o(),
         .imm_o(), .a_o(), .b_o(), .c_o(), .rm_o(), .pass_data_o(link_o), .store_data_o(),
         .rd_we_o(), .rd_o(), .rd1_o(), .rd_pending_o(), .lsu_o(), .mem_we_o(), .mem_op_o(),
         .wb_kind_o(), .system_o(), .serialize_o(), .csr_addr_o(), .csr_op_o(), .csr_src_o(),

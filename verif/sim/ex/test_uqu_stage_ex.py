@@ -11,7 +11,7 @@ from cocotb.triggers import Timer
 from pyuvm import uvm_root, uvm_test
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
-from ex_model import FU_ALU, FU_MULDIV, FU_FPU, FU_PASS, assert_outcome, cycles, outcome, random_token, token
+from ex_model import FU_ALU, FU_MULDIV, FU_FPU, FU_PASS, assert_outcome, cycles, outcome, random_token, token, split_multiply, MAC
 from rv32_arithmetic import ALU_OPS, MASK
 
 FIELDS = ('fu', 'op', 'a', 'b', 'c', 'muldiv_a', 'muldiv_b', 'rm', 'pass_data', 'store_data', 'instr',
@@ -38,9 +38,22 @@ class ExTest(uvm_test):
             getattr(self.dut, field + '_i').value = payload[field]
 
     def outputs(self):
-        return tuple(int(getattr(self.dut, field + '_o').value) for field in (
+        values = tuple(int(getattr(self.dut, field + '_o').value) for field in (
             'result', 'store_data', 'fflags_valid', 'fflags',
             'exception_valid', 'exception_cause', 'exception_tval'))
+        split = int(self.dut.mul_phase2_o.value)
+        assert int(self.dut.result_available_o.value) == bool(
+            int(self.dut.valid_o.value) and not values[4] and not split)
+        if split and not values[4]:
+            # Check the phase-one representation against the independent full
+            # product oracle; EX must not advertise this as an available result.
+            product = (int(self.dut.mul_row_a_o.value) + int(self.dut.mul_row_b_o.value)) & ((1 << 64)-1)
+            if self.params['MUA_MUL'] == 13 and int(self.dut.op_i.value) == MAC:
+                product = (product + int(self.dut.c_i.value)) & ((1 << 64)-1)
+            high = int(self.dut.mul_high_o.value)
+            assert high == (int(self.dut.op_i.value) in (1, 2, 3))
+            values = ((product >> (32*high)) & MASK,) + values[1:]
+        return values
 
     def requests(self):
         # Observe actual unit handshakes: a held stage must issue exactly once.
@@ -116,7 +129,7 @@ class ExTest(uvm_test):
             starts = [old + new for old, new in zip(starts, self.requests())]
             await self.edge()
         expected_starts = [0, 0, 0]
-        if not expected[4] and payload['fu'] != FU_PASS:
+        if not expected[4] and payload['fu'] != FU_PASS and not split_multiply(payload, self.params):
             expected_starts[payload['fu']] = 1
         assert starts == expected_starts, ('duplicate or missing unit request', payload, starts)
         self.dut.valid_i.value = 0
@@ -140,6 +153,16 @@ class DirectedTest(ExTest):
                 for b in values[:5]:
                     await self.operation(token(fu=FU_MULDIV, op=op, a=a ^ MASK,
                         b=b ^ MASK, muldiv_a=a, muldiv_b=b), hold=2)
+        if self.params['ISA_M'] and self.params['MUA_MUL'] in (13,):
+            for a in values[:5]:
+                for b in values[:5]:
+                    for c in values[:5]:
+                        await self.operation(token(fu=FU_MULDIV, op=MAC, muldiv_a=a,
+                            muldiv_b=b, c=c, a=a ^ MASK, b=b ^ MASK), wait=2, hold=3)
+            # Ordinary MUL/MULH must ignore even nonzero third-operand inputs.
+            for op in range(4):
+                await self.operation(token(fu=FU_MULDIV, op=op, muldiv_a=MASK,
+                    muldiv_b=MASK, c=MASK), hold=2)
         if self.params['ISA_ZFINX']:
             for op in range(22):
                 for rm in range(5):
@@ -148,7 +171,8 @@ class DirectedTest(ExTest):
         for payload in (token(fu=FU_PASS, pass_data=0xDEADBEEF, store_data=0x12345678),
                         token(fu=FU_FPU, op=0, instr=0x53),
                         token(fu=FU_ALU, op=31, instr=0xBAD),
-                        token(fu=FU_MULDIV, op=8, instr=0xBAD),
+                        token(fu=FU_MULDIV, op=MAC, muldiv_a=3, muldiv_b=7, c=11, instr=0xBAD),
+                        token(fu=FU_MULDIV, op=9, instr=0xBAD),
                         token(fu=FU_FPU, exception_valid=1, exception_cause=1,
                               exception_tval=0x80001000)):
             await self.operation(payload, hold=3)
@@ -178,7 +202,7 @@ class ControlTest(ExTest):
                       token(op=8, a=5, b=9),
                       token(fu=FU_PASS, pass_data=0xDEADBEEF)]
         multiply = token(fu=FU_MULDIV, op=1, a=0x80000000, b=0xFFFFFFFF)
-        if self.params['ISA_M'] and cycles(multiply, self.params) == 1:
+        if self.params['ISA_M'] and cycles(multiply, self.params) == 1 and not split_multiply(multiply, self.params):
             candidates.append(multiply)
         for payload in candidates:
             self.drive(payload)
@@ -201,6 +225,9 @@ class ControlTest(ExTest):
         if self.params['ISA_M']:
             payloads += [token(fu=FU_MULDIV, op=op, a=0x81234567, b=MASK)
                          for op in (0, 4, 6)]
+        if self.params['ISA_M'] and self.params['MUA_MUL'] in (13,):
+            payloads += [token(fu=FU_MULDIV, op=MAC, muldiv_a=0x81234567,
+                               muldiv_b=0xfedcba98, c=0xffffffff)]
         if self.params['ISA_ZFINX']:
             payloads += [token(fu=FU_FPU, op=op, a=0x3f800001, b=0x40400000) for op in (0, 3, 4, 18)]
         for payload in payloads:

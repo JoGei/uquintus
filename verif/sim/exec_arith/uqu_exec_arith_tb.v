@@ -6,7 +6,7 @@
 // cancellation. This is not the processor's future EX-stage implementation.
 module uqu_exec_arith_tb #(
     parameter ISA_M = 0,
-    parameter MUA_MUL = `UQU_MUL_ITERATIVE,
+    parameter MUA_MUL = `UQU_MUL_DADDA_MAC,
     parameter MUA_DIV = `UQU_DIV_ITERATIVE,
     parameter MUA_MULDIV_ITERUNROLL = 8
 ) (

@@ -4,7 +4,7 @@
 class HazardModel:
     def __init__(self, params):
         self.p = params
-        self.third = bool(params['ISA_ZFINX'] or
+        self.third = bool((params['ISA_M'] and params['MUA_MUL'] == 13) or params['ISA_ZFINX'] or
                           (params['XIF'] and params['XIF_NUM_RS'] == 3))
         self.dual = bool(params['XIF'] and params['XIF_DUALWRITE'])
         self.retained = [None] * 3
@@ -81,7 +81,8 @@ class HazardModel:
 
 
 def defaults():
-    i = dict(rst_n=1, de_valid=1, de_clear=0, ex_valid=1,
+    i = dict(de_late_c=0, ex_late_c=0, ex_primary_registered=0, mem_primary_registered=0,
+             mem_late_c=0, mem_c_addr=0, mem_c=0, mem_c_captured=0, rst_n=1, de_valid=1, de_clear=0, ex_valid=1,
              de_rs_used=7, de_rs_need_now=0, ex_rs_used=7, ex_rs_captured=0)
     for consumer in ('de', 'ex'):
         for n in range(3):

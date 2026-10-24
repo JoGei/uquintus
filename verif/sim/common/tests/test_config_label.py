@@ -32,6 +32,30 @@ class ConfigurationLabelTests(unittest.TestCase):
         self.catalog = json.loads((ROOT / "config/selectors.json").read_text())
         self.base = load_configuration(ROOT / "config/rv32i.yml", self.catalog)
 
+    def test_canonical_mac_and_product_presets(self):
+        for name in ('rv32im_dadda', 'rv32imc_bimodal_idata_dadda_div1'):
+            reference = load_configuration(ROOT/'config'/(name+'.yml'), self.catalog)
+            candidate = load_configuration(ROOT/'config'/(name.replace('dadda', 'dadda_mac')+'.yml'), self.catalog)
+            self.assertEqual(candidate, dict(reference, MUA_MUL='dadda_mac'))
+            self.assertEqual(parameters_for_component(candidate, ['MUA_MUL'], self.catalog), {'MUA_MUL': 13})
+            self.assertIn('mua-mul:dadda-mac', configuration_label(candidate))
+        self.assertEqual(set(self.catalog['MUA_MUL']), {'iterative', 'dadda', 'dadda_mac'})
+        self.assertNotIn('MUA_MUL_SPLIT', self.catalog)
+
+    def test_retired_multiplier_choices_are_rejected(self):
+        for choice in ('parallel', 'parallel+stages+2', 'booth_dadda', 'wallace',
+                       'dadda_sk', 'dadda_mem', 'dadda_mac_mem', 'dadda_mac_late_mem'):
+            with self.subTest(choice=choice), tempfile.TemporaryDirectory() as tmp:
+                path = Path(tmp)/'invalid.yml'
+                path.write_text(yaml.safe_dump(dict(self.base, MUA_MUL=choice)))
+                with self.assertRaisesRegex(ValueError, 'unsupported MUA_MUL'):
+                    load_configuration(path, self.catalog)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp)/'invalid.yml'
+            path.write_text(yaml.safe_dump(dict(self.base, MUA_MUL_SPLIT='two_rows')))
+            with self.assertRaisesRegex(ValueError, 'unknown=.*MUA_MUL_SPLIT'):
+                load_configuration(path, self.catalog)
+
     def test_baseline_matches_specification_and_ignores_mapping_order(self):
         self.assertEqual(configuration_label(self.base), BASE_LABEL)
         self.assertEqual(configuration_label(dict(reversed(list(self.base.items())))), BASE_LABEL)
@@ -44,7 +68,7 @@ class ConfigurationLabelTests(unittest.TestCase):
         self.assertTrue(label.startswith(
             "uqu_rv32emc_zicsr_zifencei_zfinx_xif-3rs-dw_umode_pmp_dbg_mua-gpr:ff_"))
         self.assertIn("_mua-opret_mua-c:decompr-if_mua-bp:none_", label)
-        self.assertIn("_mua-mul:iter_mua-div:iter_mua-mdu:unroll8_mua-fpu:", label)
+        self.assertIn("_mua-mul:dadda-mac_mua-div:iter_mua-mdu:unroll8_mua-fpu:", label)
         self.assertNotIn("_umode", configuration_label(dict(config, ISA_UMODE=0)))
 
     def test_xif_source_count_and_dual_write(self):
@@ -75,8 +99,7 @@ class ConfigurationLabelTests(unittest.TestCase):
                 "rv32i_", "rv32ic_").replace("_mua-bp:", "_mua-c:decode_mua-bp:"))
 
     def test_mul_implementations_share_one_unroll_field_with_div(self):
-        for implementation, token in (("iterative", "iter"), ("parallel", "para"),
-                                      ("parallel+stages+2", "para+stages2"), ("dadda", "dadda")):
+        for implementation, token in (("iterative", "iter"), ("dadda", "dadda"), ("dadda_mac", "dadda-mac")):
             for factor in (1, 2, 4, 8, 16, 32):
                 config = dict(self.base, ISA_M=1, MUA_MUL=implementation,
                               MUA_MULDIV_ITERUNROLL=factor)
@@ -92,8 +115,7 @@ class ConfigurationLabelTests(unittest.TestCase):
         self.assertEqual(parameters_for_component(config, ['MUA_MUL'], self.catalog), {'MUA_MUL': 3})
         self.assertIn('_mua-mul:dadda_', configuration_label(config))
         self.assertFalse(any('CUT_ROWS' in name for name in config))
-        # Existing encodings must retain their meanings for stored configs.
-        for label, value in [('parallel', 0), ('parallel+stages+2', 1), ('iterative', 2)]:
+        for label, value in [('iterative', 2), ('dadda', 3), ('dadda_mac', 13)]:
             self.assertEqual(self.catalog['MUA_MUL'][label]['value'], value)
 
     def test_fpu_pipeline_counts_placement_and_backend_are_visible(self):
@@ -131,7 +153,7 @@ class ConfigurationLabelTests(unittest.TestCase):
     def test_inactive_settings_and_hart_identity_are_omitted(self):
         config = dict(self.base, HART_ID=42, XIF_NUM_RS=2, XIF_DUALWRITE=1,
                       MUA_C_IMPL="decode_compressed", MUA_C_DECOMPRESS_STAGE="de",
-                      MUA_MUL="parallel+stages+2", MUA_MULDIV_ITERUNROLL=32,
+                      MUA_MUL="iterative", MUA_MULDIV_ITERUNROLL=32,
                       MUA_FPU_DIVSQRT="pulp", MUA_FPU_PIPE_CONFIG="after",
                       MUA_FPU_PIPE_REGS_FMA=8, MUA_FPU_PIPE_REGS_DIVSQRT=7,
                       MUA_FPU_PIPE_REGS_NONCOMP=6, MUA_FPU_PIPE_REGS_CONV=5)
