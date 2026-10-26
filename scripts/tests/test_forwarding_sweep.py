@@ -10,7 +10,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
-    'forwarding_sweep', ROOT / 'impl/asic/orfs/investigations/forwarding_sweep.py')
+    'forwarding_sweep', ROOT / 'impl/asic/orfs/explore/forwarding_sweep.py')
 sweep = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(sweep)
 

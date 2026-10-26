@@ -49,10 +49,7 @@ TNS or a WNS field that is clamped to zero when all paths meet timing. Setup
 slack already includes applicable library setup time, clock/data delays and
 uncertainty; do not add those terms a second time.
 
-For example, the default IHP placed Zfinx core has `T_target = 20 ns` and
-`worst_setup_slack = +3.668873 ns`, giving `T_min = 16.331127 ns` and
-`estimated_fmax = 61.2328 MHz` under that experiment's constraints. See the
-[placement comparison](../impl/asic/orfs/investigations/ihp-placement.md).
+For example, a 20 ns target with +3 ns worst setup slack yields `T_min = 17 ns` and `Fmax_est ≈ 58.82 MHz` under those fixed constraints. The [implementation guide](uqu_guide.impl.md#read-the-result-at-the-right-scope) explains the reporting scopes.
 
 This subtraction is not a general solution for half-cycle paths, multicycle
 exceptions, latch borrowing or multiple clock relationships. Those cases require
@@ -120,13 +117,10 @@ reset arrival budget may be used when justified by the integration, and shall
 be recorded for the resulting `T_min`/frequency measurement. A smaller maximum
 input delay gives the core more time by requiring the reset source to arrive earlier.
 
-The build flow supports an explicit trial override, `RESET_INPUT_DELAY_NS=1`,
+The build flow supports an explicit override, `RESET_INPUT_DELAY_NS=1`,
 which selects a 0 ns minimum and 1 ns maximum reset arrival without changing
 other input/output budgets. Omission preserves the original default. Resolved
-reset min/max values shall be retained with the result. The
-[IHP trial](../impl/asic/orfs/investigations/ihp-reset-timing.md) demonstrates the
-effect on unchanged placements; its improved frequency remains conditional on
-the integration meeting that reset-arrival contract.
+reset min/max values shall be retained with the result. The [implementation guide](uqu_guide.impl.md#run-synthesis-and-repaired-placement) explains the required integration promise and how to compare constraints.
 
 Changing the core to tolerate distributed or multicycle reset release requires
 an explicit startup/inactivity protocol and verification before corresponding
@@ -251,22 +245,7 @@ inflate it. Schema version 2 appends this counter to the previous twenty;
 validation/reporting continue accepting historical schema-1 artifacts without
 inventing replay measurements for them. The retirement-window scope is unchanged.
 
-An initial same-ELF, same-memory CoreMark performance-profile comparison on
-2026-10-22 measured 1,703,569 cycles with the 16/16 bimodal/BTB configuration
-and zero data slots, versus 1,280,224 with four slots per entry (now expressed
-as `MUA_BTB_IDATA_HWORDS=8` without C). Both CRCs passed
-and the workload retired 757,486 instructions: about 24.9% fewer cycles. These
-are fast RTL cycle measurements, with one-cycle memory responses and no claimed
-silicon frequency or Pareto optimality. The halfword-capacity migration preserves
-the 1,280,224-cycle RV32I result. Historical fixed-slot physical measurements
-are recorded in [the BPU investigation](../impl/asic/orfs/investigations/bpu-replay.md);
-the [RV32IC follow-up](../impl/asic/orfs/investigations/bpu-rv32ic.md) measures
-selected packed-C capacities and compares IF decompression, DE decompression
-and direct compressed decoding with the same executable and physical envelope.
-The [RV32IMC forwarding study](../impl/asic/orfs/investigations/forwarding-rv32imc.md)
-holds BP16/BTB16/H6, IF decompression and a parallel multiplier fixed while
-adding WB-to-DE, WB-to-EX, MEM-to-EX, MEM-to-DE and EX-to-DE bypasses in sequence.
-Broader workloads remain to be measured.
+Compare replay capacity, compressed-decode strategy and forwarding with identical ELF/memory/window inputs. Evaluate cycles alongside repaired physical timing and area; no single-workload result shall establish a universal setting or Greek profile. The [implementation guide](uqu_guide.impl.md#explore-frontend-and-forwarding-tradeoffs) describes these use cases and observation points. Per-run measurements belong in generated benchmark and implementation reports.
 
 ### 3.2. Embench-IoT workloads
 

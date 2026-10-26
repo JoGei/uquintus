@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SOURCE=Path(__file__).resolve().parents[2]/'impl/asic/orfs/investigations/reset_timing.py'
+SOURCE=Path(__file__).resolve().parents[2]/'impl/asic/orfs/explore/reset_timing.py'
 SPEC=importlib.util.spec_from_file_location('uqu_reset_timing',SOURCE)
 trial=importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(trial)

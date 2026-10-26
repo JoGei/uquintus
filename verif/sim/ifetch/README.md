@@ -197,8 +197,8 @@ The [shared-PMP fixture](../ifetch_pmp/README.md) connects one real core-owned
 checker to both real engines. Standalone and fixture lint use Verilog-2005.
 Payload storage is unreset; only control is reset. The registered completion
 storage and presented-request persistence remain unchanged; selected empty-queue
-fall-through changes first-result latency. The [request-bypass characterization](../../../impl/asic/orfs/investigations/ifetch-request-bypass.md)
-records measured CPI/area/timing tradeoffs and their physical-flow limits.
+fall-through changes first-result latency. The [implementation guide](../../../docs/uqu_guide.impl.md#explore-frontend-and-forwarding-tradeoffs)
+explains how to compare bypass latency, replay capacity and physical timing.
 The [word buffer](../if_buffer/README.md) and
 [prefetch fixture](../if_prefetch/README.md) add real fetch/buffer/aligner
 integration with capacity reservation, fault containment and redirect draining.

@@ -550,8 +550,7 @@ Constrain synchronous reset as data. Pass ABC's target explicitly in ps.
 An optional `RESET_INPUT_DELAY_NS` override shall set reset's maximum input
 delay independently, with a 0 ns minimum; when omitted, preserve the original
 20%-of-period data-input budget. Record both resolved reset delays with the run.
-The [reset timing trial](../impl/asic/orfs/investigations/ihp-reset-timing.md) documents
-the 1 ns experiment and the required integration assumption.
+The [implementation guide](uqu_guide.impl.md#run-synthesis-and-repaired-placement) explains how to supply and interpret this integration budget.
 Report cell count, summed cell area, buffer count/area, setup slack/TNS and estimated maximum
 frequency. Negative slack means the target was missed, not that mapping failed.
 The [benchmarking measurement definition](uqu_spec.bench.md#1-minimum-clock-period-and-maximum-frequency)
@@ -578,14 +577,7 @@ explicit investigation case rather than a baseline option.
 Record tool/ABC/plugin binary hashes, ORFS revision, full configuration,
 sources/includes, Bender lock, flow/platform/library hashes, constraints and
 raw outputs per run. Publish them through the shared `report.json` schema.
-The initial qualification covers standalone FPU and complete RV32I cores with
-Zfinx disabled/enabled on SKY130 HD and IHP SG13G2. A controlled
-[IHP placement comparison](../impl/asic/orfs/investigations/ihp-placement.md) also reuses
-two mapped Zfinx core netlists through identical floorplanning, placement and
-timing repair, with separate `placed_pre_cts` report records. It does not establish
-post-CTS/routed closure. The production `make impl` target now starts from RTL
-and runs the same ORFS stage sequence, using automatic pin placement. CTS/routing,
-broader parameter matrices and default tool/PDK lock policies remain open.
+The production `make impl` target shall start from RTL and run the qualified ORFS sequence with automatic pin placement, retaining separate mapped and `placed_pre_cts` observations. These measurements do not establish post-CTS/routed closure. CTS/routing, broader parameter qualification and default tool/PDK lock policies remain open. See the [implementation guide](uqu_guide.impl.md) for controlled comparisons and result interpretation.
 Build-environment
 provisioning and discovery shall follow [build, Section 5](uqu_spec.build.md#5-externally-provisioned-build-environment). Additional implementation
 flows may be added later;
@@ -859,8 +851,9 @@ verif/
   formal/           # Formal harnesses, properties, and riscv-formal integration
   common/           # Shared RVFI collector; utilities for simulation/formal reuse
   sw/               # Bare-metal programs and software execution tests
+  perfsim/          # ETISS/CorePerfDSL models, runners and checks
 config/
-  cores/            # Shared YAML core configurations
+  *.yml             # Shared complete core configurations
   sim/              # Component manifests and simulation-target configuration
 impl/
   asic/
@@ -868,20 +861,23 @@ impl/
     targets.yml     # Shared top/source/parameter selection
     orfs/
       common/       # ORFS runner and Yosys/OpenROAD hooks
+      explore/      # Reusable sweeps and controlled timing comparisons
       platforms/
         sky130hd/   # Project settings for the external ORFS platform
         ihp-sg13g2/ # Project settings for the external ORFS platform
-      investigations/ # ORFS-specific experiments and documentation
   fpga/             # Possible future FPGA implementation setup
 scripts/            # Configuration translation and tool integration helpers
 docker/             # Dockerfiles and optional Docker Compose definitions
-doc/
+docs/
   uqu_spec.md            # Overview, principles, scope, and milestones
   uqu_spec.arch.md       # ISA and microarchitecture
   uqu_spec.interfaces.md # Core integration interfaces
   uqu_spec.verif.md      # Verification and observability
   uqu_spec.build.md      # Build and project layout
   uqu_spec.style.md      # RTL coding and handshake conventions
+  uqu_spec.perfsim.md    # Performance-model contract and qualification
+  uqu_guide.perfsim.md   # Performance exploration, diagnostics and use cases
+  uqu_guide.impl.md      # Implementation, benchmarking and timing diagnosis
 build/              # uquintus-<hw>/<target>/ generated output directories
 ```
 
@@ -907,9 +903,7 @@ The repository-root `config/` directory shall hold shared core configurations
 and simulation-target configuration. `config/sim/<component>.yml` shall describe
 each component's top module, Bender target, test module, applicable parameters,
 and available tests for the shared component runner. Bender shall retain HDL
-source/dependency selection. The `cores/` subdivision shown above remains
-proposed; simulation-target settings shall stay in `config/` even though their
-testbench sources live under `verif/`.
+source/dependency selection. Complete core presets currently live directly in `config/`; simulation-target settings shall stay in `config/` even though their testbench sources live under `verif/`.
 
 Common processor RTL shall live in `src/uquintus/`, protocol-specific
 processor wrappers in `src/wrap/`, and reusable protocol adapters in

@@ -1,6 +1,6 @@
 # Combinational Dadda multiplier
 
-The observation tables call this implementation **PartialProduct/Dadda/Brent–Kung** under the current Yosys flow: ordinary bitwise partial products with signed corrections, Dadda compression and a behavioral final `+` initially mapped to Brent–Kung. Subsequent synthesis and physical optimization may restructure that adder. `MUA_MUL: dadda` remains the selector. See the [controlled Wallace comparison](../../../impl/asic/orfs/investigations/efficient-mul.md#encoding-compression-and-final-addition).
+This implementation is **PartialProduct/Dadda/Brent–Kung** under the current Yosys flow: ordinary bitwise partial products with signed corrections, Dadda compression and a behavioral final `+` initially mapped to Brent–Kung. Subsequent synthesis and physical optimization may restructure that adder. `MUA_MUL: dadda` remains the selector. See the [arithmetic comparison guide](../../../docs/uqu_guide.impl.md#evaluate-arithmetic-and-storage-changes).
 
 `src/uquintus/uqu_daddamul.v` computes one full 64-bit product from two 32-bit
 operands. `signed_a_i` and `signed_b_i` independently select two's-complement
@@ -26,7 +26,7 @@ The descriptive configuration label includes `mua-mul:dadda`.
 For a comparison with the recent RV32IMC setup, use
 `rv32imc_bimodal_idata_dadda_div1`: it changes only `MUA_MUL` relative to
 `rv32imc_bimodal_idata_dadda_mac_div1`, keeping divider unroll factor 1.
-See the [controlled comparison](../../../impl/asic/orfs/investigations/efficient-mul.md#encoding-compression-and-final-addition).
+See the [arithmetic comparison guide](../../../docs/uqu_guide.impl.md#evaluate-arithmetic-and-storage-changes).
 The simpler `rv32im_dadda` preset retains the default divider unroll factor 8
 and is a different hardware configuration.
 
@@ -46,7 +46,7 @@ Dadda unit does not use the shared ALU arithmetic slice. The iterative divider
 continues using that slice and the configured unroll factor; its timing is
 unchanged. With `ISA_M=0`, no Dadda arithmetic is instantiated.
 
-The default multiplier is `dadda_mac`, splitting PP/Dadda product rows across EX1 and MEM/EX2 with late C. This EX1-only `dadda` choice is product-only and retains lower native dependency latency; `iterative` is the shared arithmetic baseline. See the [selection record](../../../impl/asic/orfs/investigations/efficient-mul.md#decision).
+The default multiplier is `dadda_mac`, splitting PP/Dadda product rows across EX1 and MEM/EX2 with late C. This EX1-only `dadda` choice is product-only and retains lower native dependency latency; `iterative` is the shared arithmetic baseline. See the [implementation guide](../../../docs/uqu_guide.impl.md#evaluate-arithmetic-and-storage-changes).
 
 ## Verification and generation
 

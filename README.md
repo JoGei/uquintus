@@ -144,7 +144,7 @@ optional retention inside the hazard unit. See the
 [configuration catalog](docs/uqu_spec.arch.md#2-isa-and-microarchitecture-configuration-parameters)
 for all selectors and supported combinations.
 
-`MUA_MUL: dadda_mac` is the default: EX1 compresses the product, and MEM/EX2 inserts late C before final addition. `dadda` keeps product-only multiplication entirely in EX1; `iterative` retains the shared arithmetic baseline. Native MUL uses C=0; MAC remains an internal control without an assigned instruction encoding. See the [multiplier contract](docs/uqu_spec.mul.md) and [selection rationale](impl/asic/orfs/investigations/efficient-mul.md#decision).
+`MUA_MUL: dadda_mac` is the default: EX1 compresses the product, and MEM/EX2 inserts late C before final addition. `dadda` keeps product-only multiplication entirely in EX1; `iterative` retains the shared arithmetic baseline. Native MUL uses C=0; MAC remains an internal control without an assigned instruction encoding. See the [multiplier contract](docs/uqu_spec.mul.md) and [selection rationale](docs/uqu_guide.impl.md#evaluate-arithmetic-and-storage-changes).
 
 ### Forwarding paths
 
@@ -198,7 +198,7 @@ Instruction fetch tracks two ordered outstanding requests and reserves response
 storage before presenting each request. The default frontend has no
 combinational instruction-response-to-request dependency; combined response and
 word-buffer fall-through still exposes live instruction control paths. See the
-[fetch timing comparison](impl/asic/orfs/investigations/fetch-outstanding.md).
+[fetch timing comparison](docs/uqu_guide.impl.md#trace-unexpected-cross-stage-timing-paths).
 
 ## Implemented components
 
@@ -354,7 +354,7 @@ measurement boundaries and artifacts, and the
 coverage, software floating-point execution and the RV32IMC BP16/BTB16/H6 preset
 with fully unrolled iterative MUL/DIV.
 
-An experimental [ETISS/CorePerfDSL flow](verif/perfsim/README.md) executes one ELF across multiple generated integer timing models for fast microarchitecture exploration. Its [specification](docs/uqu_spec.perfsim.md) defines RV32I/E/M/C coverage, external memory/cache timing placeholders, initial synchronous PMP/trap support, explicit unsupported features, RTL comparison and the MAP-DSE roadmap. Use `make perfsim-fetch`, `make perfsim-model` and `make perfsim ELF=<program.elf>` with the documented external tools. `make perfsim-cost PERFSIM_ACCURACY=<completed-run>` compares trace-free native RTL and ISS+perfsim host execution time using validated workloads. Estimates have their own report category and remain **uncalibrated**; synthesis/implementation still supplies area and Fmax. The default [MAP-DSE backend](verif/perfsim/README.md#map-dse-block-scheduling) uses upstream composed-block scheduling and shared trace-driven models; the detailed queue model remains a separate accuracy reference.
+The [performance-simulation guide](docs/uqu_guide.perfsim.md) covers ETISS/CorePerfDSL setup, same-YAML configuration sweeps, RTL accuracy checks, diagnostics and simulation cost. The default MAP-DSE backend shares functional execution and external models across composed timing schedules. Results remain experimental estimates; the [implementation and timing guide](docs/uqu_guide.impl.md) explains how to combine cycles with measured area and frequency. Detailed model behavior and supported scope are defined in the [perfsim specification](docs/uqu_spec.perfsim.md).
 
 Benchmarks default to `BENCHMARK_MODE=fast`, a native Verilator C++ driver
 without cocotb/pyuvm, VPI or instruction tracing during execution. Use
@@ -438,7 +438,7 @@ cell counts/area and preplacement timing, with structural and full-mapping
 checks. Passing synthesis does not establish timing closure. The
 baseline enables ABC wire-load estimates and configures synthesis-buffer removal
 before timing-driven placement; each run retains the policy and ABC script hash.
-The [IHP placement comparison](impl/asic/orfs/investigations/ihp-placement.md) also provides
+The [IHP placement comparison](docs/uqu_guide.impl.md#read-the-result-at-the-right-scope) also provides
 two controlled placed results. `make impl` now runs current RTL through placement
 and timing repair, with scoped critical-path tables in the report. Supply
 `SDC=<file>` for caller-provided constraints; omit the reset-delay override in

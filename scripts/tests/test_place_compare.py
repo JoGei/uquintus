@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-SOURCE=Path(__file__).resolve().parents[2]/'impl/asic/orfs/investigations/place_compare.py'
+SOURCE=Path(__file__).resolve().parents[2]/'impl/asic/orfs/explore/place_compare.py'
 SPEC=importlib.util.spec_from_file_location('uqu_place_compare',SOURCE)
 compare=importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(compare)

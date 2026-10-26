@@ -297,7 +297,7 @@ The [multiplication specification](uqu_spec.mul.md) defines the detailed arithme
 | `dadda` | The same PP/Dadda product with its final addition in EX1, through `uqu_muldiv`. Product-only MUL/MULH completes in one EX computation cycle. | 3 |
 | `iterative` | Shared radix-2 arithmetic chain with `F = MUA_MULDIV_ITERUNROLL`; all native multiply forms take exactly `32/F` EX computation cycles. | 2 |
 
-`config/selectors.json` is authoritative. Removed encodings are not reassigned or accepted as aliases. The Booth, Wallace, explicit Sklansky, inferred `*`, internally registered parallel, early-C MAC, product-only split and optional three-row-cut experiments are historical. `MUA_MUL_SPLIT` is removed: the canonical split always carries two product rows and separate C. See the [selection rationale and measurement history](../impl/asic/orfs/investigations/efficient-mul.md#decision).
+`config/selectors.json` is authoritative. Removed encodings are not reassigned or accepted as aliases. The Booth, Wallace, explicit Sklansky, inferred `*`, internally registered parallel, early-C MAC, product-only split and optional three-row-cut experiments are historical. `MUA_MUL_SPLIT` is removed: the canonical split always carries two product rows and separate C. See the [arithmetic selection guidance](uqu_guide.impl.md#evaluate-arithmetic-and-storage-changes).
 
 All three choices implement MUL, MULH, MULHSU and MULHU with their architectural signedness and half selection. Structural products integrate signed correction into the partial-product heap and preserve lower-column carries for high-half results. `uqu_daddamul` returns the full 64-bit product; `uqu_daddamul_rows` exposes the same two weighted rows without a final carry-propagate adder. Both checked-in Verilog files come from one canonical Dadda generator. The behavioral final `+` uses the established Yosys Brent–Kung mapping; ABC and physical repair may restructure it. BK describes that mapping, not a guaranteed immutable gate topology.
 
@@ -2084,9 +2084,7 @@ active BTB shall retain their accepted-taken-branch redirect behavior.
 
 ### 5.2. Per-entry target instruction-data sequences
 
-**Status:** Packed BTB/IF replay and core-owned shared PMP implemented;
-physical measurements of the preceding fixed-slot design remain historical,
-and packed-storage area/timing evaluation remains open.
+**Status:** Packed BTB/IF replay and core-owned shared PMP implemented. Physical tradeoffs require matched configuration/workload/implementation measurements; see the [implementation guide](uqu_guide.impl.md#explore-frontend-and-forwarding-tradeoffs).
 
 The elaboration parameter `MUA_BTB_IDATA_HWORDS` is propagated through core,
 IF and BPU into the BTB. Its integer value (`0` through `2048`) shall count
@@ -3447,11 +3445,7 @@ and prediction to IF/DE; adding request bypass may extend control to a new OBI
 request. IF/DE remains an architectural pipeline boundary in every mode.
 BTB replay may hide some or all refill latency, so its halfword budget should
 be measured again rather than reduced unconditionally.
-The [result-bypass study](../impl/asic/orfs/investigations/ifetch-result-bypass.md)
-records all-eight-mode verification, same-ELF cycle/CPI comparisons and mapped
-timing with the final response bypass.
-The [request-bypass study](../impl/asic/orfs/investigations/ifetch-request-bypass.md)
-records the controlled RV32IMC comparison and Sky130 halfword-budget results.
+The [implementation guide](uqu_guide.impl.md#explore-frontend-and-forwarding-tradeoffs) describes controlled bypass/replay comparisons and their timing tradeoffs; measurements remain in generated flow reports.
 
 The fetch address shall advance by four only on native acceptance; the
 instruction PC shall advance only on accepted instruction transfer. Consumer
@@ -4205,4 +4199,4 @@ later decisions determine the active contract.
 | D-305 | Add independent Spike Zfinx ELF execution and observe actual third operands/effective rounding in a simulation companion. Preserve IEEE boundary-underflow status and correct the exact-arithmetic oracle using unbounded-exponent tininess. | Check the ISA through an external model and expose common assumptions shared by native RTL/oracles. | Implemented; verification Section 2.10; architectural certification and formal FP models remain open |
 | D-315 | Issue native data requests combinationally in MEM, transfer ownership to WB on grant, and complete loads/stores or raise precise bus faults in WB; allow successful response/request overlap while preserving registered-only DE/EX load forwarding. | Remove mandatory request and completion bubbles without speculative memory effects, extra pipeline boundaries or a store buffer. | Implemented LSU/MEM/WB/core, response-aware RVFI and component/parent/core regressions; Sections 3.8–3.10 |
 | D-316 | Bypass an empty IF request holding slot so permitted fetches can be granted in their first eligible cycle; capture stalled requests, preserve registered responses and remove idle address masking. | Align imem/dmem request presentation and reduce cold/redirect refill by one cycle without changing sustained bandwidth or outstanding limits. | Implemented engine, production IF/core regressions and BTB halfword characterization; Sections 15.2 and 15.4 |
-| D-317 | Make MEM/EX2 canonical; default to two-row PP/Dadda/BK with late-C compressor fusion (`dadda_mac`), retaining EX1 product-only `dadda` and shared `iterative` MUL. Remove superseded compressor/adder/cut settings and implementations. | Preserve independent throughput and accumulator recurrence, retain latency/area comparison baselines, and reduce active implementation and verification complexity. | Implemented; current contract in Section 3 and measurement rationale in [multiplier selection](../impl/asic/orfs/investigations/efficient-mul.md#decision). |
+| D-317 | Make MEM/EX2 canonical; default to two-row PP/Dadda/BK with late-C compressor fusion (`dadda_mac`), retaining EX1 product-only `dadda` and shared `iterative` MUL. Remove superseded compressor/adder/cut settings and implementations. | Preserve independent throughput and accumulator recurrence, retain latency/area comparison baselines, and reduce active implementation and verification complexity. | Implemented; current contract in Section 3 and measurement rationale in [multiplier selection](uqu_guide.impl.md#evaluate-arithmetic-and-storage-changes). |

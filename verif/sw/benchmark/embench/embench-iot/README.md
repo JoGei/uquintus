@@ -8,8 +8,7 @@ submodules. Build/run never downloads sources or installs dependencies.
 The one archive exclusion is an unused native-host configuration symlink,
 `config/native/chips/default`; no benchmark or support source is excluded.
 The cached source tree retains upstream license notices and `COPYING`.
-The [initial RV32IMC results](RESULTS.md) record all 19 passing workloads,
-per-workload cycles/CPI and separate arithmetic-group means.
+The [benchmark diagnosis guide](../../../../../docs/uqu_guide.impl.md#diagnose-high-cpi) explains cycle/CPI interpretation, branch working sets and repeated-kernel effects. Per-workload measurements belong in generated reports.
 
 ```sh
 make benchmark-fetch BENCHMARK=embench/embench-iot
@@ -26,22 +25,12 @@ the compiler family/version/ISA/ABI/options. These are real runtime libraries;
 the upstream dummy libraries are not used. Pass
 `BENCHMARK_ARCHIVE=<tar.gz>` to the fetch target for an offline archive.
 
-The initial complete hardware preset uses RV32IMC, full forwarding, IF
-decompression, a 16-entry bimodal direction table, a 16-entry direct-mapped
-BTB with six packed instruction halfwords per entry, and shared iterative
-MUL/DIV with `MUA_MULDIV_ITERUNROLL=32`. Fully unrolled MUL takes one EX cycle;
-DIV still has its specified setup and completion phases. This is an explicit
-experiment preset, without assigning a Greek-letter profile or changing other
-presets.
-
-The comparison preset `rv32imc_bimodal_idata_parallel_div1` changes only MUL to
-`parallel` and the iterative divider's unroll factor to 1. Reuse the first
-preset's exact executable suite for a controlled microarchitecture comparison:
+Use complete core presets for comparisons. For example, build once with the fully unrolled iterative `rv32imc_bimodal_idata_unroll32` profile, then run the exact ELF suite with EX1-only Dadda multiplication and iterative DIV factor one:
 
 ```sh
 make benchmark-run BENCHMARK=embench/embench-iot \
-  CONFIG=rv32imc_bimodal_idata_parallel_div1 \
-  BENCHMARK_REUSE_SUITE=build/uquintus-rv32imc_bimodal_idata_unroll32/sw/benchmark/embench/embench-iot/suite.json
+  CONFIG=rv32imc_bimodal_idata_dadda_div1 \
+  BENCHMARK_REUSE_SUITE=<printed-software-suite.json>
 make report
 ```
 
@@ -115,7 +104,7 @@ Checked mode already retains RVFI and rejects this fast-mode option.
 
 ```sh
 make benchmark-run BENCHMARK=embench/embench-iot \
-  CONFIG=rv32imc_bimodal_idata_parallel_div1 BENCHMARK_TRACE=1 \
+  CONFIG=rv32imc_bimodal_idata_dadda_div1 BENCHMARK_TRACE=1 \
   BENCHMARK_REUSE_SUITE=build/uquintus-rv32imc_bimodal_idata_unroll32/sw/benchmark/embench/embench-iot/suite.json
 python verif/sim/common/benchmark_prediction.py \
   --suite <printed-execution-directory>/suite-results.json \
@@ -136,5 +125,4 @@ training, actual instruction-data capture and fetch timing; prior target
 execution is only a replay opportunity. They cannot establish hypothetical
 CPI, area, frequency or a preferred hardware configuration. Whole-window
 empty-state averages still amortize repeated kernels. See the
-[nsichneu analysis](ANALYSIS_NSICHNEU.md) for the repetition effect and results
-from all 19 workloads.
+[diagnosis guide](../../../../../docs/uqu_guide.impl.md#diagnose-high-cpi) for the repetition effect and how to distinguish target reuse from modeled cycle savings.

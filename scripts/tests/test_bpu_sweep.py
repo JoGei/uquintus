@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[2]
-SPEC=importlib.util.spec_from_file_location('bpu_sweep',ROOT/'impl/asic/orfs/investigations/bpu_replay_sweep.py')
+SPEC=importlib.util.spec_from_file_location('bpu_sweep',ROOT/'impl/asic/orfs/explore/bpu_replay_sweep.py')
 sweep=importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(sweep)
 
@@ -76,7 +76,7 @@ class BpuSweepTests(unittest.TestCase):
         self.assertIn((16,2,8),points)
 
     def test_selected_rv32ic_points_include_packed_budget_and_matching_references(self):
-        points=sweep.candidate_points(ROOT/'impl/asic/orfs/investigations/bpu_rv32ic_candidates.yml')
+        points=sweep.candidate_points(ROOT/'impl/asic/orfs/explore/bpu_rv32ic_candidates.yml')
         self.assertEqual(len(points),13)
         self.assertIn((8,8,6),points)
         self.assertIn((16,8,6),points)
@@ -98,7 +98,7 @@ class BpuSweepTests(unittest.TestCase):
     def test_c_variants_change_only_compressed_implementation_and_keep_if_names(self):
         import yaml
         base=yaml.safe_load((ROOT/'config/rv32ic_bimodal_idata.yml').read_text())
-        points=sweep.candidate_points(ROOT/'impl/asic/orfs/investigations/bpu_rv32ic_candidates.yml')
+        points=sweep.candidate_points(ROOT/'impl/asic/orfs/explore/bpu_rv32ic_candidates.yml')
         old,original=sweep.make_cases(base,points,'bpu-c')
         cases,configs=sweep.make_cases(base,points,'bpu-c',list(sweep.C_VARIANTS))
         self.assertEqual(len(cases),39)

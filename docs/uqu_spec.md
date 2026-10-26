@@ -11,6 +11,8 @@ milestone, and documentation index. The first-draft architectural baseline is
 complete for implementation planning; remaining implementation and integration
 work is explicitly tracked in the topic documents.
 
+Practical workflows are described in the [performance-simulation guide](uqu_guide.perfsim.md) and [implementation, benchmarking and timing guide](uqu_guide.impl.md). Specifications define current contracts; generated build reports retain run-specific measurements and provenance.
+
 Only decisions explicitly marked **agreed** are requirements. Proposed principles
 and layouts retain their proposal status. **TBD** means an unresolved follow-up;
 it does not grant permission to change an agreed architectural contract.
