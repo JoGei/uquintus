@@ -1,0 +1,41 @@
+# Experiment definition; expands to complete core YAMLs in the sweep artifacts.
+base: rv32im_dadda
+prefix: rv32imc
+common:
+  ISA_C: 1
+cases:
+  baseline: {}
+  decompress-de:
+    MUA_C_DECOMPRESS_STAGE: de
+  decode-compressed:
+    MUA_C_IMPL: decode_compressed
+  all-bypass:
+    MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+  static-nt:
+    MUA_BRANCH_PREDICTOR: static_not_taken
+  static-nt-bypass:
+    MUA_BRANCH_PREDICTOR: static_not_taken
+    MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+  buffer4:
+    MUA_IF_BUFFER_WORDS: 4
+    MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+  iter1:
+    MUA_MUL: iterative
+    MUA_MULDIV_ITERUNROLL: 1
+    MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+  iter8:
+    MUA_MUL: iterative
+    MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+  iter32:
+    MUA_MUL: iterative
+    MUA_MULDIV_ITERUNROLL: 32
+    MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+  split:
+    MUA_MUL: dadda_mac
+    MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+  no-forwarding:
+    MUA_FORWARDING: 0
+    MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+  retention:
+    MUA_DE_OPERAND_RETENTION: 1
+    MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result

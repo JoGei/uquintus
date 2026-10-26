@@ -30,8 +30,19 @@ BENCHMARK_ARCHIVE ?=
 BENCHMARK_MODE ?= fast
 BENCHMARK_REUSE_SUITE ?=
 BENCHMARK_TRACE ?= 0
+PERFSIM_MEMORY ?=
+PERFSIM_CONFIGS ?=
+PERFSIM_ACCURACY ?=
+PERFSIM_IMEM_LATENCY ?= 1
+PERFSIM_DMEM_LATENCY ?= 1
+PERFSIM_MAX_INSTRUCTIONS ?= 100000000
+PERFSIM_TIMEOUT ?= 300
+PERFSIM_TRACE ?= 0
+PERFSIM_SCHEDULER ?= map_explorer
+PERFSIM_SHARE_MODELS ?= 0
+PERFSIM_VERIFY_SCHEDULING ?= 0
 
-.PHONY: help test sim lint synth impl sw benchmark-fetch benchmark-build benchmark-run benchmark riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests config-label report test-report test-runner clean
+.PHONY: help test sim lint synth impl sw benchmark-fetch benchmark-build benchmark-run benchmark riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests config-label report test-report test-runner clean perfsim-fetch perfsim-config perfsim-model perfsim perfsim-cost perfsim-acceleration
 
 help:
 	@echo 'make test [CONFIG=rv32i] [COMPONENT=gpregfile] [SIM=verilator]'
@@ -64,6 +75,18 @@ help:
 	@echo 'Spike discovery: SPIKE, then RISCV/bin/spike, then PATH; pinned build required.'
 	@echo 'Compiler discovery: RISCV_CC, then RISCV/bin, then PATH (GCC or Clang/LLD).'
 	@echo 'make test-runner  # Check shared component-runner helpers'
+	@echo 'make perfsim-fetch  # Fetch commit/hash-pinned ETISS/CorePerfDSL archives; no submodules'
+	@echo 'make perfsim-config [CONFIG=<hardware.yml>|rv32i]  # Resolve RTL YAML into ISA/DSL/external-model inputs'
+	@echo 'make perfsim-model CONFIG=rv32im_dadda [PERFSIM_CONFIGS=rv32im_iterative,rv32im_dadda_mac]'
+	@echo 'make perfsim ELF=<program.elf> [CONFIG=rv32i] [PERFSIM_CONFIGS=<additional configs>]'
+	@echo 'make perfsim-cost PERFSIM_ACCURACY=<accuracy-run>  # Compare trace-free native RTL/ISS execution cost'
+	@echo 'make perfsim-acceleration PERFSIM_ACCURACY=<accuracy-run>  # Check/time instruction, shared and block backends'
+	@echo 'MAP-DSE is the default; PERFSIM_SCHEDULER=instruction selects the queue reference. PERFSIM_VERIFY_SCHEDULING=1 checks equivalence.'
+	@echo 'Supply ETISS_ROOT, PERFSIM_ISA_PYTHON and PERFSIM_MODEL_PYTHON; see verif/perfsim/README.md.'
+	@echo 'make perfsim-test-frontend [JOBS=2]  # Compare timing queue model with actual IF RTL'
+	@echo 'make perfsim-test-bpu [JOBS=4]  # Compare native predictor, BTB and packed prefix state with RTL'
+	@echo 'make perfsim-test-hazards [JOBS=4]  # Compare forwarding masks and operand retention with RTL'
+	@echo 'make perfsim-test-replay [JOBS=4]  # Compare clocked IF/BPU/replay under DE and memory stalls'
 	@echo 'make config-label [CONFIG=rv32i|<hardware.yml>]  # Print the descriptive hardware label'
 	@echo 'make report       # Refresh build/report/index.html from existing artifacts'
 	@echo 'make test-report  # Check report collection, grouping and portable output'
@@ -128,6 +151,38 @@ test-runner:
 
 report:
 	$(PYTHON) scripts/report.py
+
+perfsim-fetch:
+	$(PYTHON) verif/sim/common/perfsim.py fetch
+
+.PHONY: perfsim-test-frontend perfsim-test-bpu perfsim-test-replay perfsim-test-hazards
+perfsim-test-hazards:
+	$(PYTHON) verif/perfsim/test_hazards.py --jobs "$(JOBS)"
+
+perfsim-test-frontend:
+	$(PYTHON) verif/perfsim/test_frontend.py --bender "$(BENDER)" --jobs "$(JOBS)"
+
+perfsim-test-bpu:
+	$(PYTHON) verif/perfsim/test_bpu.py --jobs "$(JOBS)"
+
+perfsim-test-replay:
+	$(PYTHON) verif/perfsim/test_frontend.py --prediction --masks 0,7 --depths 2 \
+		--bender "$(BENDER)" --jobs "$(JOBS)"
+
+perfsim-cost:
+	$(PYTHON) verif/perfsim/benchmark_cost.py --accuracy "$(PERFSIM_ACCURACY)" --jobs "$(JOBS)"
+
+perfsim-acceleration:
+	$(PYTHON) verif/perfsim/accelerate.py --accuracy "$(PERFSIM_ACCURACY)" --jobs "$(JOBS)"
+
+perfsim-config perfsim-model perfsim:
+	$(PYTHON) verif/sim/common/perfsim.py $(if $(filter perfsim,$@),run,$(if $(filter perfsim-config,$@),config,model)) \
+		--config "$(CONFIG)" --configs "$(PERFSIM_CONFIGS)" --elf "$(ELF)" --jobs "$(JOBS)" \
+		--imem-latency "$(PERFSIM_IMEM_LATENCY)" --dmem-latency "$(PERFSIM_DMEM_LATENCY)" $(if $(PERFSIM_MEMORY),--memory "$(PERFSIM_MEMORY)") \
+		--max-instructions "$(PERFSIM_MAX_INSTRUCTIONS)" --timeout "$(PERFSIM_TIMEOUT)" \
+		--scheduler "$(PERFSIM_SCHEDULER)" $(if $(filter 1,$(PERFSIM_SHARE_MODELS)),--share-models) \
+		$(if $(filter 1,$(PERFSIM_VERIFY_SCHEDULING)),--verify-scheduling) \
+		$(if $(filter 1,$(PERFSIM_TRACE)),--trace)
 
 test-report:
 	$(PYTHON) -m unittest discover -s scripts/tests -v

@@ -1,0 +1,9 @@
+# Timing-only cache stubs outside the core; no cache RTL is implied.
+imem:
+  grant_pattern: [1]
+  response_cycles: [8]
+  cache: {lines: 16, line_bytes: 16, hit_cycles: 1, miss_cycles: 8}
+dmem:
+  grant_pattern: [1]
+  response_cycles: [8]
+  cache: {lines: 16, line_bytes: 16, hit_cycles: 1, miss_cycles: 8}

@@ -1,0 +1,163 @@
+// MAP-DSE: trace-only model groups -> shared delay vectors -> composed blocks.
+#include "uqu_map.h"
+#include "UQU_Channel.h"
+#include "MAPExplorer.h"
+#include "uqu_map_models.h"
+#include <stdexcept>
+#include <algorithm>
+
+@TABLES@
+
+namespace {
+using Engine=MAP_Explorer::MAPExplorer<true,4,@COUNT@,@FETCHES@,@TYPES@,75,4,5>;
+class FetchGroup final : public MAP_Explorer::ResourceGroupT<@FETCH_TYPES@> {
+    std::array<uqu_map::FetchModel,@FETCHES@>& models;
+public:
+    explicit FetchGroup(std::array<uqu_map::FetchModel,@FETCHES@>& pool)
+      : ResourceGroupT(0,@FETCH_REFS@),models(pool) {}
+    void connectChannel(Channel* channel,int* index) override {
+        auto& c=*static_cast<UQU_Channel*>(channel);
+        for(auto& model:models) {model.connectInstrIdx(index);model.pc_ptr=c.pc;model.code_ptr=c.code;
+            model.rs1_ptr=c.rs1;model.rs2_ptr=c.rs2;model.rd_ptr=c.rd;model.brTarget_ptr=c.brTarget;model.memAddr_ptr=c.memAddr;model.event_ptr=c.event;}
+    }
+};
+class HazardGroup final : public MAP_Explorer::ResourceGroupT<@HAZARD_TYPES@> {
+public:
+    explicit HazardGroup(std::array<uqu_map::HazardModel,@FETCHES@>& pool)
+      : ResourceGroupT(1,@HAZARD_REFS@) {}
+    void connectChannel(Channel*,int*) override {}
+};
+class RequestGroup final : public MAP_Explorer::ResourceGroupT<@REQUEST_TYPES@> {
+public:
+    explicit RequestGroup(std::array<uqu_map::RequestModel,@FETCHES@>& pool):ResourceGroupT(2,@HAZARD_REFS@) {}
+    void connectChannel(Channel*,int*) override {}
+};
+class ResponseGroup final : public MAP_Explorer::ResourceGroupT<@RESPONSE_TYPES@> {
+public:
+    explicit ResponseGroup(std::array<uqu_map::ResponseModel,@FETCHES@>& pool):ResourceGroupT(3,@HAZARD_REFS@) {}
+    void connectChannel(Channel*,int*) override {}
+};
+class BranchGroup final : public MAP_Explorer::BranchGroupT<@BRANCH_TYPES@> {
+public:
+    explicit BranchGroup(std::array<uqu_map::BranchModel,@BRANCHES@>& pool):BranchGroupT(@BRANCH_REFS@) {}
+};
+class UquExplorer final : public Engine, public MapBackend {
+    MAP_Explorer::BlockDictionary dictionary{block_ptrs,@BLOCKS@};
+    std::array<uqu_map::FetchModel,@FETCHES@> fetches{};
+    std::array<uqu_map::HazardModel,@FETCHES@> hazards{};
+    std::array<uqu_map::RequestModel,@FETCHES@> requests{};
+    std::array<uqu_map::ResponseModel,@FETCHES@> responses{};
+    std::array<uqu_map::BranchModel,@BRANCHES@> branches{};
+    std::array<uqu::TimedBpuState,@BPUS@> bpus{};
+    FetchGroup fetch_group{fetches};
+    HazardGroup hazard_group{hazards};
+    RequestGroup request_group{requests};
+    ResponseGroup response_group{responses};
+    BranchGroup branch_group{branches};
+    std::array<const ResGroupEntryType,@TYPES@> lut=make_lut(&fetch_group,&hazard_group,&request_group,&response_group);
+    std::array<MAP_Explorer::ResourceGroup*,4> resources{{&fetch_group,&hazard_group,&request_group,&response_group}};
+    std::array<DVecType,@FETCHES@> delays{};
+    std::array<CombType,@COUNT@> combinations{};
+    UQU_Channel& channel;
+    std::vector<ModelInstance>& models;
+    void* observer_context=nullptr;
+    void (*observer)(void*,unsigned,unsigned,uint64_t,uint32_t)=nullptr;
+    uint64_t ordinal=0,call_count=0,scheduled_count=0,observed_count=0;
+    unsigned selected=0;
+    bool checking=false;
+    static std::array<const ResGroupEntryType,@TYPES@> make_lut(FetchGroup* fetch,HazardGroup* hazard,RequestGroup* request,ResponseGroup* response) {
+        // Evaluate the trace envelope before reading its hazard-delay output.
+        return make_lut_impl(fetch,hazard,request,response,std::make_index_sequence<@TYPES@>{});
+    }
+    template<size_t... I> static std::array<const ResGroupEntryType,@TYPES@>
+    make_lut_impl(FetchGroup* fetch,HazardGroup* hazard,RequestGroup* request,ResponseGroup* response,std::index_sequence<I...>) {
+        constexpr bool memory[]={@MEMORY_TYPE_FLAGS@};
+        return {{{uint8_t(memory[I]?4:2),{{fetch,hazard,memory[I]?request:nullptr,memory[I]?response:nullptr}}}...}};
+    }
+public:
+    UquExplorer(UQU_Channel& c,std::vector<ModelInstance>& m)
+      : Engine(&dictionary,nullptr,lut,resources,&branch_group,delays,combinations),channel(c),models(m) {
+        if(models.size()!=@COUNT@)throw std::runtime_error("MAPExplorer model count mismatch");
+        @CONFIGURE_FETCH@
+        @CONFIGURE_BPU@
+        for(unsigned i=0;i<@FETCHES@;++i)fetches[i].shared_bpu=&bpus[fetch_bpu_ids[i]];
+        @CONFIGURE_BRANCH@
+        for(unsigned i=0;i<@BRANCHES@;++i)branches[i].fetch_ptr=&fetches[branch_fetch_ids[i]];
+        for(unsigned i=0;i<@FETCHES@;++i) {
+            hazards[i].source=&fetches[i];requests[i].source=&fetches[i];responses[i].source=&fetches[i];
+            delays[i]=DVecType(std::array<map_models::ResourceModel*,4>{{&fetches[i],&hazards[i],&requests[i],&responses[i]}});
+        }
+        for(unsigned i=0;i<@COUNT@;++i)combinations[i]=CombType(&delays[fetch_ids[i]],&branches[branch_ids[i]]);
+        checking=bool(models[0].reference);connectChannel(&channel);
+    }
+    void connectChannel(Channel*) override {
+        ch_instrCnt_ptr=&channel.instrCnt;ch_pc_ptr=channel.pc;ch_typeId_ptr=channel.typeId;
+        ch_rs1_ptr=channel.rs1;ch_rs2_ptr=channel.rs2;ch_rd_ptr=channel.rd;
+        fetch_group.connectChannel(&channel,&curInstrIdx);
+        for(auto& b:branches) {b.connectInstrIdx(&curInstrIdx);b.pc_ptr=channel.pc;b.code_ptr=channel.code;}
+    }
+    void execute(unsigned end,uint64_t first,void* context,
+                 void (*observe)(void*,unsigned,unsigned,uint64_t,uint32_t)) override {
+        if(end>100)throw std::runtime_error("MAPExplorer trace overflow");
+        ordinal=first;observer_context=context;observer=observe;
+        for(unsigned i=0;i<end;++i) {
+            const auto pc=channel.pc[i];
+            const auto e=std::lower_bound(std::begin(expected),std::end(expected),pc,
+                [](const auto& entry,uint64_t address){return entry.pc<address;});
+            if(e==std::end(expected) || e->pc!=pc || e->code!=channel.code[i] || e->type!=channel.typeId[i] ||
+               e->rs1!=channel.rs1[i] || e->rs2!=channel.rs2[i] || e->rd!=channel.rd[i])
+                throw std::runtime_error("MAPExplorer unprofiled instruction/operand identity");
+        }
+        if(checking) {
+            // The ordinary instruction schedules are a verification oracle.
+            // They never provide readiness or timestamps to MAPExplorer/models.
+            for(unsigned i=0;i<end;++i) {
+                for(auto& m:models) {m.reference->instrIndex=i;m.reference->callSchedulingFunction(channel.typeId[i]);m.reference->update();}
+                Engine::executeRange(i,i+1);
+            }
+        } else Engine::executeRange(0,end);
+        observed_count+=end;
+    }
+    uint64_t calls() const override {return call_count;}
+    std::string statistics() const override {
+        uint64_t request=0,response=0;for(const auto& m:requests)request+=m.evaluations;for(const auto& m:responses)response+=m.evaluations;
+        uint64_t fetch=0,hazard=0,hazard_wait=0,branch=0,bpu=0,replay=0,ex_pressure=0,wb_pressure=0;for(const auto& b:bpus)bpu+=b.evaluations;
+        for(const auto& h:hazards)hazard+=h.evaluations;
+        for(const auto& f:fetches)hazard_wait+=f.hazard_wait_cycles;
+        for(const auto& f:fetches){replay+=f.replayed;ex_pressure+=f.ex_pressure;wb_pressure+=f.wb_pressure;}for(const auto& f:fetches)fetch+=f.evaluations;
+        for(const auto& b:branches)branch+=b.evaluations;
+        return ",\"map_scheduled_instructions\":"+std::to_string(scheduled_count)+
+          ",\"map_observed_instructions\":"+std::to_string(observed_count)+
+          ",\"shared_fetch_models\":@FETCHES@,\"shared_branch_models\":@BRANCHES@"+
+          std::string(",\"shared_bpu_models\":@BPUS@,\"active_bpu_models\":@ACTIVE_BPUS@,\"bpu_model_evaluations\":")+std::to_string(bpu)+
+          ",\"shared_envelope_ex_pressure_cycles\":"+std::to_string(ex_pressure)+
+          ",\"shared_envelope_wb_pressure_cycles\":"+std::to_string(wb_pressure)+
+          ",\"shared_envelope_replayed_instructions\":"+std::to_string(replay)+
+          std::string(",\"fetch_model_evaluations\":")+std::to_string(fetch)+
+          ",\"shared_hazard_models\":@FETCHES@,\"hazard_model_evaluations\":"+std::to_string(hazard)+
+          ",\"shared_envelope_hazard_wait_cycles\":"+std::to_string(hazard_wait)+
+          ",\"request_model_evaluations\":"+std::to_string(request)+
+          ",\"response_model_evaluations\":"+std::to_string(response)+
+          ",\"branch_model_evaluations\":"+std::to_string(branch);
+    }
+protected:
+    MAP_Explorer::Block::SchedFuncPtr selectBlockSchedule(size_t combination,const MAP_Explorer::Block& block) override {
+        selected=block.id;return functions[combination][selected];
+    }
+    void afterCombination(size_t combination,uint64_t* vec) override {
+        auto& m=models[combination];auto v=m.view(*m.model);m.model->instrIndex=curInstrIdx;
+        for(unsigned i=0;i<5;++i)*v.stages[i]=vec[i];
+        v.serial.serial=vec[5];v.serial.committed=vec[6];v.entrance=vec[7];
+        v.frontend.set_branch_times(vec[72],vec[73],vec[74]);
+        if(checking)for(unsigned i=0;i<32;++i) {
+            v.registers.available[i]=vec[8+i];v.registers.admission[i]=vec[40+i];
+        }
+        ++call_count;scheduled_count+=block_lengths[selected];
+        if(observer)observer(observer_context,combination,curInstrIdx,
+                             ordinal+curInstrIdx+1,channel.pc[curInstrIdx]);
+    }
+};
+}
+std::unique_ptr<MapBackend> make_map_backend(UQU_Channel& channel,std::vector<ModelInstance>& models) {
+    return std::make_unique<UquExplorer>(channel,models);
+}

@@ -29,10 +29,14 @@ class ELFTrapTests(unittest.TestCase):
                 validate_trap_sequence(expected, observed, complete)
         with self.assertRaises(ValueError): validate_trap_sequence([], expected)
 
+    def test_permission_fault_causes(self):
+        for cause in (1,5,7):
+            self.assertEqual(expected_traps(self.image([0x80000000,cause,0x80001000])),[(0x80000000,cause,0x80001000)])
+
     def test_rejects_malformed_boundaries_sites_causes_and_conflicts(self):
         for image in (self.image([0x80000000,11,0], dict(uqu_expected_traps=0x80001000)),
                       self.image([0x80000000,11]), self.image([0x80000002,11,0]),
-                      self.image([0x80001000,11,0]), self.image([0x80000000,7,0]),
+                      self.image([0x80001000,11,0]), self.image([0x80000000,9,0]),
                       self.image([0x80000000,11,0,0x80000000,3,0])):
             with self.subTest(image=image), self.assertRaises(ValueError): expected_traps(image)
         self.assertEqual(expected_traps(self.image([0x80000002,2,0], flags=1)), [(0x80000002,2,0)])

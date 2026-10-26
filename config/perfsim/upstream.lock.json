@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "workspace_revision": "9acbd92122af6f59c765afa54aa07af518b68cba",
+  "sources": [
+    {
+      "path": "",
+      "repository": "tum-ei-eda/PerformanceSimulation_workspace",
+      "revision": "9acbd92122af6f59c765afa54aa07af518b68cba",
+      "archive_sha256": "bca8f728bf6a1270d0dc939b9d1e13faf316e88889e919fddcaab0260be677b7"
+    },
+    {
+      "path": "etiss-perf-sim",
+      "repository": "tum-ei-eda/etiss-perf-sim",
+      "revision": "2a2831c5b0f924c1c665d017558a06c1feef1f18",
+      "archive_sha256": "790bc06d332dbcc4a4a15e3cb2ac88d0b8a7b2966f1ac022e4ca546934596be6"
+    },
+    {
+      "path": "code_gen/generators/M2-ISA-R-Perf",
+      "repository": "tum-ei-eda/M2-ISA-R-Perf",
+      "revision": "c1ebf283cb45c1a4979112ac28ae1f7f4f1e9f73",
+      "archive_sha256": "5773762e120635e9cb1500f4730315509a7d42db45715066c9da15c059255948"
+    },
+    {
+      "path": "code_gen/generators/M2-ISA-R",
+      "repository": "tum-ei-eda/M2-ISA-R",
+      "revision": "3d678f2ce8a067b2a2c0ccae593282effce3ed34",
+      "archive_sha256": "ff8e0f0eb16b37a3d185f7eecae48a9c870bf6d9738df742549396583cb40af2"
+    },
+    {
+      "path": "code_gen/descriptions/core_dsl/etiss_arch_riscv",
+      "repository": "tum-ei-eda/etiss_arch_riscv",
+      "revision": "5ea909ab11111dc54080ea45ae8cda960b0bb193",
+      "archive_sha256": "0771b5e56c47a07771390301bee04f541a899f914a64348b770f460e14899f15"
+    },
+    {
+      "path": "code_gen/descriptions/core_perf_dsl",
+      "repository": "tum-ei-eda/CorePerfDSL-Examples",
+      "revision": "c48ba77016c97adb98245e28789513af3aba908a",
+      "archive_sha256": "1565e66d0cadb7efac0bf72c2d1a0ccda8fa286676ce538f6f128612b1ac7091"
+    },
+    {
+      "path": "etiss-perf-sim/etiss",
+      "repository": "wysiwyng/etiss",
+      "revision": "17e5720210e24af7cb7b8441dfe5b509183599d8",
+      "archive_sha256": "ca90f6b62a3f4792bb5ce26b7381ab42d0fb18bd247cd1612ebd58278f38e25f"
+    },
+    {
+      "path": "etiss-perf-sim/etiss_plugins/SoftwareEvalLib",
+      "repository": "tum-ei-eda/SoftwareEvalLib",
+      "revision": "3f1c9a97b4c00c4d1694685bd30f7eb81689169e",
+      "archive_sha256": "3ac5fc1052d8a771e832b60ca37e1ac85875a70d5d94f9ab596db48bd7c46791"
+    },
+    {
+      "path": "code_gen/descriptions/core_dsl/etiss_arch_riscv/rv_base",
+      "repository": "tum-ei-eda/RISCV_ISA_CoreDSL",
+      "revision": "da934064da56ca6c9c79bcaf1d3bba0b79d53150",
+      "archive_sha256": "8b32879af06ae6c6d77590efc01f3b7c435e27598f89a276006819af2cd35fc0"
+    },
+    {
+      "path": "etiss-perf-sim/etiss/third_party/betterenums",
+      "repository": "aantron/better-enums",
+      "revision": "c35576bed0295689540b39873126129adfa0b4c8",
+      "archive_sha256": "9b78dcef7f88d1345b6f25335bfbcba5f024b08990c7d6dc605b833f4128b8dd"
+    },
+    {
+      "path": "etiss-perf-sim/etiss/third_party/tcc",
+      "repository": "TinyCC/tinycc",
+      "revision": "ba0899d9094afe64e9271c226752857e71dab80e",
+      "archive_sha256": "7747caddd8fe2175e72b9147921c2cc277906b36514dd7f8b0b6d83d16e431f9"
+    },
+    {
+      "path": "etiss-perf-sim/etiss/third_party/pugixml",
+      "repository": "zeux/pugixml",
+      "revision": "ee86beb30e4973f5feffe3ce63bfa4fbadf72f38",
+      "archive_sha256": "51c102d4187fac99daa38af281b0772c5e6c586f65004cdc63f8f2e011a21492"
+    },
+    {
+      "path": "etiss-perf-sim/etiss/third_party/softfloat/berkeley-softfloat",
+      "repository": "ucb-bar/berkeley-softfloat-3",
+      "revision": "a0c6494cdc11865811dec815d5c0049fba9d82a8",
+      "archive_sha256": "1f719bcc8878be9627f6cfc44a0d6dbddf32bacc70ac81193bcbf2c62f97cbe9"
+    },
+    {
+      "path": "etiss-perf-sim/etiss/third_party/simpleini",
+      "repository": "brofield/simpleini",
+      "revision": "09c21bda1dc1b578fa55f4a005d79b0afd481296",
+      "archive_sha256": "f53b816e6c534942e63dce33b8c060c64d72d3877343b5d1fbf5c5a9571bb432"
+    },
+    {
+      "path": "etiss-perf-sim/etiss/third_party/elfio",
+      "repository": "serge1/ELFIO",
+      "revision": "a04810f12625207cce72665d783babb80f0175a8",
+      "archive_sha256": "88ce02f63a22fa94fe1c66a114d9ec3983f53451275b614b9e8f844c6944f28a"
+    },
+    {
+      "path": "etiss-perf-sim/etiss/third_party/fmt",
+      "repository": "fmtlib/fmt",
+      "revision": "e424e3f2e607da02742f73db84873b8084fc714c",
+      "archive_sha256": "8e9b9d9e5b4d5e0a9094f349bec933f83e48a22e587bcf677534499fc5549202"
+    },
+    {
+      "path": "etiss-perf-sim/etiss_plugins/SoftwareEvalLib/libs/backends",
+      "repository": "tum-ei-eda/SoftwareEval-Backends",
+      "revision": "98e840021630a458d9975501817e2de2f6c9d2cc",
+      "archive_sha256": "329ce9db550ed208f98b8371cc610afc9da1526ca184bbb4d7c81a44d2dd097a"
+    }
+  ]
+}

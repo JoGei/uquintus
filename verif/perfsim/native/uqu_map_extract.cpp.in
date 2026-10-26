@@ -1,0 +1,51 @@
+// Use upstream BlockExtractor, including its persistent cross-channel blocks.
+#include "uqu_map.h"
+#include "UQU_Channel.h"
+#include "BlockExtractor.h"
+
+namespace {
+class Instruction final : public BlockInstruction {
+    ProfileInstruction value;
+public:
+    Instruction(UQU_Channel& channel,unsigned i,bool boundary):BlockInstruction(&channel,i),
+      value{channel.pc[i],channel.code[i],channel.typeId[i],channel.rs1[i],channel.rs2[i],channel.rd[i]} {
+        pc=value.pc;isBranch=boundary;
+    }
+    std::string getJsonStr(std::string) override {
+        return "{\"pc\":"+std::to_string(value.pc)+",\"code\":"+std::to_string(value.code)+
+          ",\"typeId\":"+std::to_string(value.type)+",\"rs1\":"+std::to_string(value.rs1)+
+          ",\"rs2\":"+std::to_string(value.rs2)+",\"rd\":"+std::to_string(value.rd)+"}";
+    }
+};
+class Extractor final : public MapExtractor, public BlockExtractor {
+    UQU_Channel& input;
+    unsigned start,stop,end=0;
+    bool final=false;
+public:
+    Extractor(UQU_Channel& c,unsigned first,unsigned last):input(c),start(first),stop(last) {
+        channel=&c;ch_typeId_ptr=c.typeId;ch_instrCnt_ptr=&c.instrCnt;ch_pc_ptr=c.pc;
+        outputPath="blocks.json";
+        struct Factory final : BlockInstructionGenerator {
+            Factory(Extractor& owner) {
+                for(unsigned type: @TYPE_IDS@)ctorMap[type]=[&owner](Channel*,uint64_t i) {
+                    const auto pc=owner.input.pc[i];
+                    const bool boundary=(owner.input.event[i]>=1 && owner.input.event[i]<=4) || uqu::FrontendState::control(owner.input.code[i]) || pc==owner.start ||
+                        pc==owner.stop || (owner.final && i+1==owner.end);
+                    return std::make_unique<Instruction>(owner.input,i,boundary);
+                };
+            }
+        };
+        blockInstrGen=std::make_unique<Factory>(*this);
+    }
+    void connectChannel(Channel*) override {}
+    void consume(unsigned count,bool finished) override {
+        end=count;final=finished;
+        const auto saved=input.instrCnt;input.instrCnt=count;
+        BlockExtractor::execute();input.instrCnt=saved;
+    }
+    void save() override {BlockExtractor::finalize();}
+};
+}
+std::unique_ptr<MapExtractor> make_map_extractor(UQU_Channel& channel,unsigned start,unsigned stop) {
+    return std::make_unique<Extractor>(channel,start,stop);
+}

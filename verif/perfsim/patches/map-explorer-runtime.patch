@@ -1,0 +1,78 @@
+--- a/include/internal/MAPExplorer.h
++++ b/include/internal/MAPExplorer.h
+@@ -29,6 +29,7 @@
+ #include <vector>
+ #include <memory>
+ #include <iostream>
++#include <stdexcept>
+ 
+ using std::uint64_t;
+ 
+@@ -242,9 +243,13 @@
+         std::cout << "MAPExplorer initialized!" << std::endl;
+     };
+     
+-    void execute(void) {
+-        
+-        for(curInstrIdx=0; curInstrIdx<*ch_instrCnt_ptr; curInstrIdx++){
++    void execute(void) { executeRange(0, *ch_instrCnt_ptr); }
++
++    // Accept channel slices without discarding an active cross-channel block.
++    void executeRange(unsigned first, unsigned end) {
++        if (first > end || end > *ch_instrCnt_ptr)
++            throw std::runtime_error("MAPExplorer: invalid channel range");
++        for(curInstrIdx=first; curInstrIdx<end; curInstrIdx++){
+             if constexpr(USE_BLK){
+                 executeBlockScheduling();
+             }
+@@ -323,6 +328,13 @@
+ 
+ protected:
+ 
++    // Observation is only at completed block boundaries. No pipeline timing
++    // timestamps are supplied to the trace-driven resource/branch models.
++    virtual void afterCombination(size_t, uint64_t*) {}
++    virtual Block::SchedFuncPtr selectBlockSchedule(size_t, const Block& block) {
++        return block.getScheduleFunction();
++    }
++
+     uint64_t* ch_instrCnt_ptr;
+     uint64_t* ch_typeId_ptr;
+     uint64_t* ch_pc_ptr;
+@@ -358,6 +370,7 @@
+ 
+             activeBlock = true;
+             curBlk = blkDict->getBlock(curPc);
++            if (!curBlk) throw std::runtime_error("MAPExplorer: unprofiled PC");
+ 
+             // Evaluate branch
+             if(prevBlkEndOnBranch){
+@@ -381,7 +394,8 @@
+             // Execute block-scheduling-function
+             auto schedFunc = curBlk->getScheduleFunction();
+             for(int i=0; i<NUM_COMBS; i++){
+-                combinations[i].executeScheduling(schedFunc, prevBlkEndOnBranch);
++                combinations[i].executeScheduling(selectBlockSchedule(i, *curBlk), prevBlkEndOnBranch);
++                afterCombination(i, combinations[i].getTimingVector());
+             }
+ 
+             if(curBlk->endOnBranch){
+--- a/include/internal/BlockSchedulingDictionary.h
++++ b/include/internal/BlockSchedulingDictionary.h
+@@ -21,6 +21,7 @@
+ 
+ #include <unordered_map>
+ #include <array>
++#include <algorithm>
+ 
+ namespace MAP_Explorer{
+ 
+@@ -48,7 +49,7 @@
+ 
+     inline const Block* getBlock(uint64_t pc_) const {
+         
+-        for(size_t i=0; i < 10; i++){
++        for(size_t i=0; i < std::min(size_t(10), numBlocks); i++){
+             if(mostUsedBlocks[i]->startPc == pc_){
+                 return mostUsedBlocks[i];
+             }

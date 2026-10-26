@@ -1,0 +1,380 @@
+--- a/m2isar_perf/meta_models/matrix_model/MatrixTransformer.py
++++ b/m2isar_perf/meta_models/matrix_model/MatrixTransformer.py
+@@ -24,7 +24,8 @@
+ 
+ class MatrixTransformer:
+ 
+-    def __init__(self, n_I_="0", n_D_="0", n_BrPred_="0"):
++    def __init__(self, n_I_="0", n_D_="0", n_BrPred_="0", mapping=None):
++        self.mapping = mapping
+         
+         self.mpLib = MaxPlusLib(allowTempCreation_=False)
+ 
+@@ -39,159 +40,10 @@
+         for schedVar_i in schedulingModel_.getAllVariants():
+             matrixVar = matrixModel.createVariant(schedVar_i.name)
+ 
+-            # TODO: Hack to create resource-groups. Need to get this information from SchedModel / CorePerfDSL
+-            for rMod_i in schedVar_i.getAllResourceModels():
+-                rGroup = matrixVar.createResourceGroup(rMod_i.name.upper())
+-                
+-                if rMod_i.name == "iCache":
+-
+-                    iCacheConfigs = [
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 4, 'NUM_ROWS': 256}, # Default
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 2, 'NUM_ROWS': 512},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 1, 'NUM_ROWS': 1024},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 8, 'NUM_ROWS': 128},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 16, 'NUM_ROWS': 64},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 32, 'NUM_ROWS': 32},
+-
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 4, 'NUM_ROWS': 128}, # Faster memory, 1/2 cache
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 2, 'NUM_ROWS': 256},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 1, 'NUM_ROWS': 512},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 8, 'NUM_ROWS': 64},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 16, 'NUM_ROWS': 32},
+-
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 4, 'NUM_ROWS': 512}, # Slower memory, 2x cache
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 2, 'NUM_ROWS': 1024},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 1, 'NUM_ROWS': 2048},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 8, 'NUM_ROWS': 256},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 16, 'NUM_ROWS': 128}
+-                    ]
+-
+-                    n = self.n_I
+-                    for i in range(self.n_I):
+-                        mod = rGroup.createResourceModel((rMod_i.name + "_" + str(i)), "map_models/ICacheModel.h", rMod_i.getAllTraceValues())
+-                        if i < len(iCacheConfigs):
+-                            mod.addConfig(iCacheConfigs[i])
+-                        else:
+-                            mod.addConfig(iCacheConfigs[-1])
+-
+-                elif rMod_i.name == "dCache":
+-                    
+-                    dCacheConfigs = [
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 4, 'NUM_ROWS': 256}, # Default
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 2, 'NUM_ROWS': 512},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 1, 'NUM_ROWS': 1024},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 8, 'NUM_ROWS': 128},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 16, 'NUM_ROWS': 64},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 32, 'NUM_ROWS': 32},
+-
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 4, 'NUM_ROWS': 128}, # Faster memory, 1/2 cache
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 2, 'NUM_ROWS': 256},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 1, 'NUM_ROWS': 512},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 8, 'NUM_ROWS': 64},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 16, 'NUM_ROWS': 32},
+-
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 4, 'NUM_ROWS': 512}, # Slower memory, 2x cache
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 2, 'NUM_ROWS': 1024},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 1, 'NUM_ROWS': 2048},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 8, 'NUM_ROWS': 256},
+-                        {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 16, 'NUM_ROWS': 128}
+-                    ]
+-
+-                    for i in range(self.n_D):
+-                        mod = rGroup.createResourceModel((rMod_i.name + "_" + str(i)), "map_models/DCacheModel.h", rMod_i.getAllTraceValues())
+-                        if i < len(dCacheConfigs):
+-                            mod.addConfig(dCacheConfigs[i])
+-                        else:
+-                            mod.addConfig(dCacheConfigs[-1])
+-
+-                elif rMod_i.name == "divider":
+-                    if "CV32E40P" in schedVar_i.name:
+-                        modelLink = "map_models/Divider_CV32E40P.h"
+-                    elif "CVA6" in schedVar_i.name:
+-                        modelLink = "map_models/Divider_CVA6.h"
+-                    else:
+-                        raise RuntimeError("Cannot handle this variant yet. Expand HACK!")
+-                    rGroup.createResourceModel(rMod_i.name, modelLink, rMod_i.getAllTraceValues())
+-
+-                elif rMod_i.name == "divider_u":
+-                    if "CV32E40P" in schedVar_i.name:
+-                        modelLink = "map_models/DividerUnsigned_CV32E40P.h"
+-                    elif "CVA6" in schedVar_i.name:
+-                        modelLink = "map_models/DividerUnsigned_CVA6.h"
+-                    else:
+-                        raise RuntimeError("Cannot handle this variant yet. Expand HACK!")
+-                    rGroup.createResourceModel(rMod_i.name, modelLink, rMod_i.getAllTraceValues())
+-                    
+-                else:
+-                    print(f"WARNING: Currently no idea how to handle resource-model {rMod_i.name}...EXPAND HACK!")
+-
+-            matrixVar.createAllResourceCombinations()
+-
+-            # TODO: Hack to create branch-group
+-            brGroup = matrixVar.createBranchGroup()
+-            
+-            if "CV32E40P" in schedVar_i.name:
+-
+-                branchConfig = [
+-                    {'NUM_PAGES': 2, 'NUM_ROWS': 64}, # Default
+-                    {'NUM_PAGES': 4, 'NUM_ROWS': 32},
+-                    {'NUM_PAGES': 2, 'NUM_ROWS': 128}, # Increased size
+-                    {'NUM_PAGES': 4, 'NUM_ROWS': 64},
+-                    {'NUM_PAGES': 2, 'NUM_ROWS': 32}, # Decreased size
+-                    {'NUM_PAGES': 4, 'NUM_ROWS': 16},
+-                ]
+-
+-                for i in range(self.n_BrPred):
+-                    if i == 0:
+-                        brGroup.createBranchModel("branch_ant", "map_models/Branch_ant.h", ["pc", "brTarget"]) # always non-taken
+-                    elif i == 1:
+-                        brGroup.createBranchModel("branch_fnt_bt", "map_models/Branch_fnt_bt.h", ["pc", "brTarget"]) # forward: non-taken, backward: taken
+-                    else:
+-                        j = i-2
+-                        mod = brGroup.createBranchModel("branch_2sat_" + str(j), "map_models/Branch_2sat.h", ["pc", "brTarget"]) # Dynamic 2-sat.
+-                        if j < len(branchConfig):
+-                            mod.addConfig(branchConfig[j])
+-                        else:
+-                            mod.addConfig(branchConfig[-1])
+-
+-            elif "CVA6" in schedVar_i.name:
+-
+-                branchConfig = [
+-                    {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 64, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 16, 'RAS_SIZE': 2},  # Default
+-                    {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 128, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 16, 'RAS_SIZE': 2},
+-                    {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 64, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 32, 'RAS_SIZE': 2},
+-                    {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 128, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 32, 'RAS_SIZE': 2},
+-                    {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 64, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 16, 'RAS_SIZE': 4},
+-                    {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 128, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 16, 'RAS_SIZE': 4},
+-                    {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 64, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 32, 'RAS_SIZE': 4},
+-                    {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 128, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 32, 'RAS_SIZE': 4},
+-                ]
+-
+-                for i in range(self.n_BrPred):
+-                    mod = brGroup.createBranchModel("branch_cva6_" + str(i), "map_models/Branch_CVA6.h", ["pc", "brTarget", "imm", "typeId", "rs1", "rd"])
+-                    if i < len(branchConfig):
+-                        mod.addConfig(branchConfig[i])
+-                    else:
+-                        mod.addConfig(branchConfig[-1])
+-
++            if self.mapping is not None:
++                self.mapping.configure(matrixVar, schedVar_i)
+             else:
+-                raise RuntimeError("No idea how to generate a branch model here. Expand the hack...")
+-
+-            # Create combinations for all involved models
+-            matrixVar.createAllCombinations()
+-
+-            matrixVar.createTimingVariableSet([(t.name, t.numElements) for t in schedVar_i.getAllTimingVariables()])
+-            # TODO: Need to get this information from the model
+-            if "CV32E40P" in schedVar_i.name:
+-                matrixVar.addStaticConnectorSet("R", [("Xa", "rs1"), ("Xb", "rs2")], [("Xd", "rd")], 32)
+-                matrixVar.createBranchSet(["Pc"], ["Pc_p", "Pc_np"])
+-            elif "CVA6" in schedVar_i.name:
+-                matrixVar.addStaticConnectorSet("R", [("Xa", "rs1"), ("Xb", "rs2")], [("Xd", "rd")], 32)
+-                matrixVar.addStaticConnectorSet("Cb", [("Cb_out", "rd")], [("Cb_in", "rd")], 32, [0])
+-
+-                matrixVar.createBranchSet(["Pc_mp", "Pc_pt"], ["Pc_p", "Pc_p_j", "Pc_p_jr", "Pc_c"])
+-            else:
+-                raise RuntimeError("Cannot handle this variant yet. Expand hack!")
++                self._configure_legacy(matrixVar, schedVar_i)
+ 
+             for schedFunc_i in schedVar_i.getAllSchedulingFunctions():
+ 
+@@ -230,6 +82,9 @@
+                         schedGraph.add_edge(curNode.name, outVar.getGraphName(), weight=weight)
+ 
+                 
++                if self.mapping is not None:
++                    self.mapping.graph(schedGraph, schedFunc_i)
++
+                 # Calculate longest path between all out- and in-variable pairs to create the compressed Instr-Matrix
+                 cInstrMatrix = instr.getCompressedInstructionMatrix()
+                 for outVar_i in matrixVar.getAllOutVariables():
+@@ -283,6 +138,162 @@
+ 
+         return matrixModel
+ 
++    def _configure_legacy(self, matrixVar, schedVar_i):
++        # TODO: Hack to create resource-groups. Need to get this information from SchedModel / CorePerfDSL
++        for rMod_i in schedVar_i.getAllResourceModels():
++            rGroup = matrixVar.createResourceGroup(rMod_i.name.upper())
++            
++            if rMod_i.name == "iCache":
++
++                iCacheConfigs = [
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 4, 'NUM_ROWS': 256}, # Default
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 2, 'NUM_ROWS': 512},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 1, 'NUM_ROWS': 1024},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 8, 'NUM_ROWS': 128},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 16, 'NUM_ROWS': 64},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 32, 'NUM_ROWS': 32},
++
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 4, 'NUM_ROWS': 128}, # Faster memory, 1/2 cache
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 2, 'NUM_ROWS': 256},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 1, 'NUM_ROWS': 512},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 8, 'NUM_ROWS': 64},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 16, 'NUM_ROWS': 32},
++
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 4, 'NUM_ROWS': 512}, # Slower memory, 2x cache
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 2, 'NUM_ROWS': 1024},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 1, 'NUM_ROWS': 2048},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 8, 'NUM_ROWS': 256},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 16, 'NUM_ROWS': 128}
++                ]
++
++                n = self.n_I
++                for i in range(self.n_I):
++                    mod = rGroup.createResourceModel((rMod_i.name + "_" + str(i)), "map_models/ICacheModel.h", rMod_i.getAllTraceValues())
++                    if i < len(iCacheConfigs):
++                        mod.addConfig(iCacheConfigs[i])
++                    else:
++                        mod.addConfig(iCacheConfigs[-1])
++
++            elif rMod_i.name == "dCache":
++                
++                dCacheConfigs = [
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 4, 'NUM_ROWS': 256}, # Default
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 2, 'NUM_ROWS': 512},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 1, 'NUM_ROWS': 1024},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 8, 'NUM_ROWS': 128},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 16, 'NUM_ROWS': 64},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 5, 'NUM_WAYS': 32, 'NUM_ROWS': 32},
++
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 4, 'NUM_ROWS': 128}, # Faster memory, 1/2 cache
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 2, 'NUM_ROWS': 256},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 1, 'NUM_ROWS': 512},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 8, 'NUM_ROWS': 64},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 4, 'NUM_WAYS': 16, 'NUM_ROWS': 32},
++
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 4, 'NUM_ROWS': 512}, # Slower memory, 2x cache
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 2, 'NUM_ROWS': 1024},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 1, 'NUM_ROWS': 2048},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 8, 'NUM_ROWS': 256},
++                    {'CACHE_DELAY': 1, 'MEMORY_DELAY': 6, 'NUM_WAYS': 16, 'NUM_ROWS': 128}
++                ]
++
++                for i in range(self.n_D):
++                    mod = rGroup.createResourceModel((rMod_i.name + "_" + str(i)), "map_models/DCacheModel.h", rMod_i.getAllTraceValues())
++                    if i < len(dCacheConfigs):
++                        mod.addConfig(dCacheConfigs[i])
++                    else:
++                        mod.addConfig(dCacheConfigs[-1])
++
++            elif rMod_i.name == "divider":
++                if "CV32E40P" in schedVar_i.name:
++                    modelLink = "map_models/Divider_CV32E40P.h"
++                elif "CVA6" in schedVar_i.name:
++                    modelLink = "map_models/Divider_CVA6.h"
++                else:
++                    raise RuntimeError("Cannot handle this variant yet. Expand HACK!")
++                rGroup.createResourceModel(rMod_i.name, modelLink, rMod_i.getAllTraceValues())
++
++            elif rMod_i.name == "divider_u":
++                if "CV32E40P" in schedVar_i.name:
++                    modelLink = "map_models/DividerUnsigned_CV32E40P.h"
++                elif "CVA6" in schedVar_i.name:
++                    modelLink = "map_models/DividerUnsigned_CVA6.h"
++                else:
++                    raise RuntimeError("Cannot handle this variant yet. Expand HACK!")
++                rGroup.createResourceModel(rMod_i.name, modelLink, rMod_i.getAllTraceValues())
++                
++            else:
++                print(f"WARNING: Currently no idea how to handle resource-model {rMod_i.name}...EXPAND HACK!")
++
++        matrixVar.createAllResourceCombinations()
++
++        # TODO: Hack to create branch-group
++        brGroup = matrixVar.createBranchGroup()
++        
++        if "CV32E40P" in schedVar_i.name:
++
++            branchConfig = [
++                {'NUM_PAGES': 2, 'NUM_ROWS': 64}, # Default
++                {'NUM_PAGES': 4, 'NUM_ROWS': 32},
++                {'NUM_PAGES': 2, 'NUM_ROWS': 128}, # Increased size
++                {'NUM_PAGES': 4, 'NUM_ROWS': 64},
++                {'NUM_PAGES': 2, 'NUM_ROWS': 32}, # Decreased size
++                {'NUM_PAGES': 4, 'NUM_ROWS': 16},
++            ]
++
++            for i in range(self.n_BrPred):
++                if i == 0:
++                    brGroup.createBranchModel("branch_ant", "map_models/Branch_ant.h", ["pc", "brTarget"]) # always non-taken
++                elif i == 1:
++                    brGroup.createBranchModel("branch_fnt_bt", "map_models/Branch_fnt_bt.h", ["pc", "brTarget"]) # forward: non-taken, backward: taken
++                else:
++                    j = i-2
++                    mod = brGroup.createBranchModel("branch_2sat_" + str(j), "map_models/Branch_2sat.h", ["pc", "brTarget"]) # Dynamic 2-sat.
++                    if j < len(branchConfig):
++                        mod.addConfig(branchConfig[j])
++                    else:
++                        mod.addConfig(branchConfig[-1])
++
++        elif "CVA6" in schedVar_i.name:
++
++            branchConfig = [
++                {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 64, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 16, 'RAS_SIZE': 2},  # Default
++                {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 128, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 16, 'RAS_SIZE': 2},
++                {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 64, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 32, 'RAS_SIZE': 2},
++                {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 128, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 32, 'RAS_SIZE': 2},
++                {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 64, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 16, 'RAS_SIZE': 4},
++                {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 128, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 16, 'RAS_SIZE': 4},
++                {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 64, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 32, 'RAS_SIZE': 4},
++                {'BHT_NUM_PAGES': 2, 'BHT_NUM_ROWS': 128, 'BTB_NUM_PAGES': 2, 'BTB_NUM_ROWS': 32, 'RAS_SIZE': 4},
++            ]
++
++            for i in range(self.n_BrPred):
++                mod = brGroup.createBranchModel("branch_cva6_" + str(i), "map_models/Branch_CVA6.h", ["pc", "brTarget", "imm", "typeId", "rs1", "rd"])
++                if i < len(branchConfig):
++                    mod.addConfig(branchConfig[i])
++                else:
++                    mod.addConfig(branchConfig[-1])
++
++        else:
++            raise RuntimeError("No idea how to generate a branch model here. Expand the hack...")
++
++        # Create combinations for all involved models
++        matrixVar.createAllCombinations()
++
++        matrixVar.createTimingVariableSet([(t.name, t.numElements) for t in schedVar_i.getAllTimingVariables()])
++        # TODO: Need to get this information from the model
++        if "CV32E40P" in schedVar_i.name:
++            matrixVar.addStaticConnectorSet("R", [("Xa", "rs1"), ("Xb", "rs2")], [("Xd", "rd")], 32)
++            matrixVar.createBranchSet(["Pc"], ["Pc_p", "Pc_np"])
++        elif "CVA6" in schedVar_i.name:
++            matrixVar.addStaticConnectorSet("R", [("Xa", "rs1"), ("Xb", "rs2")], [("Xd", "rd")], 32)
++            matrixVar.addStaticConnectorSet("Cb", [("Cb_out", "rd")], [("Cb_in", "rd")], 32, [0])
++
++            matrixVar.createBranchSet(["Pc_mp", "Pc_pt"], ["Pc_p", "Pc_p_j", "Pc_p_jr", "Pc_c"])
++        else:
++            raise RuntimeError("Cannot handle this variant yet. Expand hack!")
++
++
+     def __getPathWeight(self, schedGraph_, path_):
+         weight = 0
+         symbolWeight = False
+@@ -303,6 +314,8 @@
+         return weight    
+             
+     def __getEdgeName(self, edge_):
++        if self.mapping is not None:
++            return self.mapping.edge_name(edge_)
+         if not edge_.isDynamic():
+             tv = edge_.getTimingVariable()
+             if tv.hasMultiElements():
+--- a/m2isar_perf/backends/block_schedule_generator/BlockScheduleGenerator.py
++++ b/m2isar_perf/backends/block_schedule_generator/BlockScheduleGenerator.py
+@@ -113,6 +113,11 @@
+         self.matrixTemps_acc = 0
+         self.supportTemps_acc = 0
+         self.dupTemps_acc = 0
++
++    def compose_blocks(self, variant, block_list):
++        """Compose and reduce blocks through the normal upstream generator."""
++        self.blockDict = block_list
++        return self.__getBlocks(variant)
+ 
+     def analyze(self, file_):
+         self.analysisFile = file_
+@@ -478,6 +483,8 @@
+             #self.__createScheduleFunctionCode(block, blockMatrix, mpLib)
+             self.matrixOptTime += (time.time() - t)
+             block.setEndPc(block_i['endPc'])
++            # Marker/finalization boundaries are not control-flow branches.
++            block.endsOnBranch = block_i.get('endOnBranch', True)
+             blocks.append(block)
+ 
+             #if len(mpLib._tempList) > 0:

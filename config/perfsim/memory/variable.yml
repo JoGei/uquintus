@@ -1,0 +1,9 @@
+# External OBI timing; slot zero is the first edge after reset.
+imem:
+  grant_pattern: [1, 0, 1, 1]
+  response_cycles: [1, 3, 2, 1]
+  cache: {lines: 0, line_bytes: 16, hit_cycles: 1, miss_cycles: 3}
+dmem:
+  grant_pattern: [0, 1, 1]
+  response_cycles: [2, 1, 4, 2]
+  cache: {lines: 0, line_bytes: 16, hit_cycles: 1, miss_cycles: 4}

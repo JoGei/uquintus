@@ -1,0 +1,21 @@
+# Compare replay capacities and arithmetic occupancy at separately declared
+# memory environments. The base expands to complete ordinary RTL YAMLs.
+base: rv32im_dadda
+prefix: perfsim-replay
+common:
+  ISA_C: 1
+  MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+  MUA_BRANCH_PREDICTOR: bimodal
+  MUA_BTB: direct_mapped
+cases:
+  h0: {}
+  h2:
+    MUA_BTB_IDATA_HWORDS: 2
+  h6:
+    MUA_BTB_IDATA_HWORDS: 6
+  h8:
+    MUA_BTB_IDATA_HWORDS: 8
+  h6-iter1:
+    MUA_BTB_IDATA_HWORDS: 6
+    MUA_MUL: iterative
+    MUA_MULDIV_ITERUNROLL: 1

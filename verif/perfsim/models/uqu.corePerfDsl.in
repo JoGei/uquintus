@@ -1,0 +1,108 @@
+// Project-owned initial model. Timing estimates require RTL calibration.
+Architecture(name: "UQU" isa: "RV32IMACFD")
+Connector {Pc, Pc_p, Pc_np, IfConsumed, DeAdvanced, Xa, Xb, Xd, Da, Db, Ld, Serial, Committed}
+Resource {Fetch(0), PCGen, Delivery(0), FrontAdvance(0), Decoder, Branch(0), ALU, Mul(@MUL@), Div(@DIV@),
+          Transit, MulFinish, Request, Response(@DMEM@), Commit, RegWrite, CSR,
+          Drain(0), CsrRead(0), OperandWait(0)}
+Microaction {
+  uFetch(Pc -> Fetch), uPC(PCGen -> Pc_p), uDecode(Serial -> Decoder),
+  uDelivery(Delivery -> IfConsumed), uFrontAdvance(FrontAdvance -> DeAdvanced),
+  uRead1(Da -> OperandWait), uRead2({Da, Db} -> OperandWait),
+  uRR({Xa, Xb} -> ALU@ALU_OUT@), uRI(Xa -> ALU@ALU_OUT@), uRX(ALU@ALU_OUT@),
+  uLoadAddr(Xa -> ALU), uStoreAddr({Xa, Xb} -> ALU),
+  uBranch2({Da, Db} -> Branch -> Pc_np), uBranch1(Da -> Branch -> Pc_np),
+  uBranch0(Branch -> Pc_np),
+  uMul({Xa, Xb} -> Mul@MUL_OUT@), uDiv({Xa, Xb} -> Div@ALU_OUT@),
+  uTransit(Transit), uFinish(MulFinish@FINISH_OUT@), uRequest(Request),
+  uResponse(Response -> {Ld, Committed}), uStoreResponse(Response -> Committed),
+  uCommit(Commit -> Committed), uWrite(RegWrite -> Xd),
+  uCsrDrain(Committed -> Drain), uCsrA(Xa -> CsrRead),
+  uCsrResult(CSR -> {Xd, Serial}), uFence(CSR -> Serial)
+}
+Stage {
+  IF_stage(uFetch, uPC),
+  DE_stage(uDelivery, uDecode, uRead1, uRead2, uBranch2, uBranch1, uBranch0, uCsrDrain, uCsrA),
+  EX_stage(uFrontAdvance, uRR, uRI, uRX, uLoadAddr, uStoreAddr, uMul, uDiv),
+  MEM_stage(uTransit, uFinish, uRequest),
+  WB_stage(uResponse, uStoreResponse, uCommit, uWrite, uCsrResult, uFence)
+}
+Pipeline UQU_pipeline(IF_stage -> DE_stage -> EX_stage -> MEM_stage -> WB_stage)
+TraceValue {pc, code, rs1, rs2, rd, brTarget, memAddr, event}
+ConnectorModel regModel(
+  link: "@REGISTER_MODEL@" trace: {rs1, rs2, rd}
+  connectorIn: {Xd, Ld} connectorOut: {Xa, Xb, Da, Db}
+)
+ConnectorModel frontendModel(
+  link: "@FRONTEND_MODEL@" trace: {pc, code, brTarget}
+  connectorIn: {Pc_p, Pc_np, IfConsumed, DeAdvanced} connectorOut: Pc
+)
+ConnectorModel serialModel(
+  link: "@SERIAL_MODEL@"
+  connectorIn: {Serial, Committed} connectorOut: {Serial, Committed}
+)
+InstrGroup {
+  RR(add, sub, xor, or, and, slt, sltu, sll, srl, sra),
+  RI(addi, xori, ori, andi, slti, sltiu, slli, srli, srai),
+  RX(auipc, lui), Multiply(mul, mulh, mulhu, mulhsu), Divide(div, divu, rem, remu),
+  Load(lb, lh, lw, lbu, lhu), Store(sb, sh, sw),
+  Branches(beq, bne, blt, bge, bltu, bgeu),
+  CsrReg(csrrw, csrrs, csrrc), CsrImm(csrrwi, csrrsi, csrrci), Fences(fence),
+  CPrimeRR(csub, cxor, cor, cand), CFullRR(cadd),
+  CFullRI(caddi, cslli), CPrimeRI(csrli, csrai, candi),
+  CRX(cli, clui), CBranches(cbeqz, cbnez), CJump(cj, cjal),
+  CIndirect(cjr, cjalr),
+  Default([?])
+}
+MicroactionMapping {
+  [ALL]: {uFetch, uPC, uDelivery, uFrontAdvance, uDecode, uTransit, uCommit},
+  RR: {uRead2, uRR@WRITE@}, RI: {uRead1, uRI@WRITE@}, RX: {uRX@WRITE@},
+  Multiply: {uRead2, uMul@MUL_FINISH@@WRITE@}, Divide: {uRead2, uDiv@WRITE@},
+  Load: {uRead1, uLoadAddr, uRequest, uResponse},
+  Store: {uRead2, uStoreAddr, uRequest, uStoreResponse},
+  Branches: {uBranch2},
+  jal: {uBranch0, uRX@WRITE@}, jalr: {uBranch1, uRX@WRITE@},
+  CsrReg: {uRead1, uCsrDrain, uCsrA, uCsrResult}, CsrImm: {uCsrDrain, uCsrResult},
+  CPrimeRR: {uRead2, uRR@WRITE@}, CFullRR: {uRead2, uRR@WRITE@}, cmv: {uRead2, uRR@WRITE@},
+  CFullRI: {uRead1, uRI@WRITE@}, CPrimeRI: {uRead1, uRI@WRITE@},
+  caddi4spn: {uRead1, uRI@WRITE@}, caddi16sp: {uRead1, uRI@WRITE@}, CRX: {uRX@WRITE@}, cnop: {uRX},
+  clw: {uRead1, uLoadAddr, uRequest, uResponse}, clwsp: {uRead1, uLoadAddr, uRequest, uResponse},
+  csw: {uRead2, uStoreAddr, uRequest, uStoreResponse}, cswsp: {uRead2, uStoreAddr, uRequest, uStoreResponse},
+  CBranches: {uBranch1}, CJump: {uBranch0, uRX@WRITE@}, CIndirect: {uBranch1, uRX@WRITE@},
+  Fences: {uCsrDrain, uFence}
+}
+TraceValueMapping {
+  [ALL]: {pc="$resolved{$pc}", code="$code", memAddr="0", event="0"},
+  RR: {rs1="$bitfield{rs1}", rs2="$bitfield{rs2}", rd="$bitfield{rd}"},
+  RI: {rs1="$bitfield{rs1}", rd="$bitfield{rd}"},
+  RX: {rd="$bitfield{rd}"},
+  Multiply: {rs1="$bitfield{rs1}", rs2="$bitfield{rs2}", rd="$bitfield{rd}"},
+  Divide: {rs1="$bitfield{rs1}", rs2="$bitfield{rs2}", rd="$bitfield{rd}"},
+  Load: {rs1="$bitfield{rs1}", rd="$bitfield{rd}"},
+  Store: {rs1="$bitfield{rs1}", rs2="$bitfield{rs2}"},
+  Branches: {rs1="$bitfield{rs1}", rs2="$bitfield{rs2}",
+    brTarget="$resolved{$pc + (((int16_t)($bitfield{imm} << 3)) >> 3)}"},
+  jal: {rd="$bitfield{rd}",
+    brTarget="$resolved{$pc + (((int32_t)($bitfield{imm} << 11)) >> 11)}"},
+  jalr: {rs1="$bitfield{rs1}", rd="$bitfield{rd}",
+    brTarget="($reg{$bitfield{rs1}} + $resolved{(((int16_t)($bitfield{imm} << 4)) >> 4)}) & -2U"},
+  CsrReg: {rs1="$bitfield{rs1}", rd="$bitfield{rd}"},
+  CsrImm: {rd="$bitfield{rd}"},
+  CPrimeRR: {rs1="$resolved{$bitfield{rd} + 8}", rs2="$resolved{$bitfield{rs2} + 8}", rd="$resolved{$bitfield{rd} + 8}"},
+  CFullRR: {rs1="$bitfield{rd}", rs2="$bitfield{rs2}", rd="$bitfield{rd}"},
+  cmv: {rs2="$bitfield{rs2}", rd="$bitfield{rd}"},
+  CFullRI: {rs1="$bitfield{rs1}", rd="$bitfield{rs1}"},
+  CPrimeRI: {rs1="$resolved{$bitfield{rs1} + 8}", rd="$resolved{$bitfield{rs1} + 8}"},
+  caddi4spn: {rs1="2", rd="$resolved{$bitfield{rd} + 8}"},
+  caddi16sp: {rs1="2", rd="2"}, CRX: {rd="$bitfield{rd}"},
+  clw: {rs1="$resolved{$bitfield{rs1} + 8}", rd="$resolved{$bitfield{rd} + 8}"},
+  clwsp: {rs1="2", rd="$bitfield{rd}"},
+  csw: {rs1="$resolved{$bitfield{rs1} + 8}", rs2="$resolved{$bitfield{rs2} + 8}"},
+  cswsp: {rs1="2", rs2="$bitfield{rs2}"},
+  CBranches: {rs1="$resolved{$bitfield{rs1} + 8}",
+    brTarget="$resolved{$pc + (((int16_t)($bitfield{imm} << 7)) >> 7)}"},
+  CJump: {brTarget="$resolved{$pc + (((int16_t)($bitfield{imm} << 4)) >> 4)}"},
+  cjal: {rd="1"},
+  CIndirect: {rs1="$bitfield{rs1}", brTarget="$reg{$bitfield{rs1}} & -2U"},
+  cjalr: {rd="1"}
+}
+Variant @NAME@(use Pipeline: UQU_pipeline use ConnectorModel: {regModel, frontendModel, serialModel})

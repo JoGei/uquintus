@@ -344,6 +344,7 @@ make report
 ```
 
 Ports and software/memory settings live in `verif/sw/benchmark/<suite>/`.
+
 The default runs validate workload self-checks and report workload cycles,
 instructions, CPI and footprint using deterministic memory timing. They are
 cycle-only RTL measurements; official benchmark scores are not claimed. See the
@@ -352,6 +353,8 @@ measurement boundaries and artifacts, and the
 [Embench guide](verif/sw/benchmark/embench/embench-iot/README.md) for full suite
 coverage, software floating-point execution and the RV32IMC BP16/BTB16/H6 preset
 with fully unrolled iterative MUL/DIV.
+
+An experimental [ETISS/CorePerfDSL flow](verif/perfsim/README.md) executes one ELF across multiple generated integer timing models for fast microarchitecture exploration. Its [specification](docs/uqu_spec.perfsim.md) defines RV32I/E/M/C coverage, external memory/cache timing placeholders, initial synchronous PMP/trap support, explicit unsupported features, RTL comparison and the MAP-DSE roadmap. Use `make perfsim-fetch`, `make perfsim-model` and `make perfsim ELF=<program.elf>` with the documented external tools. `make perfsim-cost PERFSIM_ACCURACY=<completed-run>` compares trace-free native RTL and ISS+perfsim host execution time using validated workloads. Estimates have their own report category and remain **uncalibrated**; synthesis/implementation still supplies area and Fmax. The default [MAP-DSE backend](verif/perfsim/README.md#map-dse-block-scheduling) uses upstream composed-block scheduling and shared trace-driven models; the detailed queue model remains a separate accuracy reference.
 
 Benchmarks default to `BENCHMARK_MODE=fast`, a native Verilator C++ driver
 without cocotb/pyuvm, VPI or instruction tracing during execution. Use

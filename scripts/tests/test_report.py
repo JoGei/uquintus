@@ -68,6 +68,28 @@ class ReportTests(unittest.TestCase):
         historical = next(r for r in data['records'] if r['source'].endswith('failed/run.json'))
         self.assertFalse(historical['latest'])
 
+    def test_perfsim_is_estimated_and_requires_native_evidence(self):
+        path = self.run_record(component='uqu_core')
+        raw = dict(schema_version=1, kind='perfsim', status='passed',
+                   configuration=dict(name='rv32i', parameters=self.parameters),
+                   configuration_scope='core', component='uqu_core', target='etiss_coreperfdsl',
+                   selection='instruction_scheduling', model=dict(id='test'),
+                   context=dict(model_status='uncalibrated'),
+                   metrics=[dict(name='estimated_cycles', value=90, unit='cycles'),
+                            dict(name='instructions', value=60, unit='instructions'),
+                            dict(name='estimated_cpi', value=1.5, unit='cycles/instruction')])
+        (path/'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        native = dict(status='passed', models=[dict(id='test', cycles=90, instructions=60)])
+        (path/'native.json').write_text(json.dumps(native))
+        record = report.collect(self.build, self.root)['records'][0]
+        self.assertEqual(record['status'], 'passed')
+        self.assertEqual(record['kind'], 'perfsim')
+        self.assertTrue(any('Uncalibrated timing estimates' in note for note in record['notes']))
+        raw['metrics'][0]['value'] += 1
+        (path/'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+
     def test_changed_parameters_and_different_workloads_stay_separate(self):
         self.run_record('first', workload='a')
         self.run_record('other-elf', workload='b')

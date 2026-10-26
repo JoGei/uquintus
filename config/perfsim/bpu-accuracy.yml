@@ -1,0 +1,28 @@
+# Expand to complete RTL configurations; one immutable RV32IMC ELF per workload.
+base: rv32im_dadda
+prefix: perfsim-bpu
+common:
+  ISA_C: 1
+  MUA_REDIRECT_BYPASS: if_buffer+redirect_request+ifetch_result
+cases:
+  static-t16:
+    MUA_BRANCH_PREDICTOR: static_not_taken
+    MUA_BTB: direct_mapped
+  bimodal-b2-t2:
+    MUA_BRANCH_PREDICTOR: bimodal
+    MUA_BP_ENTRIES: 2
+    MUA_BTB: direct_mapped
+    MUA_BTB_ENTRIES: 2
+  bimodal-b16-t16:
+    MUA_BRANCH_PREDICTOR: bimodal
+    MUA_BTB: direct_mapped
+  bimodal-b16-t16-h6:
+    MUA_BRANCH_PREDICTOR: bimodal
+    MUA_BTB: direct_mapped
+    MUA_BTB_IDATA_HWORDS: 6
+  bimodal-b16-t16-h6-iter1:
+    MUA_BRANCH_PREDICTOR: bimodal
+    MUA_BTB: direct_mapped
+    MUA_BTB_IDATA_HWORDS: 6
+    MUA_MUL: iterative
+    MUA_MULDIV_ITERUNROLL: 1

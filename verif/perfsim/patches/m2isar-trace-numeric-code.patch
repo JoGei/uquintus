@@ -1,0 +1,11 @@
+--- a/m2isar/backends/trace_gen/backend/CodeBuilder.py
++++ b/m2isar/backends/trace_gen/backend/CodeBuilder.py
+@@ -106,7 +106,7 @@
+             elif description.type == "code":
+                 if not previous_resolved:
+                     result += "<< "
+-                result += "ba"
++                result += "ba.to_ulong()"
+                 previous_resolved = False
+             elif description.type == "reg":
+                 result += f"<< \"*(({self.m2_coreDef_model.name}*)cpu)->X[\"" + self.getDescriptionString(description.nested_descriptions) + " << \"]\""

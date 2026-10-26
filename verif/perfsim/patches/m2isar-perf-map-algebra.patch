@@ -1,0 +1,52 @@
+--- a/m2isar_perf/backends/block_schedule_generator/BlockScheduleGenerator.py
++++ b/m2isar_perf/backends/block_schedule_generator/BlockScheduleGenerator.py
+@@ -46,7 +46,7 @@
+                 return None
+             
+     if offset is None:
+-        raise RuntimeError("Failed to indentify a valid row-offset")
++        return None
+     return offset
+ 
+ def checkDimShiftRow(row_i_, row_ii_):
+@@ -72,9 +72,9 @@
+                         return None
+                     
+     if offset is None:
+-        raise RuntimeError("Cannot find valid offset")
++        return None
+     if not dimensions:
+-        raise RuntimeError("Cannot find any \"free dimensions\"")
++        return None
+     
+     return (offset, dimensions)
+ 
+--- a/m2isar_perf/meta_models/matrix_model/MatrixModel.py
++++ b/m2isar_perf/meta_models/matrix_model/MatrixModel.py
+@@ -807,7 +807,7 @@
+                             #        break
+ 
+                             if (iVarIdx := col2VarIdxMap[col_i]) is not None:
+-                                newMatrix[row][col_i] = cInstrData[oVarIdx_i][iVarIdx]
++                                newMatrix[row][col_i] = cInstrData[oVar_i.idx][iVarIdx]
+ 
+                             #for (col_i, iVarIdx_i) in colVarIdxPairs:
+                             #    newMatrix[row_i][col_i] = instrRow[iVarIdx_i]
+
+--- a/m2isar_perf/meta_models/matrix_model/MatrixTransformer.py
++++ b/m2isar_perf/meta_models/matrix_model/MatrixTransformer.py
+@@ -106,6 +106,14 @@
+ 
+                         maxWeight = -1
+                         symbolWeight = False
++                        # Consider symbolic/long paths before shorter parallel
++                        # paths. A later dominating term can make an otherwise
++                        # temporary maximum unnecessary (instruction matrices
++                        # deliberately do not allocate temporary expressions).
++                        def priority(path):
++                            w = self.__getPathWeight(schedGraph, path)
++                            return (1, w.mpElement[1].bit_count(), w.mpElement[3]) if type(w) is DynamicElement else (0, 0, w)
++                        paths.sort(key=priority, reverse=True)
+                         for path_i in paths:
+                             weight = self.__getPathWeight(schedGraph, path_i)
+                             

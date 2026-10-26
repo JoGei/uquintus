@@ -88,6 +88,8 @@ BENCHMARK_REUSE_SUITE=<software-suite.json>` shall reuse the exact pinned
 executables after checking workload settings and software-visible hardware
 compatibility, recording the source suite and both parameter snapshots.
 
+`make perfsim-fetch`, `make perfsim-model` and `make perfsim ELF=<path>` provide the separate experimental ETISS/CorePerfDSL flow. Its [specification](uqu_spec.perfsim.md) and [tool setup guide](../verif/perfsim/README.md) define pinned archive dependencies, externally provisioned tools, generated-model caching, multi-configuration execution and supported coverage. `PERFSIM_MEMORY=<YAML>` optionally selects an external memory timing/cache-stub environment independently of the core YAML. Its estimated-cycle artifacts use `build/uquintus-<hw>/perfsim/` and their own report category; they do not replace either RTL benchmark backend.
+
 ### 1.2. Pinned instruction suites and external compiler identity
 
 The initial `riscv-tests` adapter shall consume the commit and archive SHA-256

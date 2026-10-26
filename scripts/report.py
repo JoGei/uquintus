@@ -25,6 +25,7 @@ KINDS = {
     'regression': 'Component regressions', 'test': 'Core / software tests',
     'lint': 'RTL lint', 'software': 'Software builds',
     'synthesis': 'Synthesis / PPA', 'formal': 'Formal verification',
+    'perfsim': 'Performance simulation (estimated)',
     'benchmark': 'Benchmarks',
 }
 STATES = ('error', 'failed', 'running', 'skipped', 'passed')
@@ -311,6 +312,23 @@ def normalize(path, build, root, hashes):
         if state == 'passed' and detail.get('status') != 'passed':
             record['status'] = 'error'
             record['notes'].append('Passed metadata conflicts with execution status.')
+    if kind == 'perfsim':
+        evidence_path = path.parent / 'native.json'
+        evidence = read_json(evidence_path) if evidence_path.is_file() else {}
+        model_id = raw.get('model', {}).get('id')
+        models = [m for m in evidence.get('models', []) if m.get('id') == model_id]
+        observed = {m['name']: m['value'] for m in metrics}
+        consistent = (evidence.get('status') == 'passed' and len(models) == 1 and
+            type(models[0].get('cycles')) is int and models[0]['cycles'] > 0 and
+            type(models[0].get('instructions')) is int and models[0]['instructions'] > 0 and
+            observed.get('estimated_cycles') == models[0]['cycles'] and
+            observed.get('instructions') == models[0]['instructions'] and
+            observed.get('estimated_cpi') == models[0]['cycles'] / models[0]['instructions'] and
+            context.get('model_status') == 'uncalibrated')
+        if state == 'passed' and not consistent:
+            record['status'] = 'error'
+            record['notes'].append('Passed perfsim metadata conflicts with native model evidence.')
+        record['notes'].append('Uncalibrated timing estimates from ETISS/CorePerfDSL. Passed means checked functional completion; these are not RTL cycle measurements or PPA results.')
     if kind == 'benchmark':
         evidence_path = path.parent / 'benchmark.json'
         evidence = read_json(evidence_path) if evidence_path.is_file() else {}

@@ -1,0 +1,17 @@
+# Finite queues under long EX/WB occupancy; explicit memory latencies are CLI inputs.
+base: rv32im_dadda
+prefix: perfsim-pressure
+common:
+  ISA_C: 1
+cases:
+  none: {}
+  iterative:
+    MUA_MUL: iterative
+    MUA_MULDIV_ITERUNROLL: 1
+  static:
+    MUA_BRANCH_PREDICTOR: static_not_taken
+  static-buffer4:
+    MUA_BRANCH_PREDICTOR: static_not_taken
+    MUA_IF_BUFFER_WORDS: 4
+  retention:
+    MUA_DE_OPERAND_RETENTION: 1

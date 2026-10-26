@@ -168,7 +168,7 @@ def expected_traps(image):
     raw = bytes(image.memory_byte(a) for a in range(start, end))
     result, sites = [], {}
     for pc, cause, tval in struct.iter_unpack('<III', raw):
-        if cause not in (0, 2, 3, 4, 6, 8, 11):
+        if cause not in (0, 1, 2, 3, 4, 5, 6, 7, 8, 11):
             raise ValueError('unsupported declared synchronous trap cause')
         if pc & (1 if image.flags & 1 else 3) or not any(
                 s.flags & 1 and s.address <= pc < s.address+s.size for s in image.segments):

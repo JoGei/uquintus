@@ -327,6 +327,8 @@ cycle-accurate runs across the declared workload suite and physical metrics.
 
 ## 4. Pareto-optimal configuration profiles
 
+The experimental [ETISS/CorePerfDSL performance simulator](uqu_spec.perfsim.md) may screen candidates before RTL runs. Its estimates shall remain separate from measured benchmark cycles, with coverage and per-workload timing error recorded. The initial integer model is uncalibrated; it cannot qualify a Pareto point or supply area/Fmax. The same executable, measurement window and memory context are required for RTL comparisons.
+
 **Status:** Naming and initial selection goals agreed; search and profile
 parameter values deferred
 
