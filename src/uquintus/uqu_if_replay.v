@@ -44,8 +44,11 @@ module uqu_if_replay #(
             end else begin : gen_words
                 assign instr = data_q[32*index_q +: 32];
             end
-            assign active_o = rst_ni && !flush_i && active_q;
-            assign instr_o = active_o ? instr : 32'd0;
+            // Presence describes the stored head until the cancellation edge.
+            // IF separately suppresses delivery on a global flush. Do not
+            // steer its lookahead mux/length adder with that late flush.
+            assign active_o = rst_ni && active_q;
+            assign instr_o = instr;
             always @(posedge clk_i) begin
                 if (!rst_ni || flush_i) active_q <= 1'b0;
                 else if (start_i) begin

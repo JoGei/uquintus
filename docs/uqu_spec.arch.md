@@ -3279,9 +3279,12 @@ token with cause 1 and tval equal to the original PC, without trusting its data
 or waiting for a successor. A successor error shall matter only for a crossing
 instruction, with tval equal to PC+2, including wraparound. Invalid-word error
 inputs and errors on unused successor data shall be ignored. Incomplete inputs
-shall wait without producing instruction/fault data. Fault tokens shall expose
-zero instruction/length placeholders, retain PC, propose no word consumption
-and preserve their fault metadata for the pipeline. After fault transfer the
+shall wait without producing a valid instruction/fault token. Instruction bytes
+and sequential next PC shall remain unqualified lookahead from the supplied
+window, independent of availability, validity and errors. They shall be consumed
+only for a successful transfer. Faults shall clear compressed status and propose
+no word consumption; the parent shall retain PC and supply zero architectural
+instruction/length placeholders while preserving fault metadata. After fault transfer the
 parent shall contain it and prevent repeated delivery until redirect/flush.
 
 Misaligned input PCs shall assert a diagnostic and suppress output validity;
@@ -3313,7 +3316,8 @@ shall release at most one existing head. Empty pops shall do nothing, including
 when an input is accepted on that edge. Full queues shall support simultaneous
 head removal and tail insertion. Head/tail pointers shall wrap explicitly at
 the configured depth, including non-power-of-two depths. Invalid read windows
-shall expose zero fields; error words shall expose zero data. Reset and flush
+shall expose zero address/error fields, while data remains unqualified stored-byte
+lookahead; error words shall expose zero data. Reset and flush
 shall invalidate control only, without resetting payload arrays. During reset
 or flush, input readiness and output validities shall be suppressed.
 
@@ -3509,6 +3513,16 @@ tests. Its parameters shall be `ISA_C`, both compressed strategy selectors,
 `MUA_BRANCH_PREDICTOR`, `MUA_BP_ENTRIES`, `MUA_BTB`, `MUA_BTB_ENTRIES`,
 `MUA_BTB_IDATA_HWORDS`, `MUA_IF_BUFFER_WORDS` and `MUA_REDIRECT_BYPASS`. Optional `uqu_if_replay`
 provides the protected cached instruction source defined in Section 5.2.
+
+Stored instruction bytes, alignment/length arithmetic and read-only prediction
+lookup shall run independently of late delivery/flush qualification. Replay
+presence shall describe the stored head until its synchronous cancellation edge;
+global IF validity shall suppress delivery immediately. The shared replay PMP
+query shall continuously describe the current aligned PC and privilege, with its
+decision consumed only for live replay. Token transfer, prediction retention,
+redirects, replay starts, training and architectural fault/payload observations
+shall retain their validity and fault checks. These lookahead paths shall add no
+pipeline stage, storage or bus transaction and shall not authorize effects.
 
 Each active reset edge shall establish a running frontend at the aligned
 `boot_addr_i` under the core boot contract. Later boot-input changes shall not

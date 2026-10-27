@@ -11,7 +11,7 @@ from cocotb.triggers import Timer
 from pyuvm import uvm_root, uvm_test
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
-from if_aligner_model import MASK, select
+from if_aligner_model import MASK, select, lookahead
 
 
 class AlignerTest(uvm_test):
@@ -29,13 +29,13 @@ class AlignerTest(uvm_test):
             getattr(self.dut,name+'_i').value = value
         await Timer(1,units='ns')
         expected = select(i,self.enabled)
+        expected.update(lookahead(i,self.enabled))
         for name,value in expected.items():
             actual = int(getattr(self.dut,name+'_o').value)
             assert actual==value,(name,actual,value,i,self.enabled)
         assert not expected['exception_valid'] or expected['valid']
         if not expected['valid'] or expected['exception_valid']:
-            assert not expected['instr'] and not expected['compressed'] and not expected['drop_word']
-            assert expected['next_pc']==i['pc']
+            assert not expected['compressed'] and not expected['drop_word']
         self.checks += 1
         return expected
 

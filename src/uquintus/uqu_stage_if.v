@@ -125,8 +125,10 @@ module uqu_stage_if #(
     wire [31:0] fetch_addr = redirect_request ? {steering_addr[31:2],2'b00} : fetch_addr_q;
     wire fetch_valid = redirect_request || (sequential_fetch_valid && !prediction_redirect);
     wire start_permit = redirect_request || sequential_start_permit;
-    assign replay_pmp_addr_o = replay_active ? {pc_q[31:2],2'b00} : 32'd0;
-    assign replay_pmp_priv_m_o = replay_active && priv_m_i;
+    // The shared checker is combinational. Keep its query independent of
+    // delivery/flush qualification; consume the decision only for live replay.
+    assign replay_pmp_addr_o = {pc_q[31:2],2'b00};
+    assign replay_pmp_priv_m_o = priv_m_i;
     assign selected_valid = replay_active ? active : fetched_valid;
     assign selected_instr = replay_active ? (replay_fault ? 32'd0 : replay_instr) : fetched_instr;
     assign selected_compressed = replay_active ? (!replay_fault && replay_short) : fetched_compressed;
@@ -146,7 +148,7 @@ module uqu_stage_if #(
     assign valid_o = active && permit_i && selected_valid;
     assign pc_o = pc_q;
     assign instr_o = valid_o && !candidate_fault ? normalized_instr : 32'd0;
-    assign original_instr_o = valid_o ? selected_instr : 32'd0;
+    assign original_instr_o = valid_o && !access_fault ? selected_instr : 32'd0;
     assign compressed_o = valid_o && selected_compressed;
     assign next_pc_o = valid_o && !candidate_fault ? selected_next_pc : pc_q;
     assign predicted_next_pc_o = valid_o && !candidate_fault ? predicted_pc : pc_q;
@@ -185,7 +187,9 @@ module uqu_stage_if #(
         .MUA_BTB(MUA_BTB), .MUA_BTB_ENTRIES(MUA_BTB_ENTRIES), .MUA_BTB_IDATA_HWORDS(IDATA_HWORDS)
     ) u_bpu (
         .clk_i(clk_i), .rst_ni(rst_ni), .invalidate_i(predictor_invalidate_i),
-        .lookup_valid_i(active && selected_valid && !candidate_fault), .lookup_pc_i(pc_q),
+        // Read-only lookahead may run before delivery is authorized. State
+        // training, redirects and replay starts still require accepted tokens.
+        .lookup_valid_i(running_q && !fault_hold_q), .lookup_pc_i(pc_q),
         .hit_o(), .taken_o(prediction_taken), .target_o(prediction_target),
         .update_valid_i(predictor_update_valid_i), .update_pc_i(predictor_update_pc_i),
         .update_control_flow_i(predictor_update_control_flow_i),
@@ -261,7 +265,10 @@ module uqu_stage_if #(
             if (valid_o && !ready_i && !prediction_held_q &&
                 ((MUA_BRANCH_PREDICTOR != `UQU_BP_NONE) && (MUA_BTB != `UQU_BTB_NONE))) begin
                 prediction_held_q <= 1'b1;
-                prediction_pc_q <= predicted_pc;
+                // Faulting heads previously looked up no prediction. Preserve
+                // that held fallback even if permissions change while stalled.
+                prediction_pc_q <= candidate_fault ?
+                    ((!replay_active && access_fault) ? pc_q : selected_next_pc) : predicted_pc;
             end
             if (transfer) begin
                 prediction_held_q <= 1'b0;

@@ -3,6 +3,15 @@
 MASK = (1 << 32)-1
 
 
+def lookahead(i, compressed_enabled):
+    """Byte selection/length do not depend on availability or authorization."""
+    window = i['word0_data'].to_bytes(4, 'little') + i['word1_data'].to_bytes(4, 'little')
+    offset = (i['pc'] & 2) if compressed_enabled else 0
+    width = 2 if compressed_enabled and window[offset] % 4 != 3 else 4
+    return dict(instr=int.from_bytes(window[offset:offset+width], 'little'),
+                next_pc=(i['pc']+width) & MASK)
+
+
 def select(i, compressed_enabled):
     pc = i['pc']
     o = dict(valid=0,instr=0,compressed=0,next_pc=pc,drop_word=0,word1_needed=0,

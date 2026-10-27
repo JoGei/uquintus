@@ -51,8 +51,11 @@ module uqu_if_buffer #(
     assign word1_addr_o = word1_valid_o ? {addr_q[second], 2'b00} : 32'd0;
     assign word0_error_o = word0_valid_o && error_q[head_q];
     assign word1_error_o = word1_valid_o && error_q[second];
-    assign word0_data_o = word0_valid_o && !error_q[head_q] ? data_q[head_q] : 32'd0;
-    assign word1_data_o = word1_valid_o && !error_q[second] ? data_q[second] : 32'd0;
+    // Validity qualifies consumption, not the bytes used for lookahead.
+    // Error payloads are already zeroed at insertion. Invalid bytes are idle
+    // payload, keeping late flush/pop control out of length/decoder datapaths.
+    assign word0_data_o = data_q[head_q];
+    assign word1_data_o = data_q[second];
 
     always @(posedge clk_i) begin
         if (!rst_ni) begin

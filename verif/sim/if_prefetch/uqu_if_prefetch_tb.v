@@ -89,12 +89,15 @@ module uqu_if_prefetch_tb #(
         .word1_valid_o(word1_valid_o), .word1_addr_o(word1_addr_o),
         .word1_data_o(word1_data), .word1_error_o(word1_error)
     );
+    wire [31:0] selected_instr, selected_next_pc;
+    assign instr_o = instr_valid_o && !exception_valid_o ? selected_instr : 32'd0;
+    assign next_pc_o = instr_valid_o && !exception_valid_o ? selected_next_pc : pc_q;
     uqu_if_aligner #(.ISA_C(ISA_C)) u_aligner (
         .valid_i(rst_ni && !flush_i && !fault_hold_q), .pc_i(pc_q),
         .word0_valid_i(word0_valid_o), .word0_data_i(word0_data), .word0_error_i(word0_error),
         .word1_valid_i(word1_valid_o), .word1_data_i(word1_data), .word1_error_i(word1_error),
-        .valid_o(instr_valid_o), .instr_o(instr_o), .compressed_o(compressed_o),
-        .next_pc_o(next_pc_o), .drop_word_o(drop_word), .word1_needed_o(), .misaligned_o(),
+        .valid_o(instr_valid_o), .instr_o(selected_instr), .compressed_o(compressed_o),
+        .next_pc_o(selected_next_pc), .drop_word_o(drop_word), .word1_needed_o(), .misaligned_o(),
         .exception_valid_o(exception_valid_o), .exception_cause_o(exception_cause_o),
         .exception_tval_o(exception_tval_o)
     );

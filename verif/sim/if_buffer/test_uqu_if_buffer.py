@@ -41,6 +41,12 @@ class BufferTest(uvm_test):
             expected.update({f'word{index}_valid':int(present),f'word{index}_addr':word[0],
                              f'word{index}_data':word[1],f'word{index}_error':word[2]})
         for name,value in expected.items():
+            if name.endswith('_data') and not expected[name.replace('_data','_valid')]:
+                index = int(name[4])
+                if i['rst_n'] and i['flush'] and len(self.queue)>index:
+                    actual = int(getattr(d,name+'_o').value)
+                    assert actual==self.queue[index][1], 'flush changed stored lookahead bytes before the edge'
+                continue
             actual = int(getattr(d,name+'_o').value)
             assert actual==value,(name,actual,value,i,list(self.queue),self.depth)
         inserting = bool(i['push_valid'] and expected['push_ready'])

@@ -40,9 +40,9 @@ buffer consumption, redirects, invalidation and the IF/DE register.
 | Output | Meaning |
 | --- | --- |
 | `valid_o` | A complete instruction or contained fetch-fault token is available. |
-| `instr_o[31:0]` | Original 32-bit instruction, or original 16-bit instruction zero-extended; zero when unavailable or faulting. |
+| `instr_o[31:0]` | Byte-window lookahead: original 32-bit instruction, or original 16-bit instruction zero-extended. Consume only with a valid, nonfaulting selection. |
 | `compressed_o` | Successful two-byte selection. Faults and invalid selections use zero; length is not trusted on faults. |
-| `next_pc_o[31:0]` | PC+2 or PC+4 for a successful selection, modulo 2^32. Otherwise the input PC. |
+| `next_pc_o[31:0]` | Unqualified PC+2/PC+4 lookahead from the prefix, modulo 2^32; apply only on a successful transfer. |
 | `drop_word_o` | The current word becomes fully consumed if this successful selection transfers. At most one word is released. |
 | `word1_needed_o` | A successful first-word prefix identifies a 32-bit instruction starting in the upper halfword. High whether the second word is present or missing. |
 | `misaligned_o` | Active candidate violates four-byte alignment with C disabled or two-byte alignment with C enabled. No instruction/fault token is emitted for this invalid input. |
@@ -58,8 +58,10 @@ instruction leaves the next word's upper halfword available for reuse.
 
 After transferring a fault token, the parent must contain the fault, suppress
 repeat delivery and wait for the appropriate redirect/invalidation. The aligner
-keeps PC unchanged and proposes no word release on faults; it owns no fault-
+proposes no word release on faults; its parent keeps PC unchanged. It owns no fault-
 issued tracking or architectural trap entry.
+
+Instruction bytes and next-PC arithmetic run independently of validity, word availability and errors. These raw payloads are not fault data or permission to advance. The parent qualifies all consumption and architectural observations, keeping late delivery/flush control out of byte selection, expansion and PC arithmetic. The regression checks raw lookahead against an independent byte-window model for every availability/error combination, alongside unchanged validity, compressed-status and fault checks.
 
 `misaligned_o` is a defensive input diagnostic. Architectural branch/jump
 alignment faults remain with DE's branch unit and their originating instruction;

@@ -214,3 +214,5 @@ whereas local prediction clear leaves the current live token visible until the
 edge. Both data bypasses expose memory data through alignment/decompression and
 prediction before IF/DE; combining request bypass also affects the outgoing
 request timing path. These policies add no instruction queue or pipeline stage.
+
+Stored bytes and length arithmetic are unqualified lookahead. Read-only BPU lookup uses registered run/fault-hold state, independently of late delivery validity. Replay presence remains visible until the synchronous cancellation edge; global IF validity immediately suppresses its delivery. The core-owned replay PMP query continuously checks the current aligned PC and privilege, with permission consumed only for active replay. All transfers, new requests, redirects, replay starts and training retain their acceptance/fault qualification. IF/DE payloads and architectural fault placeholders retain their existing contract. No storage, outstanding capacity or pipeline latency is added. Optional live data/request bypasses retain their selected external timing dependencies.

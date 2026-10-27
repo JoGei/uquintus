@@ -32,7 +32,7 @@ depth, pass a complete hardware YAML file with the desired
 Words become visible only after insertion; there is no empty bypass. A push plus
 an empty pop retains the new word. A full push/pop returns the old head before
 the edge and replaces it with the new tail after the edge. Invalid read windows
-expose zero address/data/error. A held head remains stable through tail insertions
+expose zero address/error; data is unqualified stored-byte lookahead. Flush suppresses validity immediately without masking these bytes before the edge. A held head remains stable through tail insertions
 until pop, flush or reset. Payload arrays are not reset.
 
 The FIFO does not validate sequential addresses or match words to the current

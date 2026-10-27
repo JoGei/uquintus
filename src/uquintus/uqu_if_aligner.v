@@ -29,7 +29,6 @@ module uqu_if_aligner #(
     wire short_instruction = (ISA_C == 1) && (first_half[1:0] != 2'b11);
     wire crossing = (ISA_C == 1) && pc_i[1] && !short_instruction;
     reg valid;
-    reg [31:0] instruction;
     reg compressed;
     reg word1_needed;
     reg exception;
@@ -37,18 +36,20 @@ module uqu_if_aligner #(
 
     assign misaligned_o = valid_i && (pc_i[0] || ((ISA_C == 0) && pc_i[1]));
     assign valid_o = valid;
-    assign instr_o = instruction;
+    // Compute lookahead from bytes independently of validity and faults.
+    // Only valid, nonfaulting selections may consume these payloads.
+    assign instr_o = short_instruction ? {16'd0,first_half} :
+                     crossing ? {word1_data_i[15:0],first_half} : word0_data_i;
     assign compressed_o = compressed;
     assign word1_needed_o = word1_needed;
     assign exception_valid_o = exception;
     assign exception_cause_o = exception ? CAUSE_INSTRUCTION_ACCESS : 5'd0;
     assign exception_tval_o = tval;
-    assign next_pc_o = valid && !exception ? pc_i + (compressed ? 32'd2 : 32'd4) : pc_i;
+    assign next_pc_o = pc_i + (short_instruction ? 32'd2 : 32'd4);
     assign drop_word_o = valid && !exception && (!compressed || pc_i[1]);
 
     always @* begin
         valid = 1'b0;
-        instruction = 32'd0;
         compressed = 1'b0;
         word1_needed = 1'b0;
         exception = 1'b0;
@@ -61,7 +62,6 @@ module uqu_if_aligner #(
                 tval = pc_i;
             end else if (short_instruction) begin
                 valid = 1'b1;
-                instruction = {16'd0, first_half};
                 compressed = 1'b1;
             end else if (crossing) begin
                 word1_needed = 1'b1;
@@ -70,13 +70,10 @@ module uqu_if_aligner #(
                     if (word1_error_i) begin
                         exception = 1'b1;
                         tval = pc_i + 32'd2;
-                    end else begin
-                        instruction = {word1_data_i[15:0], first_half};
                     end
                 end
             end else begin
                 valid = 1'b1;
-                instruction = word0_data_i;
             end
         end
     end
