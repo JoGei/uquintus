@@ -101,9 +101,9 @@ independent operands to prepare both magnitudes in parallel.
 
 ## Configuration and cycle counts
 
-`MUA_MUL` is `dadda_mac` (default), `dadda`, or `iterative`. `MUA_DIV` is `iterative`; `F = MUA_MULDIV_ITERUNROLL` defaults to eight and accepts 1, 2, 4, 8, 16 or 32. Labels/constants come from [config/selectors.json](../../../config/selectors.json).
+`MUA_MUL` is `dadda_mac` (default), `dadda`, or `iterative`. `MUA_DIV` is `iterative` (default) or `parallel`; `F = MUA_MULDIV_ITERUNROLL` defaults to eight and accepts 1, 2, 4, 8, 16 or 32. Labels/constants come from [config/selectors.json](../../../config/selectors.json).
 
-| F | Iterative MUL cycles | DIV/DIVU/REM/REMU cycles |
+| F | Iterative MUL cycles | Iterative DIV/DIVU/REM/REMU cycles |
 | --- | --- | --- |
 | 1 | 32 | 35 |
 | 2 | 16 | 18 |
@@ -111,6 +111,8 @@ independent operands to prepare both magnitudes in parallel.
 | 8 | 4 | 6 |
 | 16 | 2 | 4 |
 | 32 | 1 | 3 |
+
+`parallel` DIV uses native Verilog `/` and `%` on a shared signed 33-bit operand pair, with zero extension for unsigned operations. It completes in one EX computation cycle, including divide-by-zero and signed-overflow cases. It never asserts `arith_use_o`. Backpressure retains the result, and flush/reset cancels it. The unroll selector is inactive when neither MUL nor DIV is iterative. One cycle does not guarantee a particular physical clock frequency.
 
 `dadda` instantiates the one-cycle EX1-only PP/Dadda/BK product. `iterative` shares the arithmetic slices with DIV. Canonical `dadda_mac` routes multiplication around this blocking unit: EX1 compresses the product and MEM/EX2 finishes late C plus final addition. In that mode the local request interface accepts only operations 4–7; local MUL requests are explicitly rejected. The complete multiply/MAC path is tested by [daddamul_rows](../daddamul_rows/README.md), EX/pipeline/core and [mac_pipeline](../mac_pipeline/README.md).
 

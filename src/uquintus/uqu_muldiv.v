@@ -32,7 +32,7 @@ module uqu_muldiv #(
     localparam CONFIG_VALID =
         ((MUA_MUL == `UQU_MUL_ITERATIVE) || (MUA_MUL == `UQU_MUL_DADDA) ||
          (MUA_MUL == `UQU_MUL_DADDA_MAC)) &&
-        (MUA_DIV == `UQU_DIV_ITERATIVE) &&
+        ((MUA_DIV == `UQU_DIV_ITERATIVE) || (MUA_DIV == `UQU_DIV_PARALLEL)) &&
         ((MUA_MULDIV_ITERUNROLL == 1) || (MUA_MULDIV_ITERUNROLL == 2) ||
          (MUA_MULDIV_ITERUNROLL == 4) || (MUA_MULDIV_ITERUNROLL == 8) ||
          (MUA_MULDIV_ITERUNROLL == 16) || (MUA_MULDIV_ITERUNROLL == 32));
@@ -48,8 +48,9 @@ module uqu_muldiv #(
             assign arith_sub_o = 1'b0;
             assign arith_carry_in_o = 1'b0;
         end else if ((ISA_M == 1) && CONFIG_VALID) begin : gen_enabled
-            localparam F = MUA_MULDIV_ITERUNROLL;
-            localparam [5:0] STEP_INCREMENT = MUA_MULDIV_ITERUNROLL[5:0];
+            localparam F = ((MUA_MUL == `UQU_MUL_ITERATIVE) ||
+                           (MUA_DIV == `UQU_DIV_ITERATIVE)) ? MUA_MULDIV_ITERUNROLL : 1;
+            localparam [5:0] STEP_INCREMENT = F[5:0];
             localparam [5:0] LAST_GROUP = 6'd32 - STEP_INCREMENT;
             localparam [2:0] ST_IDLE = 3'd0;
             localparam [2:0] ST_MUL = 3'd1;
@@ -95,11 +96,12 @@ module uqu_muldiv #(
                 {request_signed_a && req_a_i[31], req_a_i} : multiplicand_q;
             wire phase_mul = (MUA_MUL == `UQU_MUL_ITERATIVE) &&
                 ((idle && !req_op_i[2]) || (state_q == ST_MUL));
-            wire phase_prep_a = idle && req_op_i[2];
+            wire phase_prep_a = idle && req_op_i[2] && (MUA_DIV == `UQU_DIV_ITERATIVE);
             wire phase_prep_b = (state_q == ST_DIV_PREP_B);
             wire phase_div = (state_q == ST_DIV);
             wire phase_finish = (state_q == ST_DIV_FINISH);
             wire phase_single_cycle = idle && !req_op_i[2] && (MUA_MUL == `UQU_MUL_DADDA);
+            wire phase_parallel_div = idle && req_op_i[2] && (MUA_DIV == `UQU_DIV_PARALLEL);
 
             wire [32:0] selected_magnitude = op_q[1] ? accum_q : {1'b0, bits_q};
             wire [32:0] prepared_b;
@@ -224,9 +226,29 @@ module uqu_muldiv #(
                 assign single_cycle_product = 32'd0;
             end
 
-            wire complete = phase_single_cycle ||
+            wire [31:0] parallel_div_result;
+            if (MUA_DIV == `UQU_DIV_PARALLEL) begin : gen_parallel_div
+                // One signed 33-bit operand pair represents both signed RV32
+                // and unsigned RV32 values. Identical / and % inputs allow
+                // synthesis to share their quotient/remainder logic. The extra
+                // bit also makes INT_MIN/-1 representable before truncation.
+                wire signed [32:0] dividend = {request_negative_a, req_a_i};
+                wire signed [32:0] divisor = {request_negative_b, req_b_i};
+                wire signed [32:0] quotient = dividend / divisor;
+                wire signed [32:0] remainder = dividend % divisor;
+                // Verilog division by zero is undefined; supply ISA results
+                // explicitly without introducing operand-dependent latency.
+                assign parallel_div_result = (req_b_i == 32'd0) ?
+                    (req_op_i[1] ? req_a_i : 32'hffffffff) :
+                    (req_op_i[1] ? remainder[31:0] : quotient[31:0]);
+            end else begin : gen_no_parallel_div
+                assign parallel_div_result = 32'd0;
+            end
+
+            wire complete = phase_single_cycle || phase_parallel_div ||
                             (phase_mul && last_group) || phase_finish;
-            wire [31:0] completed_result = phase_single_cycle ? single_cycle_product :
+            wire [31:0] completed_result = phase_parallel_div ? parallel_div_result :
+                phase_single_cycle ? single_cycle_product :
                 phase_mul ? iterative_product :
                 divide_zero_q ? (op_q[1] ? original_a_q : 32'hffffffff) :
                 first_result[31:0];
@@ -253,7 +275,7 @@ module uqu_muldiv #(
                                 negative_b_q <= request_negative_b;
                                 divide_zero_q <= (req_b_i == 32'd0);
                                 multiplicand_q <= {request_signed_a && req_a_i[31], req_a_i};
-                                if (req_op_i[2]) begin
+                                if (req_op_i[2] && (MUA_DIV == `UQU_DIV_ITERATIVE)) begin
                                     accum_q <= 33'd0;
                                     bits_q <= first_result[31:0];
                                     step_q <= 6'd0;
@@ -263,7 +285,7 @@ module uqu_muldiv #(
                                         divisor_q <= prepared_b;
                                         state_q <= ST_DIV;
                                     end
-                                end else if (MUA_MUL == `UQU_MUL_DADDA) begin
+                                end else if (phase_parallel_div || (MUA_MUL == `UQU_MUL_DADDA)) begin
                                     state_q <= res_fire ? ST_IDLE : ST_HOLD;
                                 end else if (last_group) begin
                                     state_q <= res_fire ? ST_IDLE : ST_HOLD;

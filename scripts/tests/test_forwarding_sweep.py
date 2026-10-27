@@ -60,6 +60,9 @@ class ForwardingSweepTests(unittest.TestCase):
                                   paths=['wb2de'] if step else [], bp=16, btb=16, hwords=6,
                                   benchmark=bench, sky130hd=f'sky130hd{step}.json',
                                   **({'ihp-sg13g2': f'ihp-sg13g2{step}.json'} if not step else {})))
+            (directory / 'config').mkdir()
+            (directory / 'config/f0.yml').write_text(yaml.safe_dump(dict(
+                MUA_MUL='dadda_mac', MUA_DIV='parallel', MUA_MULDIV_ITERUNROLL=8)))
             rows = sweep.render(directory, dict(context=dict(clock_period_ns=40),
                                 platforms=['sky130hd', 'ihp-sg13g2'], cases=cases))
             self.assertEqual(len(rows), 4)
@@ -68,6 +71,8 @@ class ForwardingSweepTests(unittest.TestCase):
             self.assertFalse(rows[3]['qualified'])
             self.assertNotIn('runtime_speedup', rows[3])
             self.assertIn('WB→DE is implicit', (directory / 'index.html').read_text())
+            self.assertIn('DIV=parallel', (directory / 'index.html').read_text())
+            self.assertNotIn('DIV remains iterative', (directory / 'index.html').read_text())
             self.assertIn('../benchmark0.json', (directory / 'index.html').read_text())
             self.assertEqual(json.loads((directory / 'summary.json').read_text())['rows'], rows)
 

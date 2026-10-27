@@ -80,7 +80,7 @@ make perfsim PYTHON=.venv/bin/python CONFIG=rv32im_dadda ELF=<printed-program.el
 | Is a working set memory limited? | External memory profile | Cycles, MEM/WB pressure, sensitivity to grants and response delays | Pressure counters overlap other waits; summing them is not a lost-cycle breakdown. |
 | Can a smaller register file serve the workload? | `ISA_E` and a separate `ilp32e` build | Correctness, cycles, code footprint, later RTL area | Compiler/register-allocation changes are part of the comparison. Keep them separate from same-ELF microarchitecture sweeps. |
 
-FF/latch register-file selection and compressed-decode placement/type are currently treated as cycle-equivalent by perfsim. Evaluate their area/frequency differences in RTL implementation. Hardware MAC encoding, F/Zfinx, XIF and debug are outside the current performance profile.
+FF/latch register-file selection and compressed-decode placement/type are currently treated as cycle-equivalent by perfsim. Evaluate their area/frequency differences in RTL implementation. Native `MUA_DIV: parallel` translates to one EX computation cycle; its description remains uncalibrated until matched RTL validation for the chosen workload/environment. Hardware MAC encoding, F/Zfinx, XIF and debug are outside the current performance profile.
 
 Use several workloads. CoreMark does not cover every arithmetic or control-flow feature. Keep integer and software-floating-point Embench workloads identifiable. For suite comparisons, use the geometric mean of candidate/reference cycle ratios with a fixed workload set; report per-workload CPI alongside it. The [benchmark specification](uqu_spec.bench.md) defines the aggregation and eventual Greek-profile policy.
 

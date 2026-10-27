@@ -214,7 +214,7 @@ in the [RTL style guide](uqu_spec.style.md#3-identifiers-and-symbols).
 | `MUA_REDIRECT_BYPASS` | `none` or canonical `+` combinations of `if_buffer`, `redirect_request`, and `ifetch_result`: independently select word-FIFO fall-through, same-cycle target requests, and empty-result-queue response fall-through. All eight choices are defined in Section 15.4. | `none` |
 | `MUA_HARDENED` | `0`: no OBI parity/checksum generation/checking requirement; `1`: planned hardened implementation including OBI parity/checksum generation and checking on both ports; enabled setting unsupported until implemented. | `0` |
 | `MUA_MUL` | `dadda_mac`: canonical PP/Dadda/BK across EX1 and MEM/EX2 with late C; `dadda`: EX1-only product; `iterative`: shared radix-2 baseline. Inactive when `ISA_M = 0`. | `dadda_mac` |
-| `MUA_DIV` | `iterative`; unrolling set by `MUA_MULDIV_ITERUNROLL`; inactive when `ISA_M = 0`. | `iterative` |
+| `MUA_DIV` | `iterative` or `parallel`; unrolling applies only to the iterative implementation; inactive when `ISA_M = 0`. | `iterative` |
 | `MUA_MULDIV_ITERUNROLL` | Integer factor 1, 2, 4, 8, 16, or 32 for the shared iterative chain; 1 means no unrolling; inactive when `ISA_M = 0`. | `8` |
 | `MUA_FPU_PIPE_REGS_FMA` | Nonnegative register count for the FP32 add/multiply/fused-operation group. | `2` |
 | `MUA_FPU_PIPE_REGS_DIVSQRT` | Nonnegative extra register count around the iterative divide/square-root unit. | `0` |
@@ -350,10 +350,23 @@ instruction's product to satisfy a later multiplication. Each instruction shall
 perform its own multiplication using the selected implementation and retain
 its specified fixed execution latency and separate architectural retirement.
 
-Similarly, `MUA_DIV` shall configure one iterative integer-divider family at
-elaboration time for `DIV`, `DIVU`, `REM`, and `REMU`. Its currently supported
-readable YAML value and default shall be `iterative`, using
-`F = MUA_MULDIV_ITERUNROLL` for the unroll factor.
+`MUA_DIV` shall independently select `iterative` (default, encoding 0) or
+`parallel` (encoding 1) for `DIV`, `DIVU`, `REM`, and `REMU`. The iterative
+implementation uses `F = MUA_MULDIV_ITERUNROLL` for the unroll factor.
+
+`parallel` shall infer combinational quotient/remainder logic using Verilog
+`/` and `%`, with one EX computation cycle for every operand pattern. Signed
+and unsigned operands shall share one signed 33-bit operand representation;
+truncation supplies the required RV32 signed-overflow result. Division by zero
+shall explicitly produce an all-ones quotient and the original dividend as
+remainder. This datapath shall not borrow the EX ALU arithmetic slice. A
+blocked result shall be retained until accepted, and reset/flush shall cancel
+it under the existing MUL/DIV handshake. The unroll parameter affects only
+iterative arithmetic; it is inactive when MUL and DIV both select other
+implementations. One-cycle latency is a scheduling contract; achievable clock
+period and area must be measured on the complete core.
+
+The following setup/iteration/completion schedule applies to `iterative`.
 
 The unroll factor shall specify how many successive binary division steps
 are implemented combinationally per iteration. Factor one shall reuse one
@@ -383,8 +396,8 @@ or pass through the selected unsigned result, using shared arithmetic.
 | 16 | 1 | 2 | 1 | 4 |
 | 32 | 1 | 1 | 1 | 3 |
 
-Architectural special-case results, including division by zero and signed
-overflow, shall use the same setup, iteration, and completion schedule as other
+For iterative division, architectural special-case results, including division
+by zero and signed overflow, shall use the same setup, iteration, and completion schedule as other
 operands. Unsigned instructions and cases requiring no sign correction shall
 also reserve these phases. Hazards and downstream backpressure may still
 extend the instruction's residence in EX. All four

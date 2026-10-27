@@ -118,6 +118,16 @@ class ConfigurationLabelTests(unittest.TestCase):
         for label, value in [('iterative', 2), ('dadda', 3), ('dadda_mac', 13)]:
             self.assertEqual(self.catalog['MUA_MUL'][label]['value'], value)
 
+    def test_parallel_divider_label_encoding_and_inactive_unroll(self):
+        config = load_configuration(ROOT/'config/rv32imc_bimodal_idata_dadda_mac_divparallel.yml', self.catalog)
+        self.assertEqual(parameters_for_component(config, ['MUA_DIV'], self.catalog), {'MUA_DIV': 1})
+        label = configuration_label(config)
+        self.assertTrue(label.endswith('_mua-mul:dadda-mac_mua-div:parallel'))
+        self.assertNotIn('unroll', label)
+        self.assertEqual(label, configuration_label(dict(config, MUA_MULDIV_ITERUNROLL=32)))
+        self.assertTrue(configuration_label(dict(config, MUA_MUL='iterative')).endswith(
+            '_mua-mul:iter_mua-div:parallel_mua-mdu:unroll8'))
+
     def test_fpu_pipeline_counts_placement_and_backend_are_visible(self):
         for backend in ("th32", "thmulti"):
             for placement in ("before", "after", "inside", "distributed"):

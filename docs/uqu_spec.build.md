@@ -233,7 +233,7 @@ defined choices, and `MUA_REGFILE_IMPL` shall use `ff` or `latch`. Their default
 YAML selections shall be `none` and `ff`, respectively. `MUA_MUL` shall use
 `dadda_mac` (default), `dadda`, or `iterative`, as defined in [architecture, Section 3](uqu_spec.arch.md#3-classical-five-stage-pipeline). MEM/EX2 is the canonical second execution region. The split has a fixed two-row payload; `MUA_MUL_SPLIT` and historical multiplier labels are rejected, without compatibility aliases.
 
-`MUA_DIV` shall use `iterative`. All hardware presets shall
+`MUA_DIV` shall use `iterative` (default) or native one-cycle `parallel`. All hardware presets shall
 also explicitly set `MUA_BP_ENTRIES`, a power of two from 2 through 1024,
 defaulting to 16 and inactive outside bimodal mode. Independently select target
 storage with `MUA_BTB: none | direct_mapped` (default `none`) and explicit
@@ -428,7 +428,7 @@ joining combined selections and `_` separating fields. The optional enabled-only
 | Instruction buffer | `_mua-ifbuf:<words>` | `MUA_IF_BUFFER_WORDS`. |
 | Redirect/refill bypass | `[_mua-rb:<policies>]` | Omit for `none`; otherwise join enabled policies in canonical order with `+`: `ifbuf` for `if_buffer`, `redirect` for `redirect_request`, `result` for `ifetch_result`. All eight selector values are supported, e.g. `mua-rb:ifbuf+redirect+result`. |
 | Multiplier | `[_mua-mul:{iter,dadda,dadda-mac}]` | Present only for `ISA_M=1`; `iterative`, EX1 product-only `dadda`, or canonical split `dadda_mac`. |
-| Divider | `[_mua-div:iter]` | Present only for `ISA_M=1`; the currently supported `MUA_DIV` choice is `iterative`. |
+| Divider | `[_mua-div:{iter,parallel}]` | Present only for `ISA_M=1`; `MUA_DIV` selects iterative arithmetic or native combinational quotient/remainder logic. |
 | Shared iterative arithmetic | `[_mua-mdu:unroll<factor>]` | `MUA_MULDIV_ITERUNROLL`, when M is enabled and at least one MUL/DIV implementation is iterative. |
 | FPU implementation | `[_mua-fpu:<backend>+pipe-<placement>+fma<N>+divsqrt<N>+noncomp<N>+conv<N>]` | Present only for `ISA_ZFINX=1`; `MUA_FPU_DIVSQRT`, `MUA_FPU_PIPE_CONFIG`, then the four `MUA_FPU_PIPE_REGS_*` counts in the displayed order. Use the validated YAML labels for backend and placement. |
 
@@ -441,8 +441,9 @@ disabling all four individually configurable paths shall produce
 Direct compressed decoding shall use `mua-c:decode`; the inactive decompressor
 placement shall not appear. MUL and DIV shall share the single
 `mua-mdu:unroll<factor>` field; it shall not imply independently configurable
-unroll factors. Factor 32 remains an unrolled iterative implementation rather
-than a separate parallel-divider selector. Future ISA or implementation
+unroll factors. Factor 32 remains a three-cycle unrolled iterative divider;
+`mua-div:parallel` instead identifies native one-cycle `/` and `%` logic. With
+non-iterative MUL and DIV, omit the inactive unroll field. Future ISA or implementation
 choices shall extend this convention when supported; reserving a parameter
 shall not make that feature selectable or qualify it for reporting as enabled.
 

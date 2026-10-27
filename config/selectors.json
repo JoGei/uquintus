@@ -32,7 +32,8 @@
     "dadda_mac": {"value": 13, "macro": "UQU_MUL_DADDA_MAC"}
   },
   "MUA_DIV": {
-    "iterative": {"value": 0, "macro": "UQU_DIV_ITERATIVE"}
+    "iterative": {"value": 0, "macro": "UQU_DIV_ITERATIVE"},
+    "parallel": {"value": 1, "macro": "UQU_DIV_PARALLEL"}
   },
   "MUA_FPU_PIPE_CONFIG": {
     "before": {"value": 0, "macro": "UQU_FPU_PIPE_BEFORE"},

@@ -21,12 +21,15 @@ class MuldivTest(uvm_test):
         self.enabled = self.params['ISA_M']
         self.factor = self.params['MUA_MULDIV_ITERUNROLL']
         self.mul_mode = self.params['MUA_MUL']
+        self.div_mode = self.params['MUA_DIV']
         self.operations = range(4,8) if self.mul_mode in (13,) else range(8)
         self.rng = random.Random(int(os.environ['RANDOM_SEED']))
         self.checks = 0
 
     def latency(self, op):
         if op >= 4:
+            if self.div_mode == 1:
+                return 1
             return (2 + self.factor - 1) // self.factor + 32 // self.factor + 1
         return {2: 32 // self.factor, 3: 1}[self.mul_mode]
 
@@ -94,7 +97,8 @@ class MuldivTest(uvm_test):
             context = f'op={op}, a={a:#x}, b={b:#x}, cycle={cycle}/{latency}'
             assert ready == int(cycle == 1), context
             assert valid == int(cycle == latency), context
-            assert arith == int(op >= 4 or self.mul_mode == 2), context
+            assert arith == int((op >= 4 and self.div_mode == 0) or
+                                (op < 4 and self.mul_mode == 2)), context
             if valid:
                 assert int(self.dut.res_data_o.value) == expected, context
             await self.edge()
@@ -158,7 +162,7 @@ class MuldivTest(uvm_test):
         self.request(5, MASK, 7)
         self.dut.res_ready_i.value = 0
         await self.settle()
-        assert self.outputs() == (1, 0, 1)
+        assert self.outputs() == (1, int(self.latency(5) == 1), int(self.div_mode == 0))
         await self.edge()
         self.request(6 if self.mul_mode in (13,) else 1, 0x80000000, 0xFFFFFFFF)
         expected = reference(5, MASK, 7)
@@ -178,6 +182,24 @@ class MuldivTest(uvm_test):
         assert self.outputs() == (0, 1, 0)
         await self.edge()
         await self.operation(6 if self.mul_mode in (13,) else 1, 0x80000000, 0xFFFFFFFF)
+
+    async def consecutive_divides(self):
+        if self.div_mode != 1:
+            return
+        self.dut.res_ready_i.value = 1
+        for index in range(128):
+            op = 4 + index % 4
+            a = self.rng.getrandbits(32)
+            b = 0 if index % 17 == 0 else self.rng.getrandbits(32)
+            self.request(op, a, b)
+            await self.settle()
+            assert self.outputs() == (1, 1, 0)
+            assert int(self.dut.res_data_o.value) == reference(op, a, b)
+            await self.edge()
+            self.checks += 1
+        self.dut.req_valid_i.value = 0
+        await self.settle()
+        assert self.outputs() == self.idle_outputs()
 
     async def cancel(self, op, cut, reset=False, held=False):
         self.request(op, 0x81234567, 0xFFFFFFFD)
@@ -252,6 +274,7 @@ class ControlTest(MuldivTest):
             await self.disabled()
         else:
             await self.consecutive_multiplies()
+            await self.consecutive_divides()
             await self.pending_request()
             for op in self.operations:
                 # Every computation phase, result cycle, and held-result state.

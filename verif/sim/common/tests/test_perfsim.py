@@ -38,6 +38,18 @@ class PerfsimTests(unittest.TestCase):
         self.assertTrue(split['schedule']['split_mul'])
         self.assertEqual(split['status'], 'uncalibrated')
 
+    def test_parallel_divider_is_one_cycle_independent_of_unroll(self):
+        for contract in ('queue', 'map_dse'):
+            original = None
+            for factor in (1, 8, 32):
+                model = describe(dict(self.config, MUA_MUL='dadda_mac', MUA_DIV='parallel',
+                                      MUA_MULDIV_ITERUNROLL=factor), contract=contract)
+                self.assertEqual(model['schedule']['div_cycles'], 1)
+                self.assertTrue(model['schedule']['split_mul'])
+                if original is not None:
+                    self.assertEqual(model['id'], original)
+                original = model['id']
+
     def test_cycle_neutral_and_inactive_parameters_share_schedule(self):
         original = describe(self.config)
         equivalent = describe(dict(self.config, MUA_REGFILE_IMPL='latch', MUA_DE_OPERAND_RETENTION=1))

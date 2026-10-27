@@ -55,6 +55,8 @@ def cycles(payload, params):
     if payload['op'] == MAC:
         return 1
     if payload['op'] >= 4:
+        if params['MUA_DIV'] == 1:
+            return 1
         return (2 + factor - 1) // factor + 32 // factor + 1
     return {2: 32 // factor, 3: 1, 13: 1}[params['MUA_MUL']]
 

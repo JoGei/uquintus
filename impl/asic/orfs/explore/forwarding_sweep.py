@@ -53,6 +53,14 @@ def render(directory, manifest):
     rows = []
     esc = html.escape
     tables = []
+    # Derive the arithmetic description from the retained full configuration;
+    # presets may select a native divider or a different iterative unroll count.
+    first_config = directory / 'config' / (manifest['cases'][0]['name'] + '.yml')
+    base = yaml.safe_load(first_config.read_text()) if first_config.is_file() else {}
+    isa = ('RV32E' if base.get('ISA_E') else 'RV32I') + ('M' if base.get('ISA_M', 1) else '') + ('C' if base.get('ISA_C', 1) else '')
+    arithmetic = (f'MUL={base["MUA_MUL"]}, DIV={base["MUA_DIV"]}, '
+                  f'iterative unroll={base["MUA_MULDIV_ITERUNROLL"]} (inactive without iterative units). '
+                  if base else 'Arithmetic settings are recorded in the experiment configurations. ')
     for platform in manifest['platforms']:
         group = []
         for case in manifest['cases']:
@@ -91,12 +99,13 @@ def render(directory, manifest):
     figures = ''.join(f'<p><object type="image/svg+xml" data="{name}"></object></p>'
                       for name in ('forwarding.svg', 'area-runtime.svg') if (directory / name).is_file())
     page = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="color-scheme" content="light dark">'
-            '<title>RV32IMC forwarding ladder</title><style>'
+            f'<title>{isa} forwarding ladder</title><style>'
             'body{font-family:system-ui;margin:2rem}table{border-collapse:collapse;font-variant-numeric:tabular-nums}'
             'td,th{padding:.5rem;border-bottom:1px solid GrayText;text-align:right}td:nth-child(2){text-align:left}'
-            'object{width:min(100%,1100px)}</style><h1>RV32IMC forwarding ladder</h1>'
-            '<p>BP16 / BTB16 / six packed halfwords / IF decompression / multiplier selected by the recorded configuration. '
-            'DIV remains iterative with unroll factor 8. WB→DE is implicit when the forwarding master is enabled. '
+            f'object{{width:min(100%,1100px)}}</style><h1>{isa} forwarding ladder</h1>'
+            f'<p>{manifest["cases"][0]["bp"]}-entry BP / {manifest["cases"][0]["btb"]}-entry BTB / '
+            f'{manifest["cases"][0]["hwords"]} packed halfwords / {esc(manifest["cases"][0].get("c_variant", "decompr-if"))}. '
+            + esc(arithmetic) + 'WB→DE is implicit when the forwarding master is enabled. '
             'There is no WB→MEM bypass. Each step adds exactly one path; this ladder is order-dependent.</p>'
             '<p>Same CoreMark performance ELF, CRC checked, one-cycle instruction/data responses. '
             f'{manifest["context"]["clock_period_ns"]:g} ns mapping target. '
@@ -117,6 +126,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--elf', type=Path)
     parser.add_argument('--base-config', type=Path, default=ROOT / 'config/rv32imc_bimodal_idata.yml')
+    parser.add_argument('--name-prefix', default='fwd-imc-b16-t16-h6-cif')
     parser.add_argument('--output', type=Path, default=ROOT / 'build/investigations/forwarding-rv32imc-60ns')
     parser.add_argument('--sdc', type=Path)
     parser.add_argument('--platforms', nargs='+', choices=('sky130hd', 'ihp-sg13g2'), default=['sky130hd'])
@@ -144,7 +154,7 @@ def main():
     from hw_config import load_configuration
     base = load_configuration(args.base_config, json.loads((ROOT / 'config/selectors.json').read_text()))
     args.elf = args.elf.resolve()
-    cases, configs = make_cases(base)
+    cases, configs = make_cases(base, args.name_prefix)
     for subdirectory in ('config', 'logs'):
         (directory / subdirectory).mkdir(exist_ok=True)
     (directory / 'audit.json').unlink(missing_ok=True)

@@ -47,7 +47,7 @@ def describe(config, imem_latency=1, dmem_latency=1, catalog=None, contract="que
     factor = config['MUA_MULDIV_ITERUNROLL']
     split = bool(config['ISA_M'] and config['MUA_MUL'] == 'dadda_mac')
     mul_cycles = 32 // factor if config['MUA_MUL'] == 'iterative' else 1
-    div_cycles = (2 + factor - 1) // factor + 32 // factor + 1
+    div_cycles = 1 if config['MUA_DIV'] == 'parallel' else (2 + factor - 1) // factor + 32 // factor + 1
     schedule = dict(version=MODEL_VERSION, isa_m=config['ISA_M'], isa_c=config['ISA_C'],
                     isa_e=config['ISA_E'], isa_pmp=config['ISA_PMP'],
                     forwarding=config['MUA_FORWARDING'], split_mul=split,
@@ -103,6 +103,8 @@ def describe(config, imem_latency=1, dmem_latency=1, catalog=None, contract="que
     if config['ISA_M']:
         for key in ('MUA_MUL', 'MUA_DIV', 'MUA_MULDIV_ITERUNROLL'):
             coverage[key] = 'modeled_uncalibrated'
+        if config['MUA_MUL'] != 'iterative' and config['MUA_DIV'] != 'iterative':
+            coverage['MUA_MULDIV_ITERUNROLL'] = 'recorded_inactive'
     for key in ('MUA_IF_BUFFER_WORDS', 'MUA_REDIRECT_BYPASS'):
         coverage[key] = 'modeled_frontend_queues'
     if config['ISA_C']:
