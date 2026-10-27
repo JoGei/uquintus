@@ -126,6 +126,8 @@ and combinational lookup latency are unchanged. Writes use constant slot
 destinations so synthesis does not pad a six-halfword bank to eight physical
 slots when widening its two write ports.
 
+Entry selection is decoded separately for new and continuing fill streams. Each constant slot decodes its low/high-halfword writes directly from the fill position, without broadcasting an incremented write address. Prefix validity and count updates use the same local bank enable. Count arithmetic retains one overflow bit beyond the capacity count; data reads use the slot address width, which can be smaller than the count width at power-of-two capacities. This does not change the accepted-event latency or replay contents.
+
 `rv32i_bimodal_idata` selects eight halfwords (four I32 instructions), adding
 `+idata-hw8` to the active BTB label. `rv32ic_bimodal_idata` selects six halfwords
 (96 bits), enough for three I32, six C16, or a mixed sequence such as 32/16/32/16.

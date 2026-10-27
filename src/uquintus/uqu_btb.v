@@ -58,6 +58,10 @@ module uqu_btb #(
                 localparam integer CELL_BITS = (ISA_C == 1) ? 16 : 32;
                 localparam integer CAPACITY = (ISA_C == 1) ? MUA_BTB_IDATA_HWORDS : MUA_BTB_IDATA_HWORDS/2;
                 localparam integer COUNT_WIDTH = $clog2(CAPACITY+1);
+                localparam integer CELL_INDEX_WIDTH = (CAPACITY > 1) ? $clog2(CAPACITY) : 1;
+                // One extra bit preserves overflow when adding a C32 pair to
+                // the final slot, including power-of-two-minus-one depths.
+                localparam [COUNT_WIDTH:0] CAPACITY_COUNT = CAPACITY[COUNT_WIDTH:0];
                 reg [MUA_BTB_ENTRIES-1:0] prefix_valid_q;
                 reg [COUNT_WIDTH-1:0] count_q [0:MUA_BTB_ENTRIES-1];
                 wire [CELL_BITS*CAPACITY-1:0] bank_data [0:MUA_BTB_ENTRIES-1];
@@ -83,9 +87,9 @@ module uqu_btb #(
                 wire [COUNT_WIDTH-1:0] count = retained ? count_q[owner] : {COUNT_WIDTH{1'b0}};
                 wire short_instr = (ISA_C == 1) && (capture_instr_i[1:0] != 2'b11);
                 wire [31:0] length = short_instr ? 32'd2 : 32'd4;
-                wire [31:0] step = ((ISA_C == 0) || short_instr) ? 32'd1 : 32'd2;
-                wire [31:0] next_offset = {{(32-COUNT_WIDTH){1'b0}},offset} + step;
-                wire fits = next_offset <= CAPACITY;
+                wire [COUNT_WIDTH:0] step = ((ISA_C == 0) || short_instr) ? 1 : 2;
+                wire [COUNT_WIDTH:0] next_offset = {1'b0,offset} + step;
+                wire fits = next_offset <= CAPACITY_COUNT;
                 wire [31:0] capture_instr = short_instr ? {16'd0,capture_instr_i[15:0]} : capture_instr_i;
                 wire [31:0] stored_instr;
                 wire same_prefix = (offset >= count) || (stored_instr == capture_instr);
@@ -103,16 +107,20 @@ module uqu_btb #(
                 assign stored_instr = bank_stored_instr[owner];
                 genvar bank, unit_index;
                 for (bank = 0; bank < MUA_BTB_ENTRIES; bank = bank+1) begin : gen_bank
+                    localparam [INDEX_WIDTH-1:0] BANK_INDEX = bank[INDEX_WIDTH-1:0];
                     reg [CELL_BITS-1:0] data_q [0:CAPACITY-1];
-                    wire write_bank = rst_ni && !invalidate_i && append && (owner == bank);
+                    wire update_bank = update_index == BANK_INDEX;
+                    wire active_bank = fill_index_q == BANK_INDEX;
+                    wire write_bank = rst_ni && !invalidate_i && append &&
+                        (start ? update_bank : active_bank);
                     if (ISA_C == 1) begin : gen_packed
-                        wire [15:0] first = data_q[offset];
-                        wire [15:0] second = ({{(31-COUNT_WIDTH){1'b0}},following_offset} < CAPACITY) ?
-                            data_q[following_offset[COUNT_WIDTH-1:0]] : 16'd0;
+                        wire [15:0] first = data_q[offset[CELL_INDEX_WIDTH-1:0]];
+                        wire [15:0] second = (following_offset < CAPACITY_COUNT) ?
+                            data_q[following_offset[CELL_INDEX_WIDTH-1:0]] : 16'd0;
                         assign bank_stored_instr[bank] =
                             (first[1:0] != 2'b11) ? {16'd0,first} : {second,first};
                     end else begin : gen_words
-                        assign bank_stored_instr[bank] = data_q[offset];
+                        assign bank_stored_instr[bank] = data_q[offset[CELL_INDEX_WIDTH-1:0]];
                     end
                     for (unit_index = 0; unit_index < CAPACITY; unit_index = unit_index+1) begin : gen_cell
                         localparam [COUNT_WIDTH-1:0] UNIT_OFFSET = unit_index[COUNT_WIDTH-1:0];
@@ -120,20 +128,38 @@ module uqu_btb #(
                         // Constant destinations prevent memory write-port
                         // widening from padding a non-power-of-two bank.
                         if (ISA_C == 1) begin : gen_packed
+                            localparam integer PREVIOUS = unit_index-1;
+                            localparam [COUNT_WIDTH-1:0] PREVIOUS_OFFSET = PREVIOUS[COUNT_WIDTH-1:0];
+                            // Decode the old stream position before selecting
+                            // a new stream's slot zero. No incremented/muxed
+                            // offset needs to drive every payload write port.
+                            wire select_low = start ? (unit_index == 0) : (fill_offset_q == UNIT_OFFSET);
+                            wire select_high = !short_instr && (unit_index > 0) &&
+                                (start ? (unit_index == 1) : (fill_offset_q == PREVIOUS_OFFSET));
+                            // Qualify the write outside the data selection so
+                            // the bank enable need not select low/high data.
                             always @(posedge clk_i) begin
                                 if (write_bank) begin
-                                    if (offset == UNIT_OFFSET)
-                                        data_q[unit_index] <= capture_instr_i[15:0];
-                                    else if (!short_instr && (following_offset == {1'b0,UNIT_OFFSET}))
-                                        data_q[unit_index] <= capture_instr_i[31:16];
+                                    if (select_low) data_q[unit_index] <= capture_instr_i[15:0];
+                                    else if (select_high) data_q[unit_index] <= capture_instr_i[31:16];
                                 end
                             end
                         end else begin : gen_words
+                            wire write_word = write_bank &&
+                                (start ? (unit_index == 0) : (fill_offset_q == UNIT_OFFSET));
                             always @(posedge clk_i) begin
-                                if (write_bank && (offset == UNIT_OFFSET))
-                                    data_q[unit_index] <= capture_instr_i;
+                                if (write_word) data_q[unit_index] <= capture_instr_i;
                             end
                         end
+                    end
+                    always @(posedge clk_i) begin
+                        if (!rst_ni || invalidate_i) begin
+                            prefix_valid_q[bank] <= 1'b0;
+                        end else begin
+                            if (changed && update_bank) prefix_valid_q[bank] <= 1'b0;
+                            if (write_bank) prefix_valid_q[bank] <= 1'b1;
+                        end
+                        if (write_bank) count_q[bank] <= next_offset[COUNT_WIDTH-1:0];
                     end
                 end
                 genvar slot;
@@ -144,13 +170,11 @@ module uqu_btb #(
                 end
                 always @(posedge clk_i) begin
                     if (!rst_ni || invalidate_i) begin
-                        prefix_valid_q <= {MUA_BTB_ENTRIES{1'b0}};
                         fill_valid_q <= 1'b0;
                     end else begin
-                        if (changed) prefix_valid_q[update_index] <= 1'b0;
                         if (stream_flush_i || !owner_live) fill_valid_q <= 1'b0;
                         if (start) begin
-                            fill_valid_q <= {{(32-COUNT_WIDTH){1'b0}},count} < CAPACITY;
+                            fill_valid_q <= {1'b0,count} < CAPACITY_COUNT;
                             fill_index_q <= update_index;
                             fill_owner_q <= update_pc_i;
                             fill_target_q <= update_target_i;
@@ -163,11 +187,7 @@ module uqu_btb #(
                         if (collect) begin
                             fill_pc_q <= capture_pc_i + length;
                             fill_offset_q <= next_offset[COUNT_WIDTH-1:0];
-                            if (next_offset == CAPACITY) fill_valid_q <= 1'b0;
-                        end
-                        if (append) begin
-                            count_q[owner] <= next_offset[COUNT_WIDTH-1:0];
-                            prefix_valid_q[owner] <= 1'b1;
+                            if (next_offset == CAPACITY_COUNT) fill_valid_q <= 1'b0;
                         end
                     end
                 end
