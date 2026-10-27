@@ -52,17 +52,16 @@ int main() {
             assert(delay==(i==4?2U:1U));
         }
     }
-    // Training before lookup is visible; training on the IF capture edge is
-    // read-before-write. Capture continues collecting after an earlier DE
-    // redirect, rather than being delayed until another functional lookup.
-    for(bool early:{false,true}) {
+    // Training accepted at edge 2 commits at edge 3, visible to lookup at 4.
+    // Captures use the same one-edge event delay, including sparse waits.
+    for(unsigned ready:{2,3,4,5}) {
         uqu::TimedBpuState b;b.enabled=true;b.compressed=true;b.hwords=6;
-        b.prepare(0x1000,1,0);b.accept(0x1000,0x6f,0x1000);
-        b.prepare(0x1000,early?5:2,2);
-        assert(b.prediction.hit==early);
-        b.accept(0x1000,0x6f,0x1000);
-        assert(b.lookup(0x1000).hwords==2);
-        b.prepare(0x1000,8,6);b.accept(0x1000,0x6f,0x1000);
+        b.prepare(0x1000,1,0);b.accept(0x1000,0x6f,0x1000,1,true,false);
+        b.prepare(0x1000,ready,2);
+        assert(b.prediction.hit==(ready>3));
+        b.accept(0x1000,0x6f,0x1000,ready,true,false);
+        assert(b.lookup(0x1000).hwords==0);
+        b.prepare(0x1000,8,6);b.accept(0x1000,0x6f,0x1000,8,true,false);
         assert(b.prediction.hit && b.prediction.taken);
         assert(b.prediction.hwords==2);
     }

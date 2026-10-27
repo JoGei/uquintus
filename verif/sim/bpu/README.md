@@ -50,12 +50,21 @@ There is no global history, return-address stack or first-encounter predecode.
 | Ports | Contract |
 | --- | --- |
 | `clk_i`, `rst_ni` | Single clock, synchronous active-low reset of valid bits only. |
-| `invalidate_i` | Suppress lookups immediately and clear valid bits on the edge, taking priority over updates. The core asserts this when FENCE.I retires. Ordinary redirects retain learned state. |
+| `invalidate_i` | Suppress lookups immediately and clear valid bits and pending events on the edge, taking priority over pending and incoming updates/captures. The core asserts this when FENCE.I retires. Ordinary redirects retain learned state. |
 | `lookup_valid_i`, `lookup_pc_i` | Combinational lookup of the current aligned instruction PC. |
 | `hit_o`, `taken_o`, `target_o` | Exact BTB tag hit, effective target-steering decision and target. Target is zero unless taken; lookup/update collisions see the old entries before the edge. |
-| `update_valid_i`, `update_pc_i` | One accepted, nonfaulting DE instruction. A held, flushed or faulting token does not train. Training precedes retirement and may include an instruction later discarded by an older event. |
+| `update_valid_i`, `update_pc_i` | Enqueue one accepted, nonfaulting DE instruction; the tables consume it on the next edge. A held, flushed or faulting token does not train. Training precedes retirement and may include an instruction later discarded by an older event. |
 | `update_control_flow_i`, `update_conditional_i` | Allocate/train a branch or jump. A non-control instruction removes a matching stale entry without evicting another tag. |
 | `update_taken_i`, `update_target_i` | Actual direction and branch target, including the target of an untaken conditional branch. Misaligned PC updates are ignored; an invalid target removes a matching entry. |
+
+`uqu_bpu` registers one aligned update/capture/ordinary-flush bundle per edge.
+An event accepted at edge N updates storage at edge N+1. Lookup stays
+combinational and sees stored state, with no pending-event bypass. Direction
+and target training use the same registered PC and target alignment. Ordinary
+flushes are ordered with captures; a new taken update can start a fresh stream
+in its flush bundle. Reset/FENCE.I instead discard pending events immediately
+at their edge. Only event-valid/flush bits require reset. Disabled effective
+BTBs omit the event register; zero payload omits capture fields.
 
 IF looks up the aligned instruction before IF/DE transfer. It snapshots the
 predicted next PC if the token stalls, even if an older instruction subsequently
@@ -154,3 +163,6 @@ after a new visit. The comparison of original bits ignores C16 upper input paddi
 The `idata_banks` case fills every entry with distinct mixed-length payloads
 while reading another entry, then checks replacement and a rejected append
 beyond the final slot for isolation between banks.
+The `event_pipeline` case checks exact update visibility, consecutive targets
+with different alignment, ordered capture/flush, simultaneous flush/new start,
+and pending-event cancellation without resurrection after reset or FENCE.I.

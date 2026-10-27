@@ -6,7 +6,7 @@ from memory import load as load_memory,validate as validate_memory,parameters as
 
 ROOT = Path(__file__).resolve().parents[2]
 MODEL_VERSION = 'uqu-five-stage-admission-v5'
-MAP_MODEL_VERSION = 'uqu-map-dse-v7'
+MAP_MODEL_VERSION = 'uqu-map-dse-v8'
 FORWARD_PATHS = ('MUA_FORWARD_EX_TO_DE', 'MUA_FORWARD_MEM_TO_DE',
                  'MUA_FORWARD_MEM_TO_EX', 'MUA_FORWARD_WB_TO_EX')
 

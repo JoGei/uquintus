@@ -4,33 +4,6 @@
 #include "uqu_bpu_model.h"
 #include "uqu_hazard_windows.h"
 namespace uqu {
-// BPU events run on the shared envelope's reference clock. Training before
-// IF becomes valid is visible to lookup; training at the capture edge is not.
-struct TimedBpuState : BpuState {
-    Prediction prediction;
-    uint64_t evaluations=0,hits=0,taken=0;
-private:
-    bool initialized=false,valid=false,pending_flush=false;
-    uint32_t previous_pc=0,previous_code=0,previous_target=0,next_pc=0,expected_pc=0;
-    Update pending;
-public:
-    void prepare(uint32_t pc,uint64_t ready,uint64_t previous_de) {
-        if(!initialized){initialize();initialized=true;}
-        if(!enabled){prediction={};return;}
-        pending={};pending_flush=valid && pc!=expected_pc;
-        if(valid)pending={true,FrontendState::control(previous_code),
-            (previous_code&3)==3?(previous_code&127)==0x63:((previous_code&3)==1 && (previous_code>>13&7)>=6),
-            pc!=next_pc,previous_pc,previous_target};
-        if(valid && previous_de<ready){clock(pending,{},pending_flush);pending={};pending_flush=false;}
-        prediction=lookup(pc);++evaluations;hits+=prediction.hit;taken+=prediction.taken;
-    }
-    void accept(uint32_t pc,uint32_t code,uint32_t target) {
-        if(!enabled)return;
-        clock(pending,{true,pc,code},pending_flush);
-        previous_pc=pc;previous_code=code;previous_target=target;next_pc=pc+((code&3)==3?4:2);
-        expected_pc=prediction.taken?prediction.target:next_pc;valid=true;
-    }
-};
 // Shared trace-derived service calendar: frontend queues and a reference
 // backend-occupancy envelope. No scheduled combination supplies timestamps.
 struct TraceFetchState {
@@ -136,7 +109,7 @@ public:
         const bool steering=prediction.taken && predicted!=pc+(word?4:2);
         if(replay){replay_left-=word?2:1;replay_pc=pc+(word?4:2);++replayed;}
         if(steering){replay_left=prediction.hwords;replay_pc=predicted;}
-        predictor_state.accept(pc,code,target);
+        predictor_state.accept(pc,code,target,arrival,control,word?op==0x63:((code&3)==1 && f>=6));
         frontend.setIfConsumed(arrival,transport_code,steering,predicted+replay_left*2,replay);
         if(barrier) {frontend.recover_at(wb,pc+(word?4:2));replay_left=0;}
         else frontend.setDeAdvanced(decoded,pc,code,predicted,true);

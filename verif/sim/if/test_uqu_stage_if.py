@@ -316,6 +316,8 @@ class IdataTest(IfStageTest):
         retained = self.predictor.fit_prefix([instr for instr,_ in values])
         while len(self.delivered)<before+len(retained)-1:
             await self.cycle(ready=1,grant=1)
+        # The last accepted capture reaches storage on the following edge.
+        await self.cycle(grant=1)
         return expected
 
     async def visit(self, branch):

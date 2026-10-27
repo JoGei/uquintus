@@ -28,6 +28,20 @@ class PerfsimTests(unittest.TestCase):
     def setUp(self):
         self.config = perfsim.configurations(['rv32im_dadda'], 1, 1)[0]['config']
 
+    def test_registered_bpu_clock_and_sparse_event_visibility(self):
+        compiler = shutil.which('c++')
+        if not compiler:
+            self.skipTest('requires a C++ compiler')
+        with tempfile.TemporaryDirectory() as tmp:
+            exe = Path(tmp)/'bpu-timing'
+            command = [compiler, '-std=c++17', '-I'+str(ROOT/'verif/perfsim/models'),
+                       str(ROOT/'verif/perfsim/tests/bpu_timing.cpp'), '-o', str(exe)]
+            built = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            self.assertEqual(built.returncode, 0, built.stdout)
+            checked = subprocess.run([str(exe)], text=True, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, timeout=10)
+            self.assertEqual(checked.returncode, 0, checked.stdout)
+
     def test_integer_latency_and_split_translation(self):
         for factor in (1, 2, 4, 8, 16, 32):
             with self.subTest(factor=factor):

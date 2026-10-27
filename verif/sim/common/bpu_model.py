@@ -13,6 +13,7 @@ class BpuModel:
         self.fill = None
         self.entries = {}
         self.directions = {}
+        self.pending = {}
 
     def lookup(self, pc, valid=True, invalidate=False):
         entry = self.entries.get((pc // self.alignment) % self.capacity)
@@ -54,6 +55,21 @@ class BpuModel:
     def step(self, *, reset=False, invalidate=False, valid=False, pc=0,
              control_flow=False, conditional=False, taken=False, target=0,
              stream_flush=False, capture_valid=False, capture_pc=0, capture_instr=0):
+        # One accepted bundle per edge. Invalidation discards both the pending
+        # bundle and the current inputs; ordinary flush stays ordered in-band.
+        if reset or invalidate:
+            self.pending = {}
+            self._apply(reset=True)
+            return
+        self._apply(**self.pending)
+        self.pending = dict(valid=valid, pc=pc, control_flow=control_flow,
+            conditional=conditional, taken=taken, target=target,
+            stream_flush=stream_flush, capture_valid=capture_valid,
+            capture_pc=capture_pc, capture_instr=capture_instr)
+
+    def _apply(self, *, reset=False, invalidate=False, valid=False, pc=0,
+               control_flow=False, conditional=False, taken=False, target=0,
+               stream_flush=False, capture_valid=False, capture_pc=0, capture_instr=0):
         if reset or invalidate:
             self.payloads.clear()
             self.fill = None

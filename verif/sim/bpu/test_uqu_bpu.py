@@ -67,6 +67,7 @@ class TrainingTest(PredictorTest):
         # JAL/JALR predictions are unconditional, including changed targets.
         for target in (0x3000, 0x4000, 0x1000):
             await self.cycle(update_valid=1, update_conditional=0, update_target=target)
+            await self.cycle()  # Accepted training applies one edge later.
             actual = await self.cycle()
             if self.model.enabled:
                 assert actual == dict(hit=1, taken=1, target=target)
@@ -102,9 +103,11 @@ class LifecycleTest(PredictorTest):
         await self.cycle(lookup_valid=0)
         await self.cycle()
         await self.cycle(update_valid=1, update_control_flow=0)
+        await self.cycle()
         assert not (await self.cycle())['hit']
         await self.cycle(update_valid=1)
         await self.cycle(update_valid=1, update_target=0x2001)
+        await self.cycle()
         assert not (await self.cycle())['hit']
         for reset in (False, True):
             await self.cycle(update_valid=1)
@@ -158,12 +161,16 @@ class IdataTest(PredictorTest):
         if hwords == 1:
             # One halfword may retain C16, never a partial C32 instruction.
             await self.cycle(update_valid=1,capture_valid=1,capture_pc=0x2000,capture_instr=0x13)
+            await self.cycle()  # Drain the registered capture bundle.
             assert self.model.payload(0x1000) == []
             await self.cycle(update_valid=1,capture_valid=1,capture_pc=0x2000,capture_instr=1)
+            await self.cycle()  # Drain the registered capture bundle.
             assert self.model.payload(0x1000) == [1]
             await self.cycle(capture_valid=1,capture_pc=0x2002,capture_instr=0x13)
+            await self.cycle()  # Drain the registered capture bundle.
             assert self.model.payload(0x1000) == [1]
             await self.cycle(invalidate=1)
+            await self.cycle()  # Drain the registered capture bundle.
             assert self.model.payload(0x1000) == []
             self.drop_objection(); return
         # Concurrent allocation/first capture; bubbles do not consume slots.
@@ -180,6 +187,7 @@ class IdataTest(PredictorTest):
             await self.cycle(capture_valid=1,capture_pc=pc,capture_instr=word)
             pc = (pc+self.model.length(word)) & 0xffffffff
         await self.cycle(capture_valid=1,capture_pc=pc,capture_instr=0x13)
+        await self.cycle()  # Drain the registered capture bundle.
         assert self.model.payload(0x1000) == words
         # Reads, flushes and repeated updates retain a warm prefix.
         for _ in range(3):
@@ -187,20 +195,24 @@ class IdataTest(PredictorTest):
             await self.cycle(update_valid=1, update_target=target)
             await self.cycle(capture_valid=1,capture_pc=target,capture_instr=words[0])
             await self.cycle()
+            await self.cycle()  # Drain the registered capture bundle.
             assert self.model.payload(0x1000) == words
         # Changed target, partial fill and later extension at the fixed origin.
         await self.cycle(update_valid=1,update_target=0x4000)
         await self.cycle(capture_valid=1,capture_pc=0x4000,capture_instr=0x13)
         await self.cycle(stream_flush=1)
+        await self.cycle()  # Drain the registered capture bundle.
         assert self.model.payload(0x1000) == [0x13]
         await self.cycle(update_valid=1,update_target=0x4000)
         for k in range(hwords//2):
             await self.cycle(capture_valid=1,capture_pc=0x4000+4*k,capture_instr=0x13)
+        await self.cycle()  # Drain the registered capture bundle.
         assert self.model.payload(0x1000) == [0x13]*(hwords//2)
         # Tag miss by a non-control does not clear somebody else's payload.
         alias = 0x1000+self.model.capacity*self.model.alignment
         await self.cycle(update_valid=1,update_pc=alias,update_control_flow=0)
         await self.cycle()
+        await self.cycle()  # Drain the registered capture bundle.
         assert self.model.payload(0x1000) == [0x13]*(hwords//2)
         # Replacement, stale fill and global invalidation cannot leak bytes.
         await self.cycle(update_valid=1,update_pc=alias,update_target=0x8000)
@@ -219,13 +231,16 @@ class IdataTest(PredictorTest):
                 await self.cycle(capture_valid=1,capture_pc=target+2*k,capture_instr=1)
             tail = target+2*(hwords-1)
             await self.cycle(capture_valid=1,capture_pc=tail,capture_instr=0x13)
+            await self.cycle()  # Drain the registered capture bundle.
             assert self.model.payload(0x1000) == [1]*(hwords-1)
             await self.cycle(capture_valid=1,capture_pc=tail,capture_instr=1)
+            await self.cycle()  # Drain the registered capture bundle.
             assert self.model.payload(0x1000) == [1]*(hwords-1), 'overflow must stop the old fill stream'
             await self.cycle(update_valid=1,update_target=target,
                              capture_valid=1,capture_pc=target,capture_instr=1)
             for k in range(1,hwords):
                 await self.cycle(capture_valid=1,capture_pc=target+2*k,capture_instr=1)
+            await self.cycle()  # Drain the registered capture bundle.
             assert self.model.payload(0x1000) == [1]*hwords
         # Random lifecycle/capture interleavings, checked against the model.
         pcs = [0x1000+self.model.alignment*k for k in range(2*self.model.capacity)]
@@ -296,3 +311,56 @@ class IdataBanksTest(PredictorTest):
 @cocotb.test()
 async def idata_banks(dut):
     await uvm_root().run_test('IdataBanksTest')
+
+
+class EventPipelineTest(PredictorTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.cycle(rst_n=0)
+        branch, target = 0x1000, 0x8000
+        other = branch+self.model.alignment
+        # Different next-cycle target alignment must not affect the queued
+        # conditional direction/target update. Lookup has no queue bypass.
+        first = await self.cycle(update_valid=1, update_pc=branch, update_target=target)
+        second = await self.cycle(update_valid=1, update_pc=other, update_target=0x9001)
+        assert not first['hit'] and not second['hit']
+        third = await self.cycle()
+        if self.model.enabled:
+            assert third['hit']
+            assert third['target']==(target if self.model.bimodal else 0)
+        await self.cycle(lookup_pc=other)
+        assert not self.model.lookup(other)['hit']
+        if self.model.hwords:
+            word = 1 if self.params['ISA_C'] else 0x13
+            # A capture preceding an ordinary flush is retained. The flush
+            # stops subsequent collection, rather than canceling old events.
+            await self.cycle(capture_valid=1, capture_pc=target, capture_instr=word)
+            await self.cycle(stream_flush=1)
+            await self.cycle(capture_valid=1, capture_pc=target+self.model.length(word), capture_instr=word)
+            await self.cycle()
+            await self.cycle()
+            assert self.model.payload(branch)==[word]
+            # A new start and its first instruction survive a simultaneous
+            # ordinary flush, with their original same-edge ordering intact.
+            await self.cycle(update_valid=1, update_pc=other, update_target=0xa000,
+                stream_flush=1, capture_valid=1, capture_pc=0xa000, capture_instr=word)
+            await self.cycle(lookup_pc=other)
+            await self.cycle(lookup_pc=other)
+            assert self.model.payload(other)==[word]
+        # FENCE.I/global invalidation suppresses lookup immediately, discards
+        # both the pending bundle and same-edge inputs, and cannot resurrect.
+        for reset in (False, True):
+            await self.cycle(update_valid=1, update_target=target, capture_valid=1,
+                capture_pc=target, capture_instr=1 if self.params['ISA_C'] else 0x13)
+            actual = await self.cycle(rst_n=int(not reset), invalidate=int(not reset),
+                update_valid=1, capture_valid=1, capture_pc=target, capture_instr=0x13)
+            assert not actual['hit']
+            for _ in range(3):
+                assert not (await self.cycle())['hit']
+                assert not int(self.dut.idata_hwords_o.value)
+        self.drop_objection()
+
+
+@cocotb.test()
+async def event_pipeline(dut):
+    await uvm_root().run_test('EventPipelineTest')

@@ -2075,6 +2075,18 @@ global history is part of this initial implementation.
 
 Train once for an accepted nonfaulting DE instruction, never while it is held
 or flushed. A matching entry on a non-control instruction shall be invalidated.
+`uqu_bpu` shall register each accepted update together with that edge's IF
+capture and ordinary stream-flush event. The tables and replay bookkeeping
+shall consume this bundle on the following clock edge, accepting a new bundle
+every cycle. Lookup shall remain combinational, without forwarding pending
+training into prediction. An event accepted at edge N changes stored state
+at edge N+1; lookups before that latter edge still see the preceding state.
+Reset and FENCE.I invalidation shall suppress lookup immediately, clear stored
+validity and discard both pending and same-edge incoming events. Ordinary
+flushes shall stay in the ordered bundle: preserve earlier accepted captures,
+then stop the old fill stream, allowing a simultaneous new taken update to
+start collection under the existing rule. No event registers are needed when
+the effective BTB is disabled, and capture fields are omitted at zero payload.
 Lookup/update collisions shall use the pre-edge table. Training in DE does not
 imply retirement: a subsequently discovered older fault may discard an already
 trained instruction without architectural effect from its prediction state.

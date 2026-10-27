@@ -174,6 +174,14 @@ These compare native components against real RTL and independently check matrix 
 
 Replay checks should cover simultaneous DE training/IF capture, a lookup held under backpressure, local prediction clear versus global flush, straddling C32 instructions and outstanding killed responses. Hazard checks should cover youngest writers, disappearing bypass windows, x0, registered load visibility and operand retention. Component correctness alone does not establish whole-core timing accuracy.
 
+The BPU registers accepted training/capture/ordinary-flush events and applies
+them one edge later. Its native clock model uses the same pending bundle;
+the MAP-DSE reference model merges update and capture events by commit timestamp
+in a sparse calendar, preserving long-wait skipping. Reset/invalidation discard
+pending events. Model contract `uqu-map-dse-v8` identifies this visibility rule;
+older calibrated results do not qualify the new contract. Revalidate the
+matched RTL workload/profile before promoting new DSE candidates.
+
 ## Measure the cost of exploration
 
 Use `compare_map.py --accuracy <study>` to compare MAPExplorer with instruction scheduling of the same contract. Add `--repeats`, `--warmups` and `--cpu` for controlled native trials. To compare RTL and ISS execution cost from a completed accuracy study:

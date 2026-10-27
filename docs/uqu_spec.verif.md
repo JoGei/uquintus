@@ -847,6 +847,12 @@ storage and effective disablement, depths one/three/four, sequential prefix
 capture/extension, concurrent allocation/first capture, retained warm prefixes,
 replacement during held replay, invalidation and word-sharing continuation, nested replay steering, live privilege changes and
 exact continuation latency at depths one through four.
+The BPU `event_pipeline` case shall check one-edge delayed training/capture
+visibility, back-to-back update identity and target alignment, ordered ordinary
+flushes, a simultaneous flush/new start, and pending-event cancellation on
+reset/FENCE.I without later repopulation. Native cycle and sparse timestamped
+models shall preserve this ordering, including merged update/capture timestamps
+and long idle gaps without a cycle-by-cycle model loop.
 Run IF in all three compressed strategies, including C32 crossing words and
 first-/second-word live protection denials. The shared PMP interval-model suite
 checks replay comparison banks concurrently with ordinary IF/MEM. Core
