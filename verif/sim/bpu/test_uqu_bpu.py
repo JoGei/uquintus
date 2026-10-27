@@ -244,3 +244,55 @@ class IdataTest(PredictorTest):
 @cocotb.test()
 async def idata(dut):
     await uvm_root().run_test('IdataTest')
+
+
+class IdataBanksTest(PredictorTest):
+    async def run_phase(self):
+        self.raise_objection()
+        await self.cycle(rst_n=0)
+        if not self.model.hwords:
+            self.drop_objection()
+            return
+        branches = [0x6000 + self.model.alignment*k for k in range(self.model.capacity)]
+        payloads = {}
+        # Fill every entry with distinct bytes while reading a different bank.
+        # Alternating C16/C32 puts full instructions across odd halfword offsets.
+        for bank, branch in enumerate(branches):
+            words = self.model.fit_prefix([
+                ((bank+1) << 7) | 1 if self.params['ISA_C'] and k % 3 != 1 else
+                ((bank+1) << 20) | (k << 7) | 0x13
+                for k in range(self.model.hwords)])
+            payloads[branch] = words
+            pc = 0x10000 + 0x1000*bank
+            for k, word in enumerate(words):
+                await self.cycle(update_valid=int(k == 0), update_pc=branch,
+                    update_target=0x10000 + 0x1000*bank,
+                    lookup_pc=branches[(bank-1) % len(branches)],
+                    capture_valid=1, capture_pc=pc, capture_instr=word)
+                pc += self.model.length(word)
+            await self.cycle(stream_flush=1, lookup_pc=branch)
+        for branch in branches:
+            await self.cycle(lookup_pc=branch)
+            assert self.model.payload(branch) == payloads[branch]
+        # Replace the last entry, exercise the last legal slot, then ensure
+        # a rejected append cannot wrap around into the first bank.
+        alias = branches[-1] + self.model.capacity*self.model.alignment
+        word = 1 if self.params['ISA_C'] else 0x13
+        count = self.model.hwords if self.params['ISA_C'] else self.model.hwords//2
+        for k in range(count+1):
+            await self.cycle(update_valid=int(k == 0), update_pc=alias,
+                update_target=0x40000, lookup_pc=branches[0], capture_valid=1,
+                capture_pc=0x40000+k*self.model.length(word), capture_instr=word)
+        for branch in branches[:-1]:
+            await self.cycle(lookup_pc=branch)
+            assert self.model.payload(branch) == payloads[branch]
+        await self.cycle(lookup_pc=alias)
+        assert self.model.payload(alias) == [word]*count
+        await self.cycle(lookup_pc=branches[-1])
+        assert self.model.payload(branches[-1]) == []
+        self.drop_objection()
+
+
+@cocotb.test()
+async def idata_banks(dut):
+    await uvm_root().run_test('IdataBanksTest')

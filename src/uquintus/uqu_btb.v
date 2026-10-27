@@ -60,7 +60,8 @@ module uqu_btb #(
                 localparam integer COUNT_WIDTH = $clog2(CAPACITY+1);
                 reg [MUA_BTB_ENTRIES-1:0] prefix_valid_q;
                 reg [COUNT_WIDTH-1:0] count_q [0:MUA_BTB_ENTRIES-1];
-                reg [CELL_BITS-1:0] data_q [0:MUA_BTB_ENTRIES*CAPACITY-1];
+                wire [CELL_BITS*CAPACITY-1:0] bank_data [0:MUA_BTB_ENTRIES-1];
+                wire [31:0] bank_stored_instr [0:MUA_BTB_ENTRIES-1];
                 reg fill_valid_q;
                 reg [INDEX_WIDTH-1:0] fill_index_q;
                 reg [31:0] fill_owner_q, fill_target_q, fill_pc_q;
@@ -95,30 +96,51 @@ module uqu_btb #(
                 assign idata_hwords_o = hit_o && prefix_valid_q[lookup_index] ?
                     ({{(32-COUNT_WIDTH){1'b0}},count_q[lookup_index]} << ((ISA_C == 1) ? 0 : 1)) : 32'd0;
                 assign idata_next_pc_o = target_o + (idata_hwords_o << 1);
-                if (ISA_C == 1) begin : gen_packed
-                    wire [15:0] first = data_q[owner*CAPACITY+{{(32-COUNT_WIDTH){1'b0}},offset}];
-                    wire [15:0] second = ({{(32-COUNT_WIDTH){1'b0}},offset}+32'd1 < CAPACITY) ?
-                        data_q[owner*CAPACITY+{{(32-COUNT_WIDTH){1'b0}},offset}+32'd1] : 16'd0;
-                    assign stored_instr = (first[1:0] != 2'b11) ? {16'd0,first} : {second,first};
-                    always @(posedge clk_i) begin
-                        if (rst_ni && !invalidate_i && append) begin
-                            data_q[owner*CAPACITY+{{(32-COUNT_WIDTH){1'b0}},offset}] <= capture_instr_i[15:0];
-                            if (!short_instr)
-                                data_q[owner*CAPACITY+{{(32-COUNT_WIDTH){1'b0}},offset}+32'd1] <= capture_instr_i[31:16];
-                        end
+                // Entry selection gates each bank locally. Only the small
+                // within-entry offset addresses its data; a late owner never
+                // passes through owner*CAPACITY+offset address arithmetic.
+                wire [COUNT_WIDTH:0] following_offset = {1'b0,offset} + 1'b1;
+                assign stored_instr = bank_stored_instr[owner];
+                genvar bank, unit_index;
+                for (bank = 0; bank < MUA_BTB_ENTRIES; bank = bank+1) begin : gen_bank
+                    reg [CELL_BITS-1:0] data_q [0:CAPACITY-1];
+                    wire write_bank = rst_ni && !invalidate_i && append && (owner == bank);
+                    if (ISA_C == 1) begin : gen_packed
+                        wire [15:0] first = data_q[offset];
+                        wire [15:0] second = ({{(31-COUNT_WIDTH){1'b0}},following_offset} < CAPACITY) ?
+                            data_q[following_offset[COUNT_WIDTH-1:0]] : 16'd0;
+                        assign bank_stored_instr[bank] =
+                            (first[1:0] != 2'b11) ? {16'd0,first} : {second,first};
+                    end else begin : gen_words
+                        assign bank_stored_instr[bank] = data_q[offset];
                     end
-                end else begin : gen_words
-                    assign stored_instr = data_q[owner*CAPACITY+{{(32-COUNT_WIDTH){1'b0}},offset}];
-                    always @(posedge clk_i) begin
-                        if (rst_ni && !invalidate_i && append)
-                            data_q[owner*CAPACITY+{{(32-COUNT_WIDTH){1'b0}},offset}] <= capture_instr_i;
+                    for (unit_index = 0; unit_index < CAPACITY; unit_index = unit_index+1) begin : gen_cell
+                        localparam [COUNT_WIDTH-1:0] UNIT_OFFSET = unit_index[COUNT_WIDTH-1:0];
+                        assign bank_data[bank][CELL_BITS*unit_index +: CELL_BITS] = data_q[unit_index];
+                        // Constant destinations prevent memory write-port
+                        // widening from padding a non-power-of-two bank.
+                        if (ISA_C == 1) begin : gen_packed
+                            always @(posedge clk_i) begin
+                                if (write_bank) begin
+                                    if (offset == UNIT_OFFSET)
+                                        data_q[unit_index] <= capture_instr_i[15:0];
+                                    else if (!short_instr && (following_offset == {1'b0,UNIT_OFFSET}))
+                                        data_q[unit_index] <= capture_instr_i[31:16];
+                                end
+                            end
+                        end else begin : gen_words
+                            always @(posedge clk_i) begin
+                                if (write_bank && (offset == UNIT_OFFSET))
+                                    data_q[unit_index] <= capture_instr_i;
+                            end
+                        end
                     end
                 end
                 genvar slot;
                 for (slot = 0; slot < CAPACITY; slot = slot+1) begin : gen_slot
                     assign idata_o[CELL_BITS*slot +: CELL_BITS] =
                         hit_o && prefix_valid_q[lookup_index] && (count_q[lookup_index] > slot) ?
-                        data_q[lookup_index*CAPACITY+slot] : {CELL_BITS{1'b0}};
+                        bank_data[lookup_index][CELL_BITS*slot +: CELL_BITS] : {CELL_BITS{1'b0}};
                 end
                 always @(posedge clk_i) begin
                     if (!rst_ni || invalidate_i) begin

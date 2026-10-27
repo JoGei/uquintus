@@ -14,3 +14,4 @@ tests:
   - lifecycle
   - randomized
   - idata
+  - idata_banks

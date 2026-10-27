@@ -110,6 +110,13 @@ one halfword and C32/I32 as two, including across storage-word boundaries.
 Stop at the first instruction that does not fit; never cache partial encodings.
 Low prefix bits identify length without additional per-instruction metadata.
 
+Replay data is banked by BTB entry. Each bank has an entry-local write enable
+and halfword/word offset; entry selection does not participate in combined
+entry-times-capacity address arithmetic. The payload capacity, fill protocol
+and combinational lookup latency are unchanged. Writes use constant slot
+destinations so synthesis does not pad a six-halfword bank to eight physical
+slots when widening its two write ports.
+
 `rv32i_bimodal_idata` selects eight halfwords (four I32 instructions), adding
 `+idata-hw8` to the active BTB label. `rv32ic_bimodal_idata` selects six halfwords
 (96 bits), enough for three I32, six C16, or a mixed sequence such as 32/16/32/16.
@@ -144,3 +151,6 @@ at retirement, excluding speculation and faults.
 Directed cases also cover zero-extended C16 output, one-halfword capacity,
 rejected C32 with one halfword remaining, and extending that prefix with C16
 after a new visit. The comparison of original bits ignores C16 upper input padding.
+The `idata_banks` case fills every entry with distinct mixed-length payloads
+while reading another entry, then checks replacement and a rejected append
+beyond the final slot for isolation between banks.
