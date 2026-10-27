@@ -40,6 +40,38 @@ Core synthesis preserves the public top-level inputs/outputs. Check the resolved
 
 The baseline selects ORFS's speed ABC script with wire-load estimates enabled (`ABC_AREA=0`), removes ABC buffers before physical buffering (`REMOVE_ABC_BUFFERS=1`) and enables timing-driven placement (`GPL_TIMING_DRIVEN=1`). The runner verifies the installed script and effective settings. Keep this policy fixed; evaluate an alternative as a separate experiment rather than changing it silently. A clock target supplied to OpenROAD does not prove that an ABC script consumes Yosys's delay-target option.
 
+## Estimate workload power and energy
+
+Reuse a successful repaired core implementation and a compatible, self-checking benchmark ELF:
+
+```sh
+make power PYTHON=.venv/bin/python \
+  IMPL_RUN=build/uquintus-<hw>/orfs_sky130hd/impl-core-<id> \
+  ELF=build/<software-build>/performance/program.elf \
+  ORFS_ROOT=/path/to/OpenROAD-flow-scripts \
+  YOSYS_EXE=/path/to/yosys OPENROAD_EXE=/path/to/openroad JOBS=4
+make report PYTHON=.venv/bin/python
+```
+
+The implementation's recorded YAML and clock period configure the run; `CONFIG` and `CLOCK_PERIOD_NS` do not override them. Supply Verilator and Bender as for fast benchmarking, a C++ compiler with zlib development support, and OpenROAD with OpenSTA's `read_vcd`, `report_activity_annotation` and JSON `report_power` commands. Dependencies remain externally supplied.
+
+Gate activity capture is substantially slower than a trace-free benchmark and can produce multi-gigabyte compressed waveforms. Use it for selected configurations/workloads; the portable HTML report keeps small summaries and omits large raw files.
+The initial benchmark power flow requires `XIF=0` and `DEBUG=0`; no coprocessor or debug agent is supplied.
+
+The native benchmark drives the RTL and a shadow of the repaired netlist with identical inputs. Cell functions and flip-flops come from the same Liberty libraries through Yosys. Assertions compare bus requests, qualified addresses/store payloads and fence requests on every active edge, including startup. The RTL checks benchmark completion, CRC/self-check, traps, watchdog and timer window. This validates the workload's observed bus behavior; it does not replace netlist equivalence checking.
+
+The current memory driver drives response data to zero and response error high while response-valid is low. These idle values are legal and are part of the captured stimulus; they can affect switching even though the core must ignore their functional value. Keep the driver policy fixed in comparisons and use representative SoC stimulus for integration power estimates.
+
+Activity capture starts immediately after the start-marker retirement edge and ends immediately after the stop-marker retirement edge. Startup establishes state but is excluded from the power window. Compressed `activity.vcd.gz` contains settled gate-cell pin values at both clock phases; its duration must equal the benchmark cycle delta times the recorded clock period. Scope mapping includes the cell pins, not just RTL names. OpenSTA reads this activity into the repaired database, reloads the original SDC, and estimates placement parasitics using the platform RC settings. The flow rejects changed functional RTL, changed libraries/constraints/RC, failed benchmarks, a mismatched window, or measured pin coverage below `POWER_MIN_COVERAGE` (default 99%). Preserve the annotation report, including unannotated pins. Unobserved primary inputs receive zero activity rather than an assumed default toggle rate.
+
+Results live in `<impl-run>/power-<id>/`: `power.json` gives watts and joules, and `opensta-power.json`/`power.rpt` separate internal, switching and leakage power, with sequential/combinational group totals. `report.json` records the workload/activity run, clock, libraries, coverage and physical inputs. The benchmark activity file remains with its simulation run. `make report` adds a power/energy category.
+
+To repeat analysis without recompiling and simulating, supply `POWER_ACTIVITY_RUN=<successful-gate-benchmark-directory>`. Reuse requires identical hardware parameters, ELF hash, clock period, repaired functional netlist and generated cell models. An ordinary trace-free benchmark run cannot supply gate activity.
+
+Dynamic power is **internal + switching**. Workload dynamic energy is dynamic power times `cycles * period`; leakage and total energy are reported separately, along with dynamic joules per retired instruction. Compare energy for the same work and memory policy. A different period requires a new activity/STA run; do not combine a power estimate at one frequency with an execution time at another.
+
+These are pre-CTS, placement-based estimates of Liberty-backed core cells and their nets. They include ideal-clock cell activity and constrained output loads, but exclude the implemented clock tree, routed extraction, delay-induced glitches, external memories and the surrounding SoC. Two-state, zero-delay functional simulation supplies activity, not gate-delay timing validation. Keep setup/hold closure evidence alongside the estimate. This flow supports architectural comparisons; it is not signoff power.
+
 ## Use the exploration helpers
 
 Reusable helpers live in `impl/asic/orfs/explore/`; generated experiment records remain under `build/`. Use `--help` to inspect required inputs before launching a sweep.
@@ -48,10 +80,29 @@ Reusable helpers live in `impl/asic/orfs/explore/`; generated experiment records
 |---|---|
 | `bpu_replay_sweep.py` | Compare direction/BTB entries, replay halfword budgets and compressed-decode variants with the same ELF; use `--candidates` for a bounded YAML list. |
 | `forwarding_sweep.py` | Add forwarding routes in a controlled sequence while holding arithmetic and software fixed. |
+| `forwarding_report.py` | Merge completed or partial forwarding ladders into an interactive area/performance Pareto report; separate ISA ELFs are allowed with matching workload, compiler, memory and physical policies. |
 | `place_compare.py` | Reuse mapped controls through a common floorplan/repair context to distinguish mapping from physical buffering. |
 | `reset_timing.py` | Reanalyze a retained placement with an explicit reset-arrival budget; this changes constraints, not the netlist. |
 
 The candidate lists, Tcl collateral and fixed-budget SDC examples beside these scripts are inputs to explicit experiments, not defaults for production or SoC integration. Choose the clock, memory, reset and physical scope deliberately. Keep raw outputs and the run's method/configuration snapshots with its generated report.
+
+To combine two forwarding ladders, run:
+
+```sh
+.venv/bin/python impl/asic/orfs/explore/forwarding_report.py \
+  build/explore/<study>/rv32imc build/explore/<study>/rv32ic \
+  --output build/explore/<study>
+```
+
+The standalone HTML defaults to area versus estimated workload execution time, with ISA/platform filters and alternative CPI, cycle and frequency views. Only qualified points enter the visible frontier; failed or missing evidence stays visible in the table. Across ISA targets, compare execution time for the same workload: CPI denominators and ELFs differ. The source ladders retain configuration snapshots, software identities and audits. Rerun the report command to incorporate newly completed measurements.
+
+The report also compares mapped synthesis with post-repair placement for every point, with CSV/Markdown exports (`synthesis-layout.csv` and `synthesis-layout.md`). It shows cell/buffer counts and areas, setup/hold slack, TNS, violation counts and capture-region paths, and links the mapped/repaired netlists, repaired DEF and OpenROAD checkpoints. Logic-cell counts exclude physical-only cells. Pareto timing uses the repaired-placement measurements; these remain before CTS/routing at the recorded fixed characterization period.
+
+When both backends are present, the report adds matched-configuration comparisons against Sky130 HD and `platform-comparison.csv`. Frontiers remain separate per platform. Tables retain the platform name so that equal configuration labels cannot be confused across technologies.
+
+Successful `power-*/report.json` runs under a point's implementation directory are included automatically, selecting the latest successful run. The report checks the physical configuration, library identities, ELF, memory policy, measured cycle/instruction window, period, pin coverage and derived energy before displaying it. Only measured points enter the energy table and `energy.csv`; library nominal voltage and temperature are shown alongside each estimate. Rerun the same report command after completing power analysis.
+
+Pass `--omit-energy` to `forwarding_report.py` to skip power collection and energy tables while comparing synthesis and placement. Existing power artifacts remain available in their original runs. For machines with limited memory, use `--workers 1` in the sweep helper to run configurations sequentially; `--jobs` controls the tool threads within each configuration.
 
 ## Read the result at the right scope
 

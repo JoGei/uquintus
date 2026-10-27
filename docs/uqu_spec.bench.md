@@ -439,7 +439,24 @@ after a preset changes. Reports shall compare matching contexts and distinguish
 revisions with the same profile name; a Greek-letter name alone shall not
 identify an immutable hardware implementation.
 
-## 5. Measurement decision record
+## 5. Workload power and energy
+
+The OpenSTA power flow shall report core internal, switching and leakage power in watts, using workload-derived activity from the repaired netlist. Define:
+
+```text
+P_dynamic = P_internal + P_switching
+duration_s = measured_cycles * clock_period_ns * 1e-9
+E_dynamic = P_dynamic * duration_s
+E_leakage = P_leakage * duration_s
+E_total = (P_dynamic + P_leakage) * duration_s
+dynamic_energy_per_instruction = E_dynamic / measured_retired_instructions
+```
+
+Use the same physical clock period for activity, STA and workload duration. Capture the interval immediately after the start-marker retirement edge through immediately after the stop-marker retirement edge. Validate the workload and activity duration, preserve gate-pin annotation coverage, and distinguish measured activity from default/propagated activity. A zero-coverage default estimate shall fail qualification.
+
+Power/energy results shall retain the exact implementation, ELF, clock, libraries/corner, constraints, activity source and physical interconnect model. Comparisons shall use matched workload and memory policies; joules per instruction alone do not establish energy efficiency for equivalent work across different ISA binaries. The initial flow uses zero-delay functional cell simulation and placement-estimated parasitics before CTS. Exclude routed/glitch/clock-tree, external-memory and SoC power from the claimed scope. Follow the [implementation guide](uqu_guide.impl.md#estimate-workload-power-and-energy) to produce and inspect these estimates.
+
+## 6. Measurement decision record
 
 | ID | Decision | Rationale | Status |
 | --- | --- | --- | --- |

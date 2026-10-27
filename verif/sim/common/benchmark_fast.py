@@ -62,7 +62,7 @@ def read_memory(path):
     return memory
 
 
-def run_fast(program, config_path, config, *, bender='bender', simulator='verilator', seed=1, shared_build=None, jobs=4, retire_trace=False):
+def run_fast(program, config_path, config, *, bender='bender', simulator='verilator', seed=1, shared_build=None, jobs=4, retire_trace=False, power_activity=None):
     program = Path(program).resolve()
     image = load_elf(program)
     image.validate_core(config)
@@ -106,19 +106,37 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
     sources = order_control_files([*sources, wrapper])
     tree = command_output([bender, 'sources', *options])
     includes = [directory / 'include', *bender_include_dirs(json.loads(tree))]
+    activity_args = []
+    if power_activity is not None:
+        # The power flow supplies the exact placed netlist and Liberty-derived
+        # functional cells. The unmodified RTL remains the benchmark oracle.
+        sources += [Path(p) for p in power_activity['sources']]
+        includes.append(Path(power_activity['include']))
+        activity_args = ['--trace', '--trace-underscore', '--trace-depth', '3',
+                         '--timescale-override', '1ns/1ps', '-DUQU_POWER_ACTIVITY',
+                         str(power_activity['trace_config']), '-LDFLAGS', '-lz',
+                         '-MAKEFLAGS', 'OPT_FAST=-O3 OPT_SLOW=-O0']
     headers = sorted({p for d in includes for pattern in ('*.vh', '*.svh') for p in d.rglob(pattern)})
+    if power_activity is not None:
+        headers.append(ROOT / 'verif/sim/benchmark/activity_vcd.h')
     (directory / 'sources.f').write_text(''.join(str(p)+'\n' for p in sources))
     (directory / 'bender_sources.json').write_text(tree+'\n')
     compiler = command_output([*shlex.split(os.environ.get('CXX', 'g++')), '--version'])
     simulator_info = command_output([simulator, '--version'])
-    key = simulator_build_key([*sources, driver], headers, includes, parameters,
-        'uqu_benchmark_tb', simulator_info + compiler, False, directory / 'include')
+    key_sources = [*sources, driver]
+    if power_activity is not None:
+        key_sources.append(Path(power_activity['trace_config']))
+    key = simulator_build_key(key_sources, headers, includes, parameters,
+        'uqu_benchmark_tb', simulator_info + compiler + str(activity_args), bool(power_activity), directory / 'include')
     inputs = dict(software['source_sha256'])
     for source in [*sources, *headers, driver, ROOT / 'Bender.yml', ROOT / 'config/selectors.json',
                    ROOT / 'config/sim/core_elf.yml', Path(__file__), ROOT / 'verif/sim/common/benchmark_measure.py',
                    ROOT / 'verif/sim/common/elf_image.py']:
         inputs[str(source.relative_to(ROOT)) if source.is_relative_to(ROOT) else str(source)] = sha(source)
     inputs['verif/sim/common/bpu_stats.py'] = sha(ROOT / 'verif/sim/common/bpu_stats.py')
+    if power_activity is not None:
+        for source in (ROOT / 'verif/sim/benchmark/activity_vcd.h', Path(power_activity['trace_config'])):
+            inputs[str(source)] = sha(source)
     if retire_trace:
         inputs['verif/sim/common/benchmark_prediction.py'] = sha(ROOT / 'verif/sim/common/benchmark_prediction.py')
     if config['ISA_ZFINX']:
@@ -164,8 +182,9 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
             build_dir = directory / 'obj'
             command = [simulator, '--cc', '--exe', '--build', '--assert', '-j', str(jobs),
                 '--top-module', 'uqu_benchmark_tb', '--prefix', 'Vuqu_benchmark_tb',
-                '-Mdir', str(build_dir), '-o', 'uqu_benchmark', '-O3', '-CFLAGS', '-O3 -std=c++17',
-                *HDL_LANGUAGE_ARGS, *['-I'+str(p) for p in includes],
+                '-Mdir', str(build_dir), '-o', 'uqu_benchmark', '-O3', '-CFLAGS',
+                ('-std=c++17 -DUQU_POWER_ACTIVITY' if power_activity is not None else '-O3 -std=c++17'),
+                *HDL_LANGUAGE_ARGS, *activity_args, *['-I'+str(p) for p in includes],
                 *[f'-G{k}={v}' for k, v in parameters.items()], *[str(p) for p in sources], str(driver)]
             record['build_command'] = command
             before = time.monotonic()
@@ -185,7 +204,14 @@ def run_fast(program, config_path, config, *, bender='bender', simulator='verila
             command.append('retire.bin')
         record['command'] = command
         before = time.monotonic()
-        result = subprocess.run(command, cwd=directory, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        environment = dict(os.environ)
+        if power_activity is not None:
+            environment['UQU_POWER_PERIOD_PS'] = str(power_activity['period_ps'])
+            record['context']['activity'] = dict(scope='TOP/uqu_benchmark_tb/u_gate',
+                window='post start retirement edge to post stop retirement edge',
+                clock_period_ps=power_activity['period_ps'], netlist='repaired zero-delay functional cells')
+            record['artifacts'].append('activity.vcd.gz')
+        result = subprocess.run(command, cwd=directory, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         elapsed = time.monotonic()-before
         record.update(compile_wall_seconds=compile_seconds, simulation_wall_seconds=elapsed)
         (directory / 'native.log').write_text(result.stdout)

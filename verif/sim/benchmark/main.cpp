@@ -2,6 +2,9 @@
 // Native cycle driver. Python is used only before and after this executable.
 #include "Vuqu_benchmark_tb.h"
 #include "verilated.h"
+#ifdef UQU_POWER_ACTIVITY
+#include "activity_vcd.h"
+#endif
 
 #include <array>
 #include <cstdint>
@@ -136,7 +139,14 @@ int main(int argc, char **argv) {
     int64_t exit_code = -1;
     auto context = std::make_unique<VerilatedContext>();
     context->commandArgs(argc, argv);
+#ifdef UQU_POWER_ACTIVITY
+    context->traceEverOn(true);
+    ActivityVcd activity;
+#endif
     auto dut = std::make_unique<Vuqu_benchmark_tb>(context.get());
+#ifdef UQU_POWER_ACTIVITY
+    dut->trace(&activity.trace, 3);
+#endif
     try {
         require(argc == 9 || argc == 10, "expected image, watchdog, boot, imem/dmem latency, tohost, start/stop PC, optional retirement trace");
         if (argc == 10) {
@@ -177,6 +187,12 @@ int main(int argc, char **argv) {
             // combinationally. Capturing the earlier address reads wrong code.
             dut->imem_gnt_i = dut->dmem_gnt_i = !reset;
             eval();
+#ifdef UQU_POWER_ACTIVITY
+            // Record the settled low phase with this cycle's response/grants,
+            // then the settled rising edge. Sampling only after the edge loses
+            // pre-edge combinational transitions caused by memory inputs.
+            activity.low();
+#endif
             Request request[2] = {
                 {bool(!reset && dut->imem_req_o), false, dut->imem_addr_o, 0, 0, 0},
                 {bool(!reset && dut->dmem_req_o), bool(dut->dmem_we_o), dut->dmem_addr_o,
@@ -238,6 +254,9 @@ int main(int argc, char **argv) {
                 }
             }
             dut->clk_i = 1; eval();
+#ifdef UQU_POWER_ACTIVITY
+            activity.rising(start_edge, stop_edge);
+#endif
             // Post-edge counters include the retiring marker. Subtracting
             // these snapshots implements the same (start, stop] boundary.
             if (start_edge) bpu_start.sample(*dut);

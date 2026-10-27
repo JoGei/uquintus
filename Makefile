@@ -41,8 +41,11 @@ PERFSIM_TRACE ?= 0
 PERFSIM_SCHEDULER ?= map_explorer
 PERFSIM_SHARE_MODELS ?= 0
 PERFSIM_VERIFY_SCHEDULING ?= 0
+IMPL_RUN ?=
+POWER_MIN_COVERAGE ?= 0.99
+POWER_ACTIVITY_RUN ?=
 
-.PHONY: help test sim lint synth impl sw benchmark-fetch benchmark-build benchmark-run benchmark riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests config-label report test-report test-runner clean perfsim-fetch perfsim-config perfsim-model perfsim perfsim-cost perfsim-acceleration
+.PHONY: help test sim lint synth impl power sw benchmark-fetch benchmark-build benchmark-run benchmark riscv-tests-fetch riscv-tests-build riscv-tests-run riscv-tests config-label report test-report test-runner clean perfsim-fetch perfsim-config perfsim-model perfsim perfsim-cost perfsim-acceleration
 
 help:
 	@echo 'make test [CONFIG=rv32i] [COMPONENT=gpregfile] [SIM=verilator]'
@@ -53,6 +56,8 @@ help:
 	@echo '           [CLOCK_PERIOD_NS=20] [JOBS=4] [ORFS_ROOT=<installation>]'
 	@echo '           [RESET_INPUT_DELAY_NS=1]  # Optional reset arrival window: 0 to this maximum, in ns'
 	@echo 'make impl [same options as synth]  # Through placement and timing repair, before CTS'
+	@echo 'make power IMPL_RUN=<retained-impl-directory> ELF=<benchmark.elf> [JOBS=4]'
+	@echo '           # OpenSTA workload power/energy from repaired gate activity; same ORFS/tool environment'
 	@echo '          [DIE_AREA="0 0 1240 1240"] [CORE_AREA="20 20 1220 1220"] [PLACE_DENSITY=0.65]'
 	@echo 'Supply SDC=<file> to synth/impl for integration constraints; omit RESET_INPUT_DELAY_NS.'
 	@echo 'Supply YOSYS_EXE / OPENROAD_EXE or tools on PATH; enabled Zfinx requires Slang.'
@@ -136,6 +141,16 @@ endif
 
 riscv-tests-fetch:
 	$(PYTHON) verif/sim/common/riscv_tests.py fetch $(if $(RISCV_TESTS_ARCHIVE),--archive "$(RISCV_TESTS_ARCHIVE)")
+
+power:
+ifeq ($(ASIC_FLOW),orfs)
+	$(PYTHON) impl/asic/orfs/common/power.py --implementation "$(IMPL_RUN)" --elf "$(ELF)" \
+		--orfs-root "$(ORFS_ROOT)" --yosys "$(YOSYS_EXE)" --openroad "$(OPENROAD_EXE)" \
+		--bender "$(BENDER)" --jobs "$(JOBS)" --min-coverage "$(POWER_MIN_COVERAGE)" \
+		$(if $(POWER_ACTIVITY_RUN),--activity-run "$(POWER_ACTIVITY_RUN)")
+else
+	$(error Unsupported ASIC_FLOW '$(ASIC_FLOW)'; supported: orfs)
+endif
 
 riscv-tests-build:
 	$(PYTHON) verif/sim/common/riscv_tests.py build --config "$(CONFIG)" --cc "$(RISCV_CC)" --tests "$(RISCV_TESTS)"

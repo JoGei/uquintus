@@ -100,6 +100,27 @@ class ReportTests(unittest.TestCase):
         for r in data['records']:
             self.assertEqual(r['configuration']['name'], 'rv32i')
 
+    def test_workload_power_requires_consistent_energy_and_coverage(self):
+        path = self.run_record(component='uqu_core')
+        window = dict(cycles=1000, retired=500)
+        coverage = dict(counts=dict(vcd=999, unannotated=1), measured_pin_fraction=.999, minimum=.99)
+        powers = {'Total': dict(internal=.002, switching=.003, leakage=.001, total=.006)}
+        metrics = report.power_energy(powers, 1000, 500, 20)
+        raw = dict(schema_version=1, kind='power', status='passed', component='uqu_core',
+            configuration=dict(name='rv32i', parameters=self.parameters), target='opensta_sky130hd', selection='benchmark_activity',
+            context=dict(activity_coverage=coverage, benchmark_window=window, clock_period_ns=20),
+            metrics=[dict(name=k, value=v, unit='W' if k.endswith('_w') else 's' if k.endswith('_s') else 'J')
+                     for k, v in metrics.items()])
+        (path / 'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+        evidence = dict(status='passed', benchmark_window=window, clock_period_ns=20,
+                        coverage=coverage, power=powers, metrics=metrics)
+        (path / 'power.json').write_text(json.dumps(evidence))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'passed')
+        raw['metrics'][0]['value'] += 1
+        (path / 'report.json').write_text(json.dumps(raw))
+        self.assertEqual(report.collect(self.build, self.root)['records'][0]['status'], 'error')
+
     def test_current_presets_without_runs_and_old_source_evidence(self):
         self.run_record()
         (self.root / 'unit.v').write_text('changed source\n')

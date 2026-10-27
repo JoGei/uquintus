@@ -59,6 +59,14 @@ class FastBenchmarkTests(unittest.TestCase):
                 self.assertEqual(read_memory(directory / 'final-memory.bin')[0x80000100], 42)
                 self.assertEqual(record['stop']['cycle']-record['start']['cycle'],
                                  record['stop']['mcycle_low']-record['start']['mcycle_low'])
+                if (directory / 'activity.vcd.gz').is_file():
+                    # The same driver tests may exercise a power-instrumented
+                    # binary; its actual Verilator header and clock window must
+                    # use ps even though trace construction precedes the DUT.
+                    from power_measure import vcd_window
+                    self.assertEqual(vcd_window(directory / 'activity.vcd.gz'),
+                        (0, (record['stop']['cycle']-record['start']['cycle']) *
+                         int(os.environ['UQU_POWER_PERIOD_PS'])))
                 stats = bpu_statistics(record['bpu_start'], record['bpu_stop'],
                     parameters,
                     record['stop']['retired']-record['start']['retired'])

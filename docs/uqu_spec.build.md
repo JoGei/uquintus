@@ -559,6 +559,15 @@ defines `T_min`, its relationship to setup slack and estimated maximum frequency
 and the timing context required for comparisons.
 These are preplacement estimates with ideal interconnect, not physical timing
 closure or extracted area/power. Default-activity power is not a qualified metric.
+Workload power shall use the repaired netlist's cell-pin activity and the same
+Liberty, SDC, clock period and placement RC as its recorded implementation.
+`make power IMPL_RUN=<run> ELF=<benchmark.elf>` runs a verified native benchmark
+with a functional gate shadow, compares qualified bus outputs, captures only
+the measured retirement window and checks activity duration and pin coverage.
+The default minimum measured coverage is 99%; missing activity shall not silently
+qualify an assumed-toggle estimate. Retain internal/switching/leakage power,
+annotation diagnostics, input hashes and benchmark identity. See the
+[power guide](uqu_guide.impl.md#estimate-workload-power-and-energy) for scope and usage.
 The baseline shall explicitly select the installed ORFS speed script
 (`ABC_AREA=0`) with wire-load estimates enabled in its `buffer`, `stime`,
 `upsize` and `dnsize` commands. Qualify those commands and verify that synthesis

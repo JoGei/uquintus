@@ -175,6 +175,10 @@ module uqu_benchmark_tb #(
     assign trap_cause_o = u_core.trap_valid ? {1'b1, 26'd0, u_core.trap_cause} : {27'd0, u_core.wb_cause};
     assign mcountinhibit_o = u_core.u_wb.u_csregfile.mcountinhibit;
     `include "uqu_bpu_monitor_connect.vh"
+`ifdef UQU_POWER_ACTIVITY
+    // Generated verification-only shadow of the repaired physical netlist.
+    `include "uqu_power_gate.vh"
+`endif
 endmodule
 
 `default_nettype wire

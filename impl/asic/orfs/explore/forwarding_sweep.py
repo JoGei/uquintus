@@ -65,7 +65,8 @@ def render(directory, manifest):
         group = []
         for case in manifest['cases']:
             benchmark = json.loads((ROOT / case['benchmark']).read_text()) if case.get('benchmark') else {}
-            placement = json.loads((ROOT / case[platform]).read_text()) if case.get(platform) else {}
+            placement = (json.loads((ROOT / case[platform]).read_text()) if case.get(platform) else
+                         dict(status=case.get('pending', {}).get(platform, 'missing')))
             row = measure.collect(case, benchmark, placement, platform)
             row.update(step=case['step'], added=case['added'], paths=case['paths'])
             group.append(row)
@@ -117,7 +118,7 @@ def render(directory, manifest):
             'Speedup uses the stall-only point; larger is better.</p>'
             '<p><a href="summary.json">Summary JSON</a> · <a href="experiment.json">Inputs and configurations</a> · '
             + ('<a href="audit.json">Evidence audit</a> · ' if (directory / 'audit.json').is_file() else '') +
-            '<a href="../../report/index.html">Project report</a></p>' + figures + ''.join(tables) + '</html>')
+            f'<a href="{esc(os.path.relpath(ROOT / "build/report/index.html", directory))}">Project report</a></p>' + figures + ''.join(tables) + '</html>')
     (directory / 'index.html').write_text(page)
     return rows
 

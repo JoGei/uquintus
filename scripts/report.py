@@ -21,12 +21,15 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'verif/sim/common'))
 from bpu_stats import SCOPE as BPU_SCOPE, validate as validate_bpu, metrics as bpu_metrics
+from power_measure import energy as power_energy
+from power_measure import activity_coverage
 KINDS = {
     'regression': 'Component regressions', 'test': 'Core / software tests',
     'lint': 'RTL lint', 'software': 'Software builds',
     'synthesis': 'Synthesis / PPA', 'formal': 'Formal verification',
     'perfsim': 'Performance simulation (estimated)',
     'benchmark': 'Benchmarks',
+    'power': 'Workload power / energy (estimated)',
 }
 STATES = ('error', 'failed', 'running', 'skipped', 'passed')
 CORE_COMPONENTS = {'core', 'core_elf', 'uqu_core', 'riscv-tests'}
@@ -155,7 +158,10 @@ def inputs_status(record, root, hashes):
             missing.append(filename)
             continue
         if source not in hashes:
-            hashes[source] = hashlib.sha256(source.read_bytes()).hexdigest()
+            with source.open('rb') as stream:
+                value = hashlib.sha256()
+                for chunk in iter(lambda: stream.read(1024 * 1024), b''): value.update(chunk)
+                hashes[source] = value.hexdigest()
         if hashes[source] != expected:
             changed.append(filename)
     state = 'changed' if changed else 'unknown' if missing or not record else 'match'
@@ -366,6 +372,24 @@ def normalize(path, build, root, hashes):
             record['notes'].append('Fast native execution: workload self-check, completion, trap/watchdog and timer-window checks; no per-instruction ISA/RVFI checking.')
         elif context.get('execution_mode') == 'checked':
             record['notes'].append('Checked execution: instruction oracle, RVFI, per-edge counters and workload self-checks.')
+    if kind == 'power':
+        try:
+            evidence = read_json(path.parent / 'power.json')
+            window = evidence['benchmark_window']
+            coverage = evidence['coverage']
+            expected = power_energy(evidence['power'], window['cycles'], window['retired'], evidence['clock_period_ns'])
+            actual = {m['name']: m['value'] for m in metrics}
+            if (evidence.get('status') != 'passed' or expected != evidence['metrics'] or expected != actual or
+                    activity_coverage(coverage['counts'], coverage['minimum']) != coverage or
+                    context.get('activity_coverage') != coverage or
+                    context.get('benchmark_window') != window or
+                    context.get('clock_period_ns') != evidence['clock_period_ns']):
+                raise ValueError('power metrics, coverage or benchmark window disagree')
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            if state == 'passed':
+                record['status'] = 'error'
+                record['notes'].append('Invalid workload power evidence: ' + str(error))
+        record['notes'].append('Estimated core power from zero-delay gate activity, Liberty models and placement RC; excludes implemented clock tree, routed glitches and external memories.')
     offload = path.parent / 'xif-agent.json'
     if offload.is_file():
         evidence = read_json(offload)

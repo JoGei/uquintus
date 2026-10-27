@@ -75,6 +75,11 @@ class ForwardingSweepTests(unittest.TestCase):
             self.assertNotIn('DIV remains iterative', (directory / 'index.html').read_text())
             self.assertIn('../benchmark0.json', (directory / 'index.html').read_text())
             self.assertEqual(json.loads((directory / 'summary.json').read_text())['rows'], rows)
+            cases[1]['pending']={'ihp-sg13g2':'queued'}
+            rows=sweep.render(directory,dict(context=dict(clock_period_ns=40),
+                platforms=['sky130hd','ihp-sg13g2'],cases=cases))
+            self.assertEqual(rows[3]['placement_status'],'queued')
+            self.assertFalse(rows[3]['qualified'])
 
 
 if __name__ == '__main__':
