@@ -231,7 +231,7 @@ module uqu_core #(
     wire [4:0] wb_cause;
     wire [31:0] wb_tval, wb_result;
     wire wb_result_valid, wb_we0, wb_we1;
-    wire predictor_invalidate = wb_retire && (wb_system_q == `UQU_SYS_FENCEI);
+    wire predictor_invalidate = (ISA_ZIFENCEI == 1) && wb_retire && (wb_system_q == `UQU_SYS_FENCEI);
     wire xif_id_valid, xif_issued, xif_accepted, xif_cleanup_valid, xif_cleanup_ready;
     wire xif_de_cancel, xif_kill_valid, xif_kill_ready, xif_drain_ready, draining;
     wire [2:0] xif_de_id, xif_cleanup_id, xif_kill_id;

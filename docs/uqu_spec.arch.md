@@ -2091,6 +2091,8 @@ Lookup/update collisions shall use the pre-edge table. Training in DE does not
 imply retirement: a subsequently discovered older fault may discard an already
 trained instruction without architectural effect from its prediction state.
 
+The core shall generate FENCE.I predictor invalidation only when `ISA_ZIFENCEI=1`. With the extension disabled, WB retirement shall not drive predictor invalidation.
+
 IF shall look up the aligned instruction and carry its predicted next PC into
 the core-owned IF/DE payload. A stalled token shall retain that prediction
 despite table updates. A taken prediction shall steer IF only on the token's
