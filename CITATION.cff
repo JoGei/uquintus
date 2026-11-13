@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: >-
+  If you use uquintus in your work, please cite it using the metadata below.
+type: software
+title: "uquintus: A configurable RV32 RISC-V processor"
+authors:
+  - family-names: Geier
+    given-names: Johannes
+    orcid: "https://orcid.org/0000-0002-9439-3890"
+repository-code: "https://github.com/JoGei/uquintus"
+url: "https://github.com/JoGei/uquintus"
+abstract: >-
+  A configurable, single-issue, in-order RV32 RISC-V processor with a
+  five-stage pipeline, targeting open-source ASIC flows.
+license: Unlicense
+keywords:
+  - RISC-V
+  - RV32
+  - processor
+  - RTL
+  - Verilog
+  - ASIC
